@@ -1,0 +1,53 @@
+# Trained models and data (large, regenerated)
+data/models/
+data/datasets/uploads/
+data/temp/
+
+# Database
+automl-service/automl.db
+automl-service/uploads/
+
+# Node.js
+node_modules/
+automl-ui/dist/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+*.egg
+
+# Environment files
+.env
+automl-ui/.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Claude Code
+.claude/
+
+# Domino
+domino.log
+dominodump-*
+results/
+.dominoresults
+.domino/repo/
+
+# Generated reports
+reports/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Archives
+*.zip

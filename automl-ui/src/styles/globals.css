@@ -1,0 +1,134 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Clockwise spin animation for Domino logo spinner */
+@keyframes spin-clockwise {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin-clockwise {
+  animation: spin-clockwise 1s linear infinite;
+}
+
+:root {
+  --domino-bg-primary: #FFFFFF;
+  --domino-bg-secondary: #f5f5f5;
+  --domino-bg-tertiary: #f0f0f0;
+  --domino-bg-hover: #fafafa;
+  --domino-text-primary: #2E2E38;
+  --domino-text-secondary: #65657B;
+  --domino-text-muted: #8F8FA3;
+  --domino-accent-purple-light: #f0ebff;
+  --domino-border: #e5e5e5;
+  --domino-border-muted: #f0f0f0;
+}
+
+@layer base {
+  html {
+    font-family: Inter, Lato, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.5715;
+  }
+
+  body {
+    @apply bg-domino-bg-secondary text-domino-text-primary min-h-screen;
+    font-size: 14px;
+    line-height: 1.5715;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-domino-bg-tertiary;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-domino-border rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-domino-text-muted;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center font-normal transition-all duration-200 focus:outline-none whitespace-nowrap text-center select-none;
+    height: 32px;
+    padding: 4px 15px;
+    border-radius: 2px;
+    font-size: 14px;
+    line-height: 1.5714285714285714;
+    border: 1px solid transparent;
+  }
+
+  .btn-primary {
+    @apply btn bg-domino-accent-purple text-white hover:bg-domino-accent-purple-hover;
+    box-shadow: none;
+  }
+
+  .btn-secondary {
+    @apply btn bg-white text-domino-text-primary hover:border-domino-accent-purple hover:text-domino-accent-purple;
+    border-color: #d9d9d9;
+    box-shadow: none;
+  }
+
+  .btn-danger {
+    @apply btn bg-domino-accent-red text-white hover:bg-domino-accent-red/90;
+    box-shadow: none;
+  }
+
+  .card {
+    @apply bg-white border border-domino-border p-4;
+    border-radius: 0;
+  }
+
+  .input {
+    @apply w-full bg-white text-domino-text-primary placeholder-domino-text-muted focus:outline-none focus:border-domino-accent-purple;
+    height: 32px;
+    padding: 4px 11px;
+    border: 1px solid #d9d9d9;
+    border-radius: 2px;
+    font-size: 14px;
+    line-height: 1.5714285714285714;
+    transition: all 0.2s;
+  }
+
+  .label {
+    @apply block text-sm font-semibold text-domino-text-primary mb-1;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-pending {
+    @apply badge bg-domino-accent-yellow/20 text-domino-accent-yellow;
+  }
+
+  .badge-running {
+    @apply badge bg-domino-accent-purple/20 text-domino-accent-purple;
+  }
+
+  .badge-completed {
+    @apply badge bg-domino-accent-green/20 text-domino-accent-green;
+  }
+
+  .badge-failed {
+    @apply badge bg-domino-accent-red/20 text-domino-accent-red;
+  }
+
+  .badge-cancelled {
+    @apply badge bg-domino-text-muted/20 text-domino-text-muted;
+  }
+}

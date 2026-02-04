@@ -1,0 +1,286 @@
+import { useCallback, useState, useEffect } from 'react'
+import { useDropzone } from 'react-dropzone'
+import { CloudArrowUpIcon, CircleStackIcon, CheckCircleIcon, DocumentIcon } from '@heroicons/react/24/outline'
+import clsx from 'clsx'
+import { useWizard } from '../../hooks/useWizard'
+import { useDatasets, useUploadFile, useDatasetPreview } from '../../hooks/useDatasets'
+import { useStore } from '../../store'
+import Spinner from '../common/Spinner'
+import { Dataset, DatasetFile } from '../../types/dataset'
+
+function Step1DataSource() {
+  const { dataSource, setDataSource } = useWizard()
+  const { data: datasetsData, isLoading: loadingDatasets } = useDatasets()
+  const uploadMutation = useUploadFile()
+  const addNotification = useStore((state) => state.addNotification)
+  const [sourceType, setSourceType] = useState<'upload' | 'domino_dataset'>(
+    dataSource?.type || 'upload'
+  )
+  const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null)
+
+  const datasets = datasetsData?.datasets || []
+
+  // Fetch preview/schema only for Domino datasets (uploaded files already have columns from upload response)
+  const previewFilePath = dataSource?.type === 'domino_dataset' && dataSource?.filePath ? dataSource.filePath : ''
+  const { data: previewData, isLoading: loadingPreview } = useDatasetPreview(
+    previewFilePath,
+    10 // Only fetch 10 rows to get columns
+  )
+
+  const onDrop = useCallback(
+    async (acceptedFiles: File[]) => {
+      if (acceptedFiles.length === 0) return
+
+      const file = acceptedFiles[0]
+      try {
+        const result = await uploadMutation.mutateAsync(file)
+        setDataSource({
+          type: 'upload',
+          filePath: result.file_path,
+          fileName: result.file_name,
+          columns: result.columns,
+          rowCount: result.row_count,
+        })
+      } catch (error) {
+        console.error('Upload failed:', error)
+        addNotification(
+          error instanceof Error ? error.message : 'File upload failed. Please try again.',
+          'error'
+        )
+      }
+    },
+    [uploadMutation, setDataSource, addNotification]
+  )
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: {
+      'text/csv': ['.csv'],
+      'application/vnd.apache.parquet': ['.parquet', '.pq'],
+    },
+    maxFiles: 1,
+  })
+
+  const handleSelectDataset = (dataset: Dataset) => {
+    setSelectedDataset(dataset)
+    setDataSource({
+      type: 'domino_dataset',
+      datasetId: dataset.id,
+      fileName: dataset.name,
+    })
+  }
+
+  const handleSelectFile = async (dataset: Dataset, file: DatasetFile) => {
+    // Set the file path - the useDatasetPreview hook will fetch columns
+    setDataSource({
+      type: 'domino_dataset',
+      datasetId: dataset.id,
+      fileName: file.name,
+      filePath: file.path,
+    })
+  }
+
+  // Update dataSource with columns when preview data is loaded
+  useEffect(() => {
+    if (previewData?.columns && dataSource?.type === 'domino_dataset' && dataSource?.filePath) {
+      // Only update if columns are different
+      const currentColumns = dataSource.columns?.join(',') || ''
+      const newColumns = previewData.columns.join(',')
+      if (currentColumns !== newColumns) {
+        setDataSource({
+          ...dataSource,
+          columns: previewData.columns,
+          rowCount: previewData.total_rows,
+        })
+      }
+    }
+  }, [previewData, dataSource?.filePath])
+
+  const formatSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-normal text-domino-text-primary mb-2">
+          Select Data Source
+        </h2>
+        <p className="text-domino-text-secondary">
+          Upload a file or select from mounted Domino datasets
+        </p>
+      </div>
+
+      <div className="flex gap-4">
+        <button
+          onClick={() => setSourceType('upload')}
+          className={clsx(
+            'flex-1 p-4 border transition-colors text-left',
+            sourceType === 'upload'
+              ? 'border-domino-accent-purple bg-domino-accent-purple/5'
+              : 'border-domino-border bg-white hover:border-domino-text-muted'
+          )}
+        >
+          <CloudArrowUpIcon className="h-6 w-6 text-domino-accent-purple mb-2" />
+          <p className="font-medium text-domino-text-primary">Upload File</p>
+          <p className="text-sm text-domino-text-secondary">
+            Upload a CSV or Parquet file
+          </p>
+        </button>
+
+        <button
+          onClick={() => setSourceType('domino_dataset')}
+          className={clsx(
+            'flex-1 p-4 border transition-colors text-left',
+            sourceType === 'domino_dataset'
+              ? 'border-domino-accent-purple bg-domino-accent-purple/5'
+              : 'border-domino-border bg-white hover:border-domino-text-muted'
+          )}
+        >
+          <CircleStackIcon className="h-6 w-6 text-domino-accent-purple mb-2" />
+          <p className="font-medium text-domino-text-primary">Domino Dataset</p>
+          <p className="text-sm text-domino-text-secondary">
+            Select from mounted datasets
+          </p>
+        </button>
+      </div>
+
+      {sourceType === 'upload' && (
+        <div className="bg-white border border-domino-border">
+          <div
+            {...getRootProps()}
+            className={clsx(
+              'border border-dashed p-8 text-center cursor-pointer transition-colors bg-domino-bg-tertiary',
+              isDragActive
+                ? 'border-domino-accent-purple'
+                : 'border-domino-border hover:border-domino-text-muted'
+            )}
+          >
+            <input {...getInputProps()} />
+            {uploadMutation.isPending ? (
+              <div className="flex flex-col items-center">
+                <Spinner className="mb-4" />
+                <p className="text-domino-text-secondary">Uploading...</p>
+              </div>
+            ) : dataSource?.type === 'upload' && dataSource.fileName ? (
+              <div className="flex flex-col items-center">
+                <CheckCircleIcon className="h-12 w-12 text-domino-accent-green mb-4" />
+                <p className="font-medium text-domino-text-primary">
+                  {dataSource.fileName}
+                </p>
+                <p className="text-sm text-domino-text-secondary">
+                  {dataSource.columns?.length} columns, {dataSource.rowCount?.toLocaleString()} rows
+                </p>
+                <button className="mt-4 text-sm text-domino-accent-purple hover:underline">
+                  Choose Different File
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center">
+                <CloudArrowUpIcon className="h-12 w-12 text-domino-accent-purple mb-4" />
+                <p className="text-domino-text-primary">
+                  Drag or click to upload <span className="text-domino-accent-purple cursor-pointer">files</span>
+                </p>
+                <p className="text-sm text-domino-text-muted mt-4">
+                  * Supports CSV and Parquet files
+                </p>
+                <p className="text-sm text-domino-text-muted">
+                  * File size may not exceed 550 MB
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {sourceType === 'domino_dataset' && (
+        <div className="space-y-3">
+          {loadingDatasets ? (
+            <div className="flex justify-center py-8">
+              <Spinner />
+            </div>
+          ) : datasets.length === 0 ? (
+            <div className="text-center py-8">
+              <CircleStackIcon className="h-12 w-12 text-domino-text-muted mx-auto mb-4" />
+              <p className="text-domino-text-muted">No datasets mounted</p>
+              <p className="text-sm text-domino-text-muted mt-2">
+                Mount a dataset to this app to get started
+              </p>
+            </div>
+          ) : (
+            datasets.map((dataset: Dataset) => (
+              <div key={dataset.id} className="space-y-2">
+                <button
+                  onClick={() => handleSelectDataset(dataset)}
+                  className={clsx(
+                    'w-full p-4 rounded-lg border-2 transition-colors text-left flex items-center gap-4',
+                    selectedDataset?.id === dataset.id
+                      ? 'border-domino-accent-purple bg-domino-accent-purple/10'
+                      : 'border-domino-border hover:border-domino-text-muted'
+                  )}
+                >
+                  <CircleStackIcon className="h-8 w-8 text-domino-accent-purple flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-domino-text-primary truncate">
+                      {dataset.name}
+                    </p>
+                    <p className="text-sm text-domino-text-secondary">
+                      {dataset.file_count} files, {formatSize(dataset.size_bytes)}
+                    </p>
+                  </div>
+                  {selectedDataset?.id === dataset.id && (
+                    <CheckCircleIcon className="h-6 w-6 text-domino-accent-green flex-shrink-0" />
+                  )}
+                </button>
+
+                {selectedDataset?.id === dataset.id && dataset.files.length > 0 && (
+                  <div className="ml-8 space-y-1">
+                    {dataset.files
+                      .filter(f => f.name.endsWith('.csv') || f.name.endsWith('.parquet') || f.name.endsWith('.pq'))
+                      .map((file) => (
+                        <button
+                          key={file.path}
+                          onClick={() => handleSelectFile(dataset, file)}
+                          className={clsx(
+                            'w-full p-3 rounded-lg border transition-colors text-left flex items-center gap-3',
+                            dataSource?.filePath === file.path
+                              ? 'border-domino-accent-purple bg-domino-accent-purple/10'
+                              : 'border-domino-border hover:border-domino-text-muted'
+                          )}
+                        >
+                          <DocumentIcon className="h-5 w-5 text-domino-text-muted flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-domino-text-primary truncate">
+                              {file.name}
+                            </p>
+                            <p className="text-xs text-domino-text-muted">
+                              {formatSize(file.size)}
+                              {dataSource?.filePath === file.path && dataSource?.columns && (
+                                <span className="ml-2">• {dataSource.columns.length} columns</span>
+                              )}
+                            </p>
+                          </div>
+                          {dataSource?.filePath === file.path && (
+                            loadingPreview ? (
+                              <Spinner size="sm" />
+                            ) : (
+                              <CheckCircleIcon className="h-5 w-5 text-domino-accent-green flex-shrink-0" />
+                            )
+                          )}
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+    </div>
+  )
+}
+
+export default Step1DataSource

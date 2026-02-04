@@ -1,0 +1,334 @@
+"""Data profiling endpoints."""
+
+import logging
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+
+from app.core.data_profiler import get_data_profiler
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+
+
+class ProfileRequest(BaseModel):
+    """Request for data profiling."""
+    file_path: str = Field(..., description="Path to the data file")
+    sample_size: int = Field(10000, description="Max rows to sample for profiling")
+
+
+class ColumnProfile(BaseModel):
+    """Profile of a single column."""
+    name: str
+    dtype: str
+    missing_count: int
+    missing_percentage: float
+    unique_count: int
+    unique_percentage: float
+    semantic_type: str
+    statistics: Optional[Dict[str, Any]] = None
+    histogram: Optional[Dict[str, Any]] = None
+    value_counts: Optional[List[Dict[str, Any]]] = None
+    issues: List[str] = []
+
+
+class DataSummary(BaseModel):
+    """Summary statistics of the dataset."""
+    total_rows: int
+    total_columns: int
+    sampled: bool
+    sample_size: int
+    memory_usage_mb: float
+    duplicate_rows: int
+    duplicate_percentage: float
+
+
+class Recommendation(BaseModel):
+    """A data recommendation."""
+    type: str
+    message: str
+    priority: str
+
+
+class Warning(BaseModel):
+    """A data warning."""
+    type: str
+    message: str
+    severity: str
+
+
+class ProfileResponse(BaseModel):
+    """Complete data profile response."""
+    summary: DataSummary
+    columns: List[ColumnProfile]
+    correlations: Dict[str, Any] = {}
+    recommendations: List[Recommendation] = []
+    warnings: List[Warning] = []
+
+
+class TargetSuggestion(BaseModel):
+    """A target column suggestion."""
+    column: str
+    score: int
+    reasons: List[str]
+    problem_type: str
+
+
+class TargetSuggestionsResponse(BaseModel):
+    """Response with target column suggestions."""
+    suggestions: List[TargetSuggestion]
+
+
+@router.post("/profile", response_model=ProfileResponse)
+async def profile_data(request: ProfileRequest):
+    """Generate a comprehensive profile of a data file."""
+    profiler = get_data_profiler()
+
+    try:
+        profile = profiler.profile_file(
+            file_path=request.file_path,
+            sample_size=request.sample_size
+        )
+
+        return ProfileResponse(
+            summary=DataSummary(**profile["summary"]),
+            columns=[ColumnProfile(**col) for col in profile["columns"]],
+            correlations=profile.get("correlations", {}),
+            recommendations=[Recommendation(**r) for r in profile.get("recommendations", [])],
+            warnings=[Warning(**w) for w in profile.get("warnings", [])]
+        )
+
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"File not found: {request.file_path}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Profiling error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/profile/suggest-target", response_model=TargetSuggestionsResponse)
+async def suggest_target_column(request: ProfileRequest):
+    """Suggest potential target columns based on data profile."""
+    profiler = get_data_profiler()
+
+    try:
+        profile = profiler.profile_file(
+            file_path=request.file_path,
+            sample_size=request.sample_size
+        )
+
+        suggestions = profiler.suggest_target_column(profile)
+
+        return TargetSuggestionsResponse(
+            suggestions=[TargetSuggestion(**s) for s in suggestions]
+        )
+
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"File not found: {request.file_path}")
+    except Exception as e:
+        logger.error(f"Error suggesting targets: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/profile/quick")
+async def quick_profile(file_path: str):
+    """Get a quick profile summary (faster than full profile)."""
+    profiler = get_data_profiler()
+
+    try:
+        profile = profiler.profile_file(file_path, sample_size=1000)
+
+        # Return simplified summary
+        return {
+            "rows": profile["summary"]["total_rows"],
+            "columns": profile["summary"]["total_columns"],
+            "memory_mb": round(profile["summary"]["memory_usage_mb"], 2),
+            "column_types": {
+                col["name"]: col["semantic_type"]
+                for col in profile["columns"]
+            },
+            "missing_columns": [
+                col["name"]
+                for col in profile["columns"]
+                if col["missing_percentage"] > 0
+            ],
+            "potential_targets": [
+                r["message"]
+                for r in profile.get("recommendations", [])
+                if r["type"] == "target"
+            ][:3]
+        }
+
+    except Exception as e:
+        logger.error(f"Quick profile error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/profile/column/{column_name}")
+async def profile_column(file_path: str, column_name: str):
+    """Get detailed profile for a specific column."""
+    profiler = get_data_profiler()
+
+    try:
+        profile = profiler.profile_file(file_path, sample_size=10000)
+
+        for col in profile["columns"]:
+            if col["name"] == column_name:
+                return col
+
+        raise HTTPException(status_code=404, detail=f"Column not found: {column_name}")
+
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+    except Exception as e:
+        logger.error(f"Column profile error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/profile/metrics")
+async def get_available_metrics():
+    """Get list of available evaluation metrics by problem type."""
+    return {
+        "binary": [
+            {"value": "accuracy", "label": "Accuracy", "description": "Fraction of correct predictions"},
+            {"value": "balanced_accuracy", "label": "Balanced Accuracy", "description": "Accuracy for imbalanced datasets"},
+            {"value": "f1", "label": "F1 Score", "description": "Harmonic mean of precision and recall"},
+            {"value": "f1_macro", "label": "F1 Macro", "description": "Macro-averaged F1 score"},
+            {"value": "f1_micro", "label": "F1 Micro", "description": "Micro-averaged F1 score"},
+            {"value": "f1_weighted", "label": "F1 Weighted", "description": "Weighted F1 score"},
+            {"value": "roc_auc", "label": "ROC AUC", "description": "Area under ROC curve"},
+            {"value": "average_precision", "label": "Average Precision", "description": "Area under PR curve"},
+            {"value": "precision", "label": "Precision", "description": "Positive predictive value"},
+            {"value": "recall", "label": "Recall", "description": "True positive rate"},
+            {"value": "log_loss", "label": "Log Loss", "description": "Negative log-likelihood"},
+            {"value": "pac_score", "label": "PAC Score", "description": "Probabilistic accuracy"},
+        ],
+        "multiclass": [
+            {"value": "accuracy", "label": "Accuracy", "description": "Fraction of correct predictions"},
+            {"value": "balanced_accuracy", "label": "Balanced Accuracy", "description": "Accuracy for imbalanced datasets"},
+            {"value": "f1_macro", "label": "F1 Macro", "description": "Macro-averaged F1 score"},
+            {"value": "f1_micro", "label": "F1 Micro", "description": "Micro-averaged F1 score"},
+            {"value": "f1_weighted", "label": "F1 Weighted", "description": "Weighted F1 score"},
+            {"value": "log_loss", "label": "Log Loss", "description": "Negative log-likelihood"},
+            {"value": "pac_score", "label": "PAC Score", "description": "Probabilistic accuracy"},
+            {"value": "quadratic_kappa", "label": "Quadratic Kappa", "description": "Cohen's kappa with quadratic weights"},
+        ],
+        "regression": [
+            {"value": "root_mean_squared_error", "label": "RMSE", "description": "Root mean squared error"},
+            {"value": "mean_squared_error", "label": "MSE", "description": "Mean squared error"},
+            {"value": "mean_absolute_error", "label": "MAE", "description": "Mean absolute error"},
+            {"value": "r2", "label": "R-squared", "description": "Coefficient of determination"},
+            {"value": "median_absolute_error", "label": "Median AE", "description": "Median absolute error"},
+            {"value": "mean_absolute_percentage_error", "label": "MAPE", "description": "Mean absolute percentage error"},
+            {"value": "spearmanr", "label": "Spearman", "description": "Spearman correlation coefficient"},
+            {"value": "pearsonr", "label": "Pearson", "description": "Pearson correlation coefficient"},
+        ],
+        "timeseries": [
+            {"value": "MASE", "label": "MASE", "description": "Mean absolute scaled error"},
+            {"value": "MAPE", "label": "MAPE", "description": "Mean absolute percentage error"},
+            {"value": "sMAPE", "label": "sMAPE", "description": "Symmetric mean absolute percentage error"},
+            {"value": "RMSE", "label": "RMSE", "description": "Root mean squared error"},
+            {"value": "MAE", "label": "MAE", "description": "Mean absolute error"},
+            {"value": "WAPE", "label": "WAPE", "description": "Weighted absolute percentage error"},
+            {"value": "SQL", "label": "SQL", "description": "Scaled quantile loss"},
+        ]
+    }
+
+
+@router.get("/profile/presets")
+async def get_available_presets():
+    """Get list of available training presets."""
+    return {
+        "tabular": [
+            {
+                "value": "best_quality",
+                "label": "Best Quality",
+                "description": "Maximum accuracy, slowest training. Uses stacking and extensive HPO.",
+                "time_multiplier": 10
+            },
+            {
+                "value": "high_quality",
+                "label": "High Quality",
+                "description": "Very good accuracy with reasonable training time.",
+                "time_multiplier": 5
+            },
+            {
+                "value": "good_quality",
+                "label": "Good Quality",
+                "description": "Good balance of accuracy and speed.",
+                "time_multiplier": 2
+            },
+            {
+                "value": "medium_quality_faster_train",
+                "label": "Medium Quality (Faster)",
+                "description": "Fast training with decent accuracy. Good for prototyping.",
+                "time_multiplier": 1
+            },
+            {
+                "value": "optimize_for_deployment",
+                "label": "Optimize for Deployment",
+                "description": "Fastest inference, smallest model size.",
+                "time_multiplier": 0.5
+            }
+        ],
+        "timeseries": [
+            {
+                "value": "best_quality",
+                "label": "Best Quality",
+                "description": "Includes Chronos foundation model and extensive ensembling.",
+                "time_multiplier": 10
+            },
+            {
+                "value": "high_quality",
+                "label": "High Quality",
+                "description": "Good accuracy with multiple model types.",
+                "time_multiplier": 5
+            },
+            {
+                "value": "medium_quality",
+                "label": "Medium Quality",
+                "description": "Balanced speed and accuracy.",
+                "time_multiplier": 2
+            },
+            {
+                "value": "fast_training",
+                "label": "Fast Training",
+                "description": "Quick training for prototyping.",
+                "time_multiplier": 1
+            },
+            {
+                "value": "chronos",
+                "label": "Chronos (Zero-shot)",
+                "description": "Uses pretrained Chronos model. No training required.",
+                "time_multiplier": 0.1
+            }
+        ],
+        "multimodal": [
+            {
+                "value": "best_quality",
+                "label": "Best Quality",
+                "description": "Maximum accuracy with large foundation models.",
+                "time_multiplier": 10
+            },
+            {
+                "value": "high_quality",
+                "label": "High Quality",
+                "description": "Good accuracy with reasonable resources.",
+                "time_multiplier": 5
+            },
+            {
+                "value": "medium_quality",
+                "label": "Medium Quality",
+                "description": "Balanced performance.",
+                "time_multiplier": 2
+            },
+            {
+                "value": "multilingual",
+                "label": "Multilingual",
+                "description": "Optimized for multilingual text data.",
+                "time_multiplier": 2
+            }
+        ]
+    }
