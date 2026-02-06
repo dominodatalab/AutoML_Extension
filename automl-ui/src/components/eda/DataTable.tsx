@@ -24,7 +24,7 @@ interface Filter {
 }
 
 interface PreviewData {
-  data: Record<string, unknown>[]
+  rows: Record<string, unknown>[]
   columns: string[]
   total_rows: number
 }
@@ -55,7 +55,7 @@ export function DataTable({ filePath, columns }: DataTableProps) {
           limit: pageSize,
           offset: page * pageSize,
         })
-        setData(response.data || [])
+        setData(response.rows || [])
         setTotalRows(response.total_rows || 0)
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to load data'

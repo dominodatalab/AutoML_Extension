@@ -213,7 +213,8 @@ def register_compat_routes(app: FastAPI):
 
         file_path = body.get("file_path")
         dataset_id = body.get("dataset_id")
-        rows = body.get("rows", 100)
+        limit = body.get("limit", body.get("rows", 100))
+        offset = body.get("offset", 0)
 
         if file_path:
             if not os.path.exists(file_path):
@@ -221,17 +222,21 @@ def register_compat_routes(app: FastAPI):
             try:
                 ext = os.path.splitext(file_path)[1].lower()
                 if ext == ".csv":
-                    df = pd.read_csv(file_path, nrows=rows)
+                    df = pd.read_csv(file_path)
                 elif ext in [".parquet", ".pq"]:
                     df = pd.read_parquet(file_path)
-                    df = df.head(rows)
                 else:
                     raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
+                total_rows = len(df)
+                page = df.iloc[offset : offset + limit]
+                import numpy as np
+
+                page = page.replace({np.nan: None, np.inf: None, -np.inf: None})
                 return {
                     "file_path": file_path,
                     "columns": list(df.columns),
-                    "rows": df.to_dict(orient="records"),
-                    "total_rows": len(df),
+                    "rows": page.to_dict(orient="records"),
+                    "total_rows": total_rows,
                     "dtypes": {col: str(df[col].dtype) for col in df.columns},
                 }
             except HTTPException:
