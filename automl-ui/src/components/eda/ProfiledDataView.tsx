@@ -3,6 +3,7 @@ import {
   DocumentIcon,
   ArrowDownTrayIcon,
   ArrowPathIcon,
+  ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
 import clsx from 'clsx'
 import Spinner from '../common/Spinner'
@@ -11,9 +12,12 @@ import { ColumnExplorer } from './ColumnExplorer'
 import { CorrelationMatrix } from './CorrelationMatrix'
 import { MissingValuesChart } from './MissingValuesChart'
 import { DataQualityPanel } from './DataQualityPanel'
-import type { DataProfile } from '../../types/profiling'
+import { TimeSeriesOverview } from './TimeSeriesOverview'
+import { StationarityTrendPanel } from './StationarityTrendPanel'
+import { ACFPanel } from './ACFPanel'
+import type { DataProfile, TimeSeriesProfile } from '../../types/profiling'
 
-type EDATab = 'data' | 'columns' | 'correlations' | 'quality' | 'transforms'
+type EDATab = 'data' | 'columns' | 'correlations' | 'quality' | 'transforms' | 'ts-overview' | 'ts-stationarity' | 'ts-acf'
 
 interface TransformConfig {
   column: string
@@ -33,12 +37,20 @@ interface ProfiledDataViewProps {
   isExporting: boolean
   currentPage: number
   pageSize: number
+  samplingStrategy: string
+  sampleSize: number
+  stratifyColumn: string
   onChangeFile: () => void
   onExportNotebook: () => void
   onAddTransform: (transform: TransformConfig) => void
   onRemoveTransform: (index: number) => void
   onPageChange: (page: number) => void
   onPageSizeChange: (size: number) => void
+  onReanalyze: (strategy: string, size: number, stratifyCol: string) => void
+  edaMode?: 'tabular' | 'timeseries'
+  tsProfile?: TimeSeriesProfile | null
+  tsLoading?: boolean
+  tsError?: string | null
 }
 
 function formatNumber(num: number | null | undefined): string {
@@ -66,22 +78,46 @@ export function ProfiledDataView({
   isExporting,
   currentPage,
   pageSize,
+  samplingStrategy,
+  sampleSize,
+  stratifyColumn,
   onChangeFile,
   onExportNotebook,
   onAddTransform,
   onRemoveTransform,
   onPageChange,
   onPageSizeChange,
+  onReanalyze,
+  edaMode = 'tabular',
+  tsProfile,
+  tsLoading,
+  tsError,
 }: ProfiledDataViewProps) {
   const [activeTab, setActiveTab] = useState<EDATab>('data')
+  const [localStrategy, setLocalStrategy] = useState(samplingStrategy)
+  const [localSampleSize, setLocalSampleSize] = useState(String(sampleSize))
+  const [localStratifyCol, setLocalStratifyCol] = useState(stratifyColumn)
 
-  const tabs = [
+  const tabularTabs = [
     { id: 'data' as const, label: 'Data Preview' },
     { id: 'columns' as const, label: 'Column Analysis' },
     { id: 'correlations' as const, label: 'Correlations' },
     { id: 'quality' as const, label: 'Data Quality' },
     { id: 'transforms' as const, label: 'Transformations' },
   ]
+
+  const tsTabs: { id: EDATab; label: string }[] = [
+    { id: 'data' as const, label: 'Data Preview' },
+    { id: 'ts-overview' as const, label: 'Temporal Overview' },
+    { id: 'ts-stationarity' as const, label: 'Stationarity & Trends' },
+    { id: 'ts-acf' as const, label: 'Seasonality & ACF' },
+    { id: 'columns' as const, label: 'Column Analysis' },
+    { id: 'quality' as const, label: 'Data Quality' },
+  ]
+
+  const tabs = edaMode === 'timeseries' ? tsTabs : tabularTabs
+
+  const isSampled = profile?.summary && profile.summary.total_rows > profile.summary.sample_size
 
   return (
     <>
@@ -129,6 +165,67 @@ export function ProfiledDataView({
           Change File
         </button>
       </div>
+
+      {/* Sampling Config Bar */}
+      {isSampled && edaMode === 'tabular' && (
+        <div className="bg-amber-50 border border-amber-200 p-4">
+          <div className="flex items-center gap-4 flex-wrap">
+            <span className="text-sm text-amber-800 font-medium">
+              Sampled {profile!.summary.sample_size.toLocaleString()} of {profile!.summary.total_rows.toLocaleString()} rows
+            </span>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-domino-text-secondary">Strategy:</label>
+              <select
+                value={localStrategy}
+                onChange={(e) => setLocalStrategy(e.target.value)}
+                className="h-[28px] px-2 text-xs border border-[#d9d9d9] rounded-[2px] bg-white"
+              >
+                <option value="random">Random</option>
+                <option value="stratified">Stratified</option>
+                <option value="head">First N</option>
+                <option value="full">Full Dataset</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-domino-text-secondary">Sample size:</label>
+              <input
+                type="number"
+                value={localSampleSize}
+                onChange={(e) => setLocalSampleSize(e.target.value)}
+                className="h-[28px] w-[100px] px-2 text-xs border border-[#d9d9d9] rounded-[2px]"
+                disabled={localStrategy === 'full'}
+              />
+            </div>
+            {localStrategy === 'stratified' && profile?.columns && (
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-domino-text-secondary">Stratify by:</label>
+                <select
+                  value={localStratifyCol}
+                  onChange={(e) => setLocalStratifyCol(e.target.value)}
+                  className="h-[28px] px-2 text-xs border border-[#d9d9d9] rounded-[2px] bg-white"
+                >
+                  <option value="">Select column...</option>
+                  {profile.columns.map((col) => (
+                    <option key={col.name} value={col.name}>{col.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <button
+              onClick={() => onReanalyze(localStrategy, Number(localSampleSize) || 50000, localStratifyCol)}
+              className="h-[28px] px-3 text-xs bg-domino-accent-purple text-white rounded-[2px] hover:bg-domino-accent-purple-hover"
+            >
+              Re-analyze
+            </button>
+            {localStrategy === 'full' && profile!.summary.total_rows > 500000 && (
+              <span className="flex items-center gap-1 text-xs text-amber-700">
+                <ExclamationTriangleIcon className="h-3.5 w-3.5" />
+                Large dataset — analysis may take longer
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* EDA Tabs */}
       <div className="border-b border-domino-border">
@@ -214,6 +311,48 @@ export function ProfiledDataView({
             onAddTransform={onAddTransform}
             onRemoveTransform={onRemoveTransform}
           />
+        )}
+
+        {activeTab === 'ts-overview' && (
+          tsLoading ? (
+            <div className="flex items-center justify-center py-20"><Spinner /></div>
+          ) : tsError ? (
+            <div className="text-center py-20 text-domino-accent-red">{tsError}</div>
+          ) : tsProfile ? (
+            <TimeSeriesOverview profile={tsProfile} />
+          ) : (
+            <div className="text-center py-20 text-domino-text-muted">
+              Configure time series columns and run analysis to see temporal overview
+            </div>
+          )
+        )}
+
+        {activeTab === 'ts-stationarity' && (
+          tsLoading ? (
+            <div className="flex items-center justify-center py-20"><Spinner /></div>
+          ) : tsError ? (
+            <div className="text-center py-20 text-domino-accent-red">{tsError}</div>
+          ) : tsProfile ? (
+            <StationarityTrendPanel profile={tsProfile} />
+          ) : (
+            <div className="text-center py-20 text-domino-text-muted">
+              Configure time series columns and run analysis to see stationarity results
+            </div>
+          )
+        )}
+
+        {activeTab === 'ts-acf' && (
+          tsLoading ? (
+            <div className="flex items-center justify-center py-20"><Spinner /></div>
+          ) : tsError ? (
+            <div className="text-center py-20 text-domino-accent-red">{tsError}</div>
+          ) : tsProfile ? (
+            <ACFPanel profile={tsProfile} />
+          ) : (
+            <div className="text-center py-20 text-domino-text-muted">
+              Configure time series columns and run analysis to see ACF results
+            </div>
+          )
         )}
       </div>
     </>

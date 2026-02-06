@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect } from 'react'
+import { useCallback, useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useDatasets, useUploadFile, useDatasetPreview } from '../hooks/useDatasets'
 import { useProfiling } from '../hooks/useProfiling'
@@ -7,6 +7,7 @@ import { Dataset, DatasetFile } from '../types/dataset'
 import { generateEDANotebook } from '../utils/notebookGenerator'
 import { DataSourceSelector } from '../components/eda/DataSourceSelector'
 import { ProfiledDataView } from '../components/eda/ProfiledDataView'
+import { TimeSeriesConfigPanel } from '../components/eda/TimeSeriesConfigPanel'
 
 interface TransformConfig {
   column: string
@@ -17,7 +18,10 @@ function EDAAnalysis() {
   const { data: datasetsData, isLoading: loadingDatasets } = useDatasets()
   const uploadMutation = useUploadFile()
   const addNotification = useStore((state) => state.addNotification)
-  const { profile, loading: profilingLoading, error: profilingError, profileFile } = useProfiling()
+  const {
+    profile, loading: profilingLoading, error: profilingError, profileFile,
+    tsProfile, tsLoading, tsError, profileTimeSeries,
+  } = useProfiling()
 
   const [sourceType, setSourceType] = useState<'upload' | 'dataset'>('dataset')
   const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null)
@@ -27,6 +31,14 @@ function EDAAnalysis() {
   const [isExporting, setIsExporting] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
+  const [samplingStrategy, setSamplingStrategy] = useState('random')
+  const [sampleSize, setSampleSize] = useState(50000)
+  const [stratifyColumn, setStratifyColumn] = useState('')
+  const [edaMode, setEdaMode] = useState<'tabular' | 'timeseries'>('tabular')
+  const [timeColumn, setTimeColumn] = useState('')
+  const [targetColumn, setTargetColumn] = useState('')
+  const [idColumn, setIdColumn] = useState('')
+  const [rollingWindow, setRollingWindow] = useState('')
 
   const datasets = datasetsData?.datasets || []
 
@@ -81,6 +93,39 @@ function EDAAnalysis() {
     if (bytes < 1024) return `${bytes} B`
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  const hasDatetimeColumns = useMemo(() => {
+    if (!profile?.columns) return false
+    return profile.columns.some(
+      (c) => c.semantic_type === 'datetime' || c.dtype.includes('datetime')
+    )
+  }, [profile])
+
+  const handleRunTSAnalysis = (tc: string, tgt: string, id: string, size: number, strategy: string, rw: string) => {
+    if (!selectedFilePath) return
+    setTimeColumn(tc)
+    setTargetColumn(tgt)
+    setIdColumn(id)
+    setRollingWindow(rw)
+    profileTimeSeries({
+      file_path: selectedFilePath,
+      time_column: tc,
+      target_column: tgt,
+      id_column: id || undefined,
+      sample_size: size,
+      sampling_strategy: strategy,
+      rolling_window: Number(rw) || undefined,
+    })
+  }
+
+  const handleReanalyze = (strategy: string, size: number, stratifyCol: string) => {
+    setSamplingStrategy(strategy)
+    setSampleSize(size)
+    setStratifyColumn(stratifyCol)
+    if (selectedFilePath) {
+      profileFile(selectedFilePath, size, strategy, stratifyCol || undefined)
+    }
   }
 
   const addTransform = (transform: TransformConfig) => {
@@ -157,6 +202,58 @@ function EDAAnalysis() {
     <div className="space-y-6">
       {breadcrumb}
 
+      {/* Mode Toggle */}
+      <div className="flex items-center gap-4">
+        <div className="flex items-center border border-[#d9d9d9] rounded-[2px] overflow-hidden">
+          <button
+            onClick={() => setEdaMode('tabular')}
+            className={`px-4 py-1.5 text-sm font-medium ${
+              edaMode === 'tabular'
+                ? 'bg-domino-accent-purple text-white'
+                : 'bg-white text-domino-text-secondary hover:bg-domino-bg-tertiary'
+            }`}
+          >
+            Tabular
+          </button>
+          <button
+            onClick={() => setEdaMode('timeseries')}
+            className={`px-4 py-1.5 text-sm font-medium border-l border-[#d9d9d9] ${
+              edaMode === 'timeseries'
+                ? 'bg-domino-accent-purple text-white'
+                : 'bg-white text-domino-text-secondary hover:bg-domino-bg-tertiary'
+            }`}
+          >
+            Time Series
+          </button>
+        </div>
+        {edaMode === 'tabular' && hasDatetimeColumns && (
+          <button
+            onClick={() => setEdaMode('timeseries')}
+            className="text-xs text-domino-accent-purple hover:underline"
+          >
+            Datetime columns detected — try Time Series mode
+          </button>
+        )}
+      </div>
+
+      {/* Time Series Config Panel */}
+      {edaMode === 'timeseries' && profile?.columns && (
+        <TimeSeriesConfigPanel
+          columns={profile.columns}
+          totalRows={profile.summary.total_rows}
+          onRunAnalysis={handleRunTSAnalysis}
+          loading={tsLoading}
+          timeColumn={timeColumn}
+          targetColumn={targetColumn}
+          idColumn={idColumn}
+          onTimeColumnChange={setTimeColumn}
+          onTargetColumnChange={setTargetColumn}
+          onIdColumnChange={setIdColumn}
+          rollingWindow={rollingWindow}
+          onRollingWindowChange={setRollingWindow}
+        />
+      )}
+
       <ProfiledDataView
         selectedFilePath={selectedFilePath}
         selectedFileName={selectedFileName!}
@@ -170,12 +267,20 @@ function EDAAnalysis() {
         isExporting={isExporting}
         currentPage={currentPage}
         pageSize={pageSize}
+        samplingStrategy={samplingStrategy}
+        sampleSize={sampleSize}
+        stratifyColumn={stratifyColumn}
         onChangeFile={handleChangeFile}
         onExportNotebook={exportNotebook}
         onAddTransform={addTransform}
         onRemoveTransform={removeTransform}
         onPageChange={setCurrentPage}
         onPageSizeChange={(size) => { setPageSize(size); setCurrentPage(1); }}
+        onReanalyze={handleReanalyze}
+        edaMode={edaMode}
+        tsProfile={tsProfile}
+        tsLoading={tsLoading}
+        tsError={tsError}
       />
     </div>
   )

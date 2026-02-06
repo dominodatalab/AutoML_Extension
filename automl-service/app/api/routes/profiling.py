@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.data_profiler import get_data_profiler
+from app.core.ts_profiler import get_ts_profiler
 from app.api.error_handler import handle_errors
 
 logger = logging.getLogger(__name__)
@@ -16,7 +17,9 @@ router = APIRouter()
 class ProfileRequest(BaseModel):
     """Request for data profiling."""
     file_path: str = Field(..., description="Path to the data file")
-    sample_size: int = Field(10000, description="Max rows to sample for profiling")
+    sample_size: int = Field(50000, description="Max rows to sample for profiling")
+    sampling_strategy: str = Field("random", description="Sampling strategy: random, stratified, head, full")
+    stratify_column: Optional[str] = Field(None, description="Column for stratified sampling")
 
 
 class ColumnProfile(BaseModel):
@@ -40,6 +43,7 @@ class DataSummary(BaseModel):
     total_columns: int
     sampled: bool
     sample_size: int
+    sampling_strategy: str = "random"
     memory_usage_mb: float
     duplicate_rows: int
     duplicate_percentage: float
@@ -90,7 +94,9 @@ async def profile_data(request: ProfileRequest):
     try:
         profile = profiler.profile_file(
             file_path=request.file_path,
-            sample_size=request.sample_size
+            sample_size=request.sample_size,
+            sampling_strategy=request.sampling_strategy,
+            stratify_column=request.stratify_column,
         )
 
         return ProfileResponse(
@@ -114,7 +120,9 @@ async def suggest_target_column(request: ProfileRequest):
     try:
         profile = profiler.profile_file(
             file_path=request.file_path,
-            sample_size=request.sample_size
+            sample_size=request.sample_size,
+            sampling_strategy=request.sampling_strategy,
+            stratify_column=request.stratify_column,
         )
 
         suggestions = profiler.suggest_target_column(profile)
@@ -321,3 +329,67 @@ async def get_available_presets():
             }
         ]
     }
+
+
+# ── Time Series Profiling ──────────────────────────────────────────────
+
+
+class TimeSeriesProfileRequest(BaseModel):
+    """Request for time series profiling."""
+    file_path: str = Field(..., description="Path to the data file")
+    time_column: str = Field(..., description="Name of the datetime column")
+    target_column: str = Field(..., description="Name of the numeric target column")
+    id_column: Optional[str] = Field(None, description="Name of the series identifier column")
+    sample_size: int = Field(100000, description="Max rows to sample for profiling")
+    sampling_strategy: str = Field("recent", description="Sampling strategy: recent, oldest, uniform, full")
+    rolling_window: Optional[int] = Field(None, description="Rolling window size (auto if omitted)")
+
+
+class TimeSeriesProfileResponse(BaseModel):
+    """Complete time series profile response."""
+    temporal_summary: Dict[str, Any] = {}
+    gap_analysis: Dict[str, Any] = {}
+    stationarity: Optional[Dict[str, Any]] = None
+    trend_analysis: Optional[Dict[str, Any]] = None
+    seasonality: Optional[Dict[str, Any]] = None
+    autocorrelation: Optional[Dict[str, Any]] = None
+    target_statistics: Dict[str, Any] = {}
+    rolling_statistics: Optional[Dict[str, Any]] = None
+    per_series_summary: Optional[List[Dict[str, Any]]] = None
+    recommendations: List[Recommendation] = []
+    warnings: List[Warning] = []
+
+
+@router.post("/profile/timeseries", response_model=TimeSeriesProfileResponse)
+@handle_errors("Time series profiling error")
+async def profile_timeseries(request: TimeSeriesProfileRequest):
+    """Generate a comprehensive time series profile."""
+    profiler = get_ts_profiler()
+
+    try:
+        result = profiler.profile_timeseries_file(
+            file_path=request.file_path,
+            time_column=request.time_column,
+            target_column=request.target_column,
+            id_column=request.id_column,
+            sample_size=request.sample_size,
+            sampling_strategy=request.sampling_strategy,
+            rolling_window=request.rolling_window,
+        )
+
+        return TimeSeriesProfileResponse(
+            temporal_summary=result.get("temporal_summary", {}),
+            gap_analysis=result.get("gap_analysis", {}),
+            stationarity=result.get("stationarity"),
+            trend_analysis=result.get("trend_analysis"),
+            seasonality=result.get("seasonality"),
+            autocorrelation=result.get("autocorrelation"),
+            target_statistics=result.get("target_statistics", {}),
+            rolling_statistics=result.get("rolling_statistics"),
+            per_series_summary=result.get("per_series_summary"),
+            recommendations=[Recommendation(**r) for r in result.get("recommendations", [])],
+            warnings=[Warning(**w) for w in result.get("warnings", [])],
+        )
+
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"File not found: {request.file_path}")

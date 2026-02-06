@@ -53,6 +53,7 @@ export interface DataSummary {
   total_columns: number
   sampled: boolean
   sample_size: number
+  sampling_strategy?: string
   memory_usage_mb: number
   duplicate_rows: number
   duplicate_percentage: number
@@ -118,3 +119,106 @@ export interface PresetInfo {
 
 export type MetricsByProblemType = Record<string, MetricInfo[]>
 export type PresetsByModelType = Record<string, PresetInfo[]>
+
+// Time Series Profiling Types
+
+export interface TemporalSummary {
+  num_series: number
+  total_observations: number
+  total_rows: number
+  date_range_start: string | null
+  date_range_end: string | null
+  inferred_frequency: string | null
+  sampling_strategy: string
+}
+
+export interface GapInfo {
+  start: string
+  end: string
+  duration: string
+  missing_periods: number
+}
+
+export interface GapAnalysis {
+  gaps: GapInfo[]
+  total_gaps: number
+  irregular_intervals: boolean
+}
+
+export interface StationarityResult {
+  adf_statistic: number
+  p_value: number
+  num_observations: number
+  critical_values: Record<string, number>
+  interpretation: string
+  is_stationary: boolean
+}
+
+export interface TrendAnalysis {
+  direction: 'upward' | 'downward' | 'flat'
+  slope: number
+  r_squared: number
+}
+
+export interface DecompositionComponent {
+  timestamps: string[]
+  values: (number | null)[]
+}
+
+export interface SeasonalityResult {
+  model: 'additive' | 'multiplicative'
+  period: number
+  seasonal_strength: number
+  trend: DecompositionComponent
+  seasonal: DecompositionComponent
+  residual: DecompositionComponent
+}
+
+export interface AutocorrelationResult {
+  acf: number[]
+  pacf: number[]
+  confidence_interval: number
+  significant_lags: number[]
+  nlags: number
+}
+
+export interface TargetStatistics {
+  mean: number
+  std: number
+  cv: number
+  min: number
+  max: number
+  skewness: number
+  kurtosis: number
+}
+
+export interface RollingStatistics {
+  window_size: number
+  timestamps: string[]
+  rolling_mean: (number | null)[]
+  rolling_std: (number | null)[]
+}
+
+export interface PerSeriesSummary {
+  id: string
+  count: number
+  date_range_start: string | null
+  date_range_end: string | null
+  missing_rate: number
+  mean: number | null
+  std: number | null
+}
+
+export interface TimeSeriesProfile {
+  temporal_summary: TemporalSummary
+  gap_analysis: GapAnalysis
+  stationarity: StationarityResult | null
+  trend_analysis: TrendAnalysis | null
+  seasonality: SeasonalityResult | null
+  autocorrelation: AutocorrelationResult | null
+  target_statistics: TargetStatistics
+  rolling_statistics: RollingStatistics | null
+  per_series_summary: PerSeriesSummary[] | null
+  recommendations: DataRecommendation[]
+  warnings: DataWarning[]
+}

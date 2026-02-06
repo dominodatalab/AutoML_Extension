@@ -19,7 +19,13 @@ class DataProfiler:
     def __init__(self):
         pass
 
-    def profile_file(self, file_path: str, sample_size: int = 10000) -> Dict[str, Any]:
+    def profile_file(
+        self,
+        file_path: str,
+        sample_size: int = 50000,
+        sampling_strategy: str = "random",
+        stratify_column: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Generate a comprehensive profile of a data file."""
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
@@ -36,20 +42,42 @@ class DataProfiler:
         else:
             raise ValueError(f"Unsupported file format: {file_path}")
 
-        return self.profile_dataframe(df, sample_size)
+        return self.profile_dataframe(df, sample_size, sampling_strategy, stratify_column)
 
-    def profile_dataframe(self, df: pd.DataFrame, sample_size: int = 10000) -> Dict[str, Any]:
+    def profile_dataframe(
+        self,
+        df: pd.DataFrame,
+        sample_size: int = 50000,
+        sampling_strategy: str = "random",
+        stratify_column: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Generate a comprehensive profile of a DataFrame."""
         total_rows = len(df)
         total_cols = len(df.columns)
 
         # Sample for large datasets
-        if total_rows > sample_size:
+        if sampling_strategy == "full" or total_rows <= sample_size:
+            sample_df = df
+            sampled = total_rows > sample_size  # True for "full" on large data
+        elif sampling_strategy == "head":
+            sample_df = df.head(sample_size)
+            sampled = True
+        elif sampling_strategy == "stratified" and stratify_column and stratify_column in df.columns:
+            try:
+                frac = sample_size / total_rows
+                sample_df = df.groupby(stratify_column, group_keys=False).apply(
+                    lambda x: x.sample(frac=frac, random_state=42) if len(x) > 1 else x
+                )
+                if len(sample_df) > sample_size:
+                    sample_df = sample_df.head(sample_size)
+                sampled = True
+            except Exception:
+                sample_df = df.sample(n=sample_size, random_state=42)
+                sampled = True
+        else:
+            # Default: random sampling
             sample_df = df.sample(n=sample_size, random_state=42)
             sampled = True
-        else:
-            sample_df = df
-            sampled = False
 
         # Basic statistics
         profile = {
@@ -58,6 +86,7 @@ class DataProfiler:
                 "total_columns": total_cols,
                 "sampled": sampled,
                 "sample_size": len(sample_df),
+                "sampling_strategy": sampling_strategy,
                 "memory_usage_mb": df.memory_usage(deep=True).sum() / (1024 * 1024),
                 "duplicate_rows": int(df.duplicated().sum()),
                 "duplicate_percentage": round(df.duplicated().sum() / total_rows * 100, 2) if total_rows > 0 else 0,

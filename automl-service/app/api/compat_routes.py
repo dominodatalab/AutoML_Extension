@@ -62,6 +62,7 @@ def register_compat_routes(app: FastAPI):
         ("/svcpredictbatch", "app.api.routes.predictions", "batch_predict", "BatchPredictRequest"),
         ("/svcprofile", "app.api.routes.profiling", "profile_data", "ProfileRequest"),
         ("/svcsuggesttarget", "app.api.routes.profiling", "suggest_target_column", "ProfileRequest"),
+        ("/svcprofiletimeseries", "app.api.routes.profiling", "profile_timeseries", "TimeSeriesProfileRequest"),
         ("/svcregistermodel", "app.api.routes.registry", "register_model", "RegisterModelRequest"),
         ("/svctransitionstage", "app.api.routes.registry", "transition_model_stage", "TransitionStageRequest"),
         ("/svcupdatedescription", "app.api.routes.registry", "update_model_description", "UpdateDescriptionRequest"),

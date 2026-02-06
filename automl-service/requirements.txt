@@ -31,5 +31,8 @@ python-dotenv>=1.0.0
 # HTTP client
 httpx>=0.26.0
 
+# Statistical analysis
+statsmodels>=0.14.0
+
 # Utilities
 python-dateutil>=2.8.0

@@ -7,8 +7,19 @@ import type {
   QuickProfile,
   ColumnProfile,
   MetricsByProblemType,
-  PresetsByModelType
+  PresetsByModelType,
+  TimeSeriesProfile,
 } from '../types/profiling'
+
+interface TimeSeriesProfileRequest {
+  file_path: string
+  time_column: string
+  target_column: string
+  id_column?: string
+  sample_size?: number
+  sampling_strategy?: string
+  rolling_window?: number
+}
 
 interface UseProfilingResult {
   profile: DataProfile | null
@@ -17,14 +28,18 @@ interface UseProfilingResult {
   columnProfile: ColumnProfile | null
   metrics: MetricsByProblemType | null
   presets: PresetsByModelType | null
+  tsProfile: TimeSeriesProfile | null
+  tsLoading: boolean
+  tsError: string | null
   loading: boolean
   error: string | null
-  profileFile: (filePath: string, sampleSize?: number) => Promise<DataProfile | null>
+  profileFile: (filePath: string, sampleSize?: number, samplingStrategy?: string, stratifyColumn?: string) => Promise<DataProfile | null>
   quickProfileFile: (filePath: string) => Promise<QuickProfile | null>
   suggestTarget: (filePath: string) => Promise<TargetSuggestion[]>
   profileColumn: (filePath: string, columnName: string) => Promise<ColumnProfile | null>
   fetchMetrics: () => Promise<MetricsByProblemType | null>
   fetchPresets: () => Promise<PresetsByModelType | null>
+  profileTimeSeries: (request: TimeSeriesProfileRequest) => Promise<TimeSeriesProfile | null>
 }
 
 export function useProfiling(): UseProfilingResult {
@@ -34,13 +49,17 @@ export function useProfiling(): UseProfilingResult {
   const [columnProfile, setColumnProfile] = useState<ColumnProfile | null>(null)
   const [metrics, setMetrics] = useState<MetricsByProblemType | null>(null)
   const [presets, setPresets] = useState<PresetsByModelType | null>(null)
+  const [tsProfile, setTsProfile] = useState<TimeSeriesProfile | null>(null)
 
   const profileOp = useAsyncOperation(
-    async (filePath: string, sampleSize = 10000) => {
-      const { data } = await api.post<DataProfile>('profile', {
+    async (filePath: string, sampleSize = 50000, samplingStrategy = 'random', stratifyColumn?: string) => {
+      const payload: Record<string, unknown> = {
         file_path: filePath,
-        sample_size: sampleSize
-      })
+        sample_size: sampleSize,
+        sampling_strategy: samplingStrategy,
+      }
+      if (stratifyColumn) payload.stratify_column = stratifyColumn
+      const { data } = await api.post<DataProfile>('profile', payload)
       setProfile(data)
       return data
     },
@@ -97,6 +116,15 @@ export function useProfiling(): UseProfilingResult {
     { errorMessage: 'Failed to fetch presets' }
   )
 
+  const tsProfileOp = useAsyncOperation(
+    async (request: TimeSeriesProfileRequest) => {
+      const { data } = await api.post<TimeSeriesProfile>('profiletimeseries', request)
+      setTsProfile(data)
+      return data
+    },
+    { errorMessage: 'Failed to profile time series' }
+  )
+
   // Derive combined loading/error from all operations
   const loading = profileOp.loading || quickProfileOp.loading || suggestTargetOp.loading ||
     profileColumnOp.loading || fetchMetricsOp.loading || fetchPresetsOp.loading
@@ -105,8 +133,8 @@ export function useProfiling(): UseProfilingResult {
 
   // Wrap execute calls to preserve the original return-type contracts
   // (returning null / [] on failure instead of undefined)
-  const profileFile = useCallback(async (filePath: string, sampleSize?: number) => {
-    const result = await profileOp.execute(filePath, sampleSize ?? 10000)
+  const profileFile = useCallback(async (filePath: string, sampleSize?: number, samplingStrategy?: string, stratifyColumn?: string) => {
+    const result = await profileOp.execute(filePath, sampleSize ?? 50000, samplingStrategy ?? 'random', stratifyColumn)
     return result ?? null
   }, [profileOp.execute])
 
@@ -135,6 +163,11 @@ export function useProfiling(): UseProfilingResult {
     return result ?? null
   }, [fetchPresetsOp.execute])
 
+  const profileTimeSeries = useCallback(async (request: TimeSeriesProfileRequest) => {
+    const result = await tsProfileOp.execute(request)
+    return result ?? null
+  }, [tsProfileOp.execute])
+
   return {
     profile,
     quickProfile,
@@ -142,6 +175,9 @@ export function useProfiling(): UseProfilingResult {
     columnProfile,
     metrics,
     presets,
+    tsProfile,
+    tsLoading: tsProfileOp.loading,
+    tsError: tsProfileOp.error ?? null,
     loading,
     error,
     profileFile,
@@ -150,5 +186,6 @@ export function useProfiling(): UseProfilingResult {
     profileColumn,
     fetchMetrics,
     fetchPresets,
+    profileTimeSeries,
   }
 }
