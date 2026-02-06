@@ -140,7 +140,13 @@ function EDAAnalysis() {
     if (!selectedFilePath || !selectedFileName || !profile) return
     setIsExporting(true)
     try {
-      const notebook = generateEDANotebook({ path: selectedFilePath, name: selectedFileName }, profile, transforms)
+      const tsConfig = (edaMode === 'timeseries' && tsProfile) ? {
+        tsProfile,
+        timeColumn,
+        targetColumn,
+        idColumn,
+      } : undefined
+      const notebook = generateEDANotebook({ path: selectedFilePath, name: selectedFileName }, profile, transforms, tsConfig)
       const blob = new Blob([JSON.stringify(notebook, null, 2)], { type: 'application/x-ipynb+json' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
