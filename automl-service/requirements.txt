@@ -6,6 +6,7 @@ python-multipart>=0.0.9
 # Database
 sqlalchemy>=2.0.0
 aiosqlite>=0.19.0
+greenlet>=3.0.0
 
 # AutoGluon
 autogluon.tabular>=1.1.0
