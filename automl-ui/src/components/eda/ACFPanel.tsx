@@ -9,10 +9,12 @@ function ACFBarChart({
   title,
   values,
   confidenceInterval,
+  fullWidth,
 }: {
   title: string
   values: number[]
   confidenceInterval: number
+  fullWidth?: boolean
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
   const [hoverBar, setHoverBar] = useState<number | null>(null)
@@ -57,7 +59,7 @@ function ACFBarChart({
         <svg
           ref={svgRef}
           viewBox={`0 0 ${width} ${height}`}
-          className="w-full max-w-3xl mx-auto border border-domino-border bg-white"
+          className={`w-full border border-domino-border bg-white ${fullWidth ? '' : 'max-w-3xl mx-auto'}`}
           onMouseMove={onMouseMove}
           onMouseLeave={onMouseLeave}
         >
@@ -172,17 +174,23 @@ export function ACFPanel({ profile }: ACFPanelProps) {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-6">
-        <ACFBarChart
-          title="Autocorrelation Function (ACF)"
-          values={autocorrelation.acf}
-          confidenceInterval={autocorrelation.confidence_interval}
-        />
-        <ACFBarChart
-          title="Partial Autocorrelation Function (PACF)"
-          values={autocorrelation.pacf}
-          confidenceInterval={autocorrelation.confidence_interval}
-        />
+      <div className="flex flex-wrap gap-6">
+        <div className="flex-1 min-w-[420px]">
+          <ACFBarChart
+            title="Autocorrelation Function (ACF)"
+            values={autocorrelation.acf}
+            confidenceInterval={autocorrelation.confidence_interval}
+            fullWidth
+          />
+        </div>
+        <div className="flex-1 min-w-[420px]">
+          <ACFBarChart
+            title="Partial Autocorrelation Function (PACF)"
+            values={autocorrelation.pacf}
+            confidenceInterval={autocorrelation.confidence_interval}
+            fullWidth
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

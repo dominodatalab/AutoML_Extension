@@ -32,10 +32,12 @@ function SVGLineChart({
   title,
   datasets,
   timestamps,
+  fullWidth,
 }: {
   title: string
   datasets: { label: string; values: (number | null)[]; color: string }[]
   timestamps?: string[]
+  fullWidth?: boolean
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
@@ -87,7 +89,7 @@ function SVGLineChart({
         <svg
           ref={svgRef}
           viewBox={`0 0 ${width} ${height}`}
-          className="w-full max-w-3xl mx-auto border border-domino-border bg-white"
+          className={`w-full border border-domino-border bg-white ${fullWidth ? '' : 'max-w-3xl mx-auto'}`}
           onMouseMove={onMouseMove}
           onMouseLeave={onMouseLeave}
         >
@@ -255,25 +257,36 @@ export function StationarityTrendPanel({ profile }: StationarityTrendPanelProps)
 
       {/* Decomposition Charts */}
       {seasonality && (
-        <div className="space-y-3">
-          <h3 className="text-sm font-medium text-domino-text-primary">
+        <div>
+          <h3 className="text-sm font-medium text-domino-text-primary mb-3">
             Seasonal Decomposition ({seasonality.model}, period={seasonality.period})
           </h3>
-          <SVGLineChart
-            title="Trend Component"
-            datasets={[{ label: 'Trend', values: seasonality.trend.values, color: '#2563eb' }]}
-            timestamps={seasonality.trend.timestamps}
-          />
-          <SVGLineChart
-            title="Seasonal Component"
-            datasets={[{ label: 'Seasonal', values: seasonality.seasonal.values, color: '#16a34a' }]}
-            timestamps={seasonality.seasonal.timestamps}
-          />
-          <SVGLineChart
-            title="Residual Component"
-            datasets={[{ label: 'Residual', values: seasonality.residual.values, color: '#dc2626' }]}
-            timestamps={seasonality.residual.timestamps}
-          />
+          <div className="flex flex-wrap gap-4">
+            <div className="flex-1 min-w-[420px]">
+              <SVGLineChart
+                title="Trend Component"
+                datasets={[{ label: 'Trend', values: seasonality.trend.values, color: '#2563eb' }]}
+                timestamps={seasonality.trend.timestamps}
+                fullWidth
+              />
+            </div>
+            <div className="flex-1 min-w-[420px]">
+              <SVGLineChart
+                title="Seasonal Component"
+                datasets={[{ label: 'Seasonal', values: seasonality.seasonal.values, color: '#16a34a' }]}
+                timestamps={seasonality.seasonal.timestamps}
+                fullWidth
+              />
+            </div>
+            <div className="flex-1 min-w-[420px]">
+              <SVGLineChart
+                title="Residual Component"
+                datasets={[{ label: 'Residual', values: seasonality.residual.values, color: '#dc2626' }]}
+                timestamps={seasonality.residual.timestamps}
+                fullWidth
+              />
+            </div>
+          </div>
         </div>
       )}
     </div>
