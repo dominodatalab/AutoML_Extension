@@ -2,6 +2,8 @@
 data/models/
 data/datasets/uploads/
 data/temp/
+automl-service/local_data/
+automl-service/mlruns/
 
 # Database
 automl-service/automl.db

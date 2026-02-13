@@ -41,12 +41,46 @@ class TimeSeriesTrainer(BaseTrainer):
         if not prediction_length:
             raise ValueError("prediction_length is required for timeseries models")
 
+        # Add a synthetic item_id for single-series data when no id_column provided
+        if not id_column:
+            df = df.copy()
+            df["item_id"] = "default"
+            id_column = "item_id"
+
         # Convert to TimeSeriesDataFrame
         ts_df = TimeSeriesDataFrame.from_data_frame(
             df,
             id_column=id_column,
             timestamp_column=time_column,
         )
+
+        # Auto-detect frequency if not explicitly provided
+        detected_freq = None
+        if not (timeseries_config and timeseries_config.get("freq")):
+            try:
+                timestamps = pd.to_datetime(ts_df.index.get_level_values("timestamp"))
+                detected_freq = pd.infer_freq(timestamps)
+            except Exception:
+                pass
+            if not detected_freq:
+                # Infer from median time delta
+                try:
+                    timestamps = ts_df.reset_index()["timestamp"].sort_values()
+                    median_delta = timestamps.diff().median()
+                    if median_delta <= pd.Timedelta(hours=1):
+                        detected_freq = "h"
+                    elif median_delta <= pd.Timedelta(days=1):
+                        detected_freq = "D"
+                    elif median_delta <= pd.Timedelta(days=7):
+                        detected_freq = "W"
+                    elif median_delta <= pd.Timedelta(days=31):
+                        detected_freq = "MS"
+                    else:
+                        detected_freq = "D"
+                    logger.info(f"Auto-detected frequency from median delta ({median_delta}): {detected_freq}")
+                except Exception:
+                    detected_freq = "D"
+                    logger.warning("Could not infer frequency, defaulting to 'D'")
 
         # Configure predictor
         predictor_kwargs = {
@@ -66,13 +100,25 @@ class TimeSeriesTrainer(BaseTrainer):
             if timeseries_config.get("quantile_levels"):
                 predictor_kwargs["quantile_levels"] = timeseries_config["quantile_levels"]
 
+        # Use auto-detected freq if none was set by config
+        if "freq" not in predictor_kwargs and detected_freq:
+            predictor_kwargs["freq"] = detected_freq
+
         # Create predictor
         predictor = TimeSeriesPredictor(**predictor_kwargs)
+
+        # Map tabular presets to valid TS presets
+        ts_preset_map = {
+            "medium_quality_faster_train": "medium_quality",
+            "good_quality": "medium_quality",
+            "optimize_for_deployment": "fast_training",
+        }
+        ts_preset = ts_preset_map.get(preset, preset)
 
         # Configure fit parameters
         fit_kwargs = {
             "train_data": ts_df,
-            "presets": preset,
+            "presets": ts_preset,
         }
 
         if time_limit:
