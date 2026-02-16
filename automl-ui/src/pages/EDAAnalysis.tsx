@@ -21,6 +21,7 @@ function EDAAnalysis() {
   const {
     profile, loading: profilingLoading, error: profilingError, profileFile,
     tsProfile, tsLoading, tsError, profileTimeSeries,
+    startAsyncProfile, getAsyncProfileStatus, setProfileData, setTsProfileData,
   } = useProfiling()
 
   const [sourceType, setSourceType] = useState<'upload' | 'dataset'>('upload')
@@ -34,11 +35,16 @@ function EDAAnalysis() {
   const [samplingStrategy, setSamplingStrategy] = useState('random')
   const [sampleSize, setSampleSize] = useState(50000)
   const [stratifyColumn, setStratifyColumn] = useState('')
+  const [edaExecutionTarget, setEdaExecutionTarget] = useState<'local' | 'domino_job'>('local')
   const [edaMode, setEdaMode] = useState<'tabular' | 'timeseries'>('tabular')
   const [timeColumn, setTimeColumn] = useState('')
   const [targetColumn, setTargetColumn] = useState('')
   const [idColumn, setIdColumn] = useState('')
   const [rollingWindow, setRollingWindow] = useState('')
+  const [asyncRequestId, setAsyncRequestId] = useState<string | null>(null)
+  const [asyncDominoJobId, setAsyncDominoJobId] = useState<string | null>(null)
+  const [asyncProfileStatus, setAsyncProfileStatus] = useState<'idle' | 'starting' | 'pending' | 'running' | 'completed' | 'failed'>('idle')
+  const [asyncProfileError, setAsyncProfileError] = useState<string | null>(null)
 
   const datasets = datasetsData?.datasets || []
 
@@ -49,11 +55,137 @@ function EDAAnalysis() {
     offset
   )
 
-  useEffect(() => {
-    if (selectedFilePath) {
-      profileFile(selectedFilePath)
+  const resetAsyncState = useCallback(() => {
+    setAsyncRequestId(null)
+    setAsyncDominoJobId(null)
+    setAsyncProfileStatus('idle')
+    setAsyncProfileError(null)
+  }, [])
+
+  const startAsyncTabularProfiling = useCallback(async (
+    filePath: string,
+    size: number,
+    strategy: string,
+    stratifyCol?: string
+  ) => {
+    setAsyncProfileStatus('starting')
+    setAsyncProfileError(null)
+    setAsyncRequestId(null)
+    try {
+      const response = await startAsyncProfile({
+        mode: 'tabular',
+        file_path: filePath,
+        sample_size: size,
+        sampling_strategy: strategy,
+        stratify_column: stratifyCol || undefined,
+      })
+      setAsyncRequestId(response.request_id)
+      setAsyncDominoJobId(response.domino_job_id || null)
+      setAsyncProfileStatus(response.status === 'pending' ? 'pending' : 'running')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to start async EDA profiling'
+      setAsyncProfileError(message)
+      setAsyncProfileStatus('failed')
+      addNotification(message, 'error')
     }
-  }, [selectedFilePath, profileFile])
+  }, [addNotification, startAsyncProfile])
+
+  const startAsyncTimeSeriesProfiling = useCallback(async (
+    filePath: string,
+    tc: string,
+    tgt: string,
+    id: string,
+    size: number,
+    strategy: string,
+    rw: string
+  ) => {
+    setAsyncProfileStatus('starting')
+    setAsyncProfileError(null)
+    setAsyncRequestId(null)
+    try {
+      const response = await startAsyncProfile({
+        mode: 'timeseries',
+        file_path: filePath,
+        time_column: tc,
+        target_column: tgt,
+        id_column: id || undefined,
+        sample_size: size,
+        sampling_strategy: strategy,
+        rolling_window: Number(rw) || undefined,
+      })
+      setAsyncRequestId(response.request_id)
+      setAsyncDominoJobId(response.domino_job_id || null)
+      setAsyncProfileStatus(response.status === 'pending' ? 'pending' : 'running')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to start async time series profiling'
+      setAsyncProfileError(message)
+      setAsyncProfileStatus('failed')
+      addNotification(message, 'error')
+    }
+  }, [addNotification, startAsyncProfile])
+
+  useEffect(() => {
+    if (!selectedFilePath) return
+    if (edaExecutionTarget === 'local') {
+      resetAsyncState()
+      void profileFile(selectedFilePath)
+      return
+    }
+    void startAsyncTabularProfiling(selectedFilePath, sampleSize, samplingStrategy, stratifyColumn || undefined)
+  }, [selectedFilePath, edaExecutionTarget, profileFile, resetAsyncState, startAsyncTabularProfiling])
+
+  useEffect(() => {
+    if (!asyncRequestId || edaExecutionTarget !== 'domino_job') return
+
+    let mounted = true
+    let intervalId: number | null = null
+
+    const pollStatus = async () => {
+      try {
+        const status = await getAsyncProfileStatus(asyncRequestId)
+        if (!mounted) return
+
+        setAsyncDominoJobId(status.domino_job_id || asyncDominoJobId)
+
+        if (status.status === 'completed') {
+          if (status.mode === 'timeseries' && status.result) {
+            setTsProfileData(status.result as any)
+          } else if (status.result) {
+            setProfileData(status.result as any)
+          }
+          setAsyncProfileStatus('completed')
+          setAsyncProfileError(null)
+          if (intervalId !== null) window.clearInterval(intervalId)
+          return
+        }
+
+        if (status.status === 'failed') {
+          setAsyncProfileStatus('failed')
+          setAsyncProfileError(status.error || 'Async profiling failed')
+          if (intervalId !== null) window.clearInterval(intervalId)
+          return
+        }
+
+        setAsyncProfileStatus(status.status === 'pending' ? 'pending' : 'running')
+      } catch (error) {
+        if (!mounted) return
+        const message = error instanceof Error ? error.message : 'Failed to poll async profiling status'
+        setAsyncProfileStatus('failed')
+        setAsyncProfileError(message)
+        if (intervalId !== null) window.clearInterval(intervalId)
+      }
+    }
+
+    void pollStatus()
+    intervalId = window.setInterval(() => {
+      void pollStatus()
+    }, 4000)
+
+    return () => {
+      mounted = false
+      if (intervalId !== null) window.clearInterval(intervalId)
+    }
+  }, [asyncDominoJobId, asyncRequestId, edaExecutionTarget, getAsyncProfileStatus, setProfileData, setTsProfileData])
 
   const onDrop = useCallback(
     async (acceptedFiles: File[]) => {
@@ -78,15 +210,19 @@ function EDAAnalysis() {
   }
 
   const handleSelectFile = (file: DatasetFile) => {
+    resetAsyncState()
     setSelectedFilePath(file.path)
     setSelectedFileName(file.name)
     setTransforms([])
   }
 
   const handleChangeFile = () => {
+    resetAsyncState()
     setSelectedFilePath(null)
     setSelectedFileName(null)
     setTransforms([])
+    setProfileData(null)
+    setTsProfileData(null)
   }
 
   const formatSize = (bytes: number): string => {
@@ -108,7 +244,11 @@ function EDAAnalysis() {
     setTargetColumn(tgt)
     setIdColumn(id)
     setRollingWindow(rw)
-    profileTimeSeries({
+    if (edaExecutionTarget === 'domino_job') {
+      void startAsyncTimeSeriesProfiling(selectedFilePath, tc, tgt, id, size, strategy, rw)
+      return
+    }
+    void profileTimeSeries({
       file_path: selectedFilePath,
       time_column: tc,
       target_column: tgt,
@@ -124,7 +264,11 @@ function EDAAnalysis() {
     setSampleSize(size)
     setStratifyColumn(stratifyCol)
     if (selectedFilePath) {
-      profileFile(selectedFilePath, size, strategy, stratifyCol || undefined)
+      if (edaExecutionTarget === 'domino_job') {
+        void startAsyncTabularProfiling(selectedFilePath, size, strategy, stratifyCol || undefined)
+      } else {
+        void profileFile(selectedFilePath, size, strategy, stratifyCol || undefined)
+      }
     }
   }
 
@@ -173,6 +317,21 @@ function EDAAnalysis() {
       <span className="text-domino-text-secondary">Data Exploration</span>
     </nav>
   )
+
+  const isAsyncRunning = edaExecutionTarget === 'domino_job' &&
+    ['starting', 'pending', 'running'].includes(asyncProfileStatus)
+  const effectiveTabularLoading = edaExecutionTarget === 'domino_job'
+    ? (edaMode === 'tabular' && isAsyncRunning)
+    : profilingLoading
+  const effectiveTabularError = edaExecutionTarget === 'domino_job'
+    ? (edaMode === 'tabular' ? asyncProfileError : null)
+    : profilingError
+  const effectiveTsLoading = edaExecutionTarget === 'domino_job'
+    ? (edaMode === 'timeseries' && isAsyncRunning)
+    : tsLoading
+  const effectiveTsError = edaExecutionTarget === 'domino_job'
+    ? (edaMode === 'timeseries' ? asyncProfileError : null)
+    : tsError
 
   // If no file selected, show file selection UI
   if (!selectedFilePath) {
@@ -242,13 +401,37 @@ function EDAAnalysis() {
         )}
       </div>
 
+      <div className="flex items-center gap-3">
+        <label className="text-sm text-domino-text-secondary">Execution:</label>
+        <select
+          value={edaExecutionTarget}
+          onChange={(e) => setEdaExecutionTarget(e.target.value as 'local' | 'domino_job')}
+          className="h-[32px] px-3 text-sm border border-[#d9d9d9] rounded-[2px] bg-white"
+        >
+          <option value="local">Local (In App)</option>
+          <option value="domino_job">Domino Job (External)</option>
+        </select>
+      </div>
+
+      {edaExecutionTarget === 'domino_job' && asyncProfileStatus !== 'idle' && (
+        <div className="border border-domino-border bg-domino-bg-tertiary p-3 text-sm text-domino-text-secondary">
+          <p>
+            Async profiling status: <span className="font-medium capitalize">{asyncProfileStatus}</span>
+            {asyncDominoJobId ? ` | Domino Job ID: ${asyncDominoJobId}` : ''}
+          </p>
+          {asyncProfileError && (
+            <p className="text-domino-accent-red mt-1">{asyncProfileError}</p>
+          )}
+        </div>
+      )}
+
       {/* Time Series Config Panel */}
       {edaMode === 'timeseries' && profile?.columns && (
         <TimeSeriesConfigPanel
           columns={profile.columns}
           totalRows={profile.summary.total_rows}
           onRunAnalysis={handleRunTSAnalysis}
-          loading={tsLoading}
+          loading={effectiveTsLoading}
           timeColumn={timeColumn}
           targetColumn={targetColumn}
           idColumn={idColumn}
@@ -267,8 +450,8 @@ function EDAAnalysis() {
         previewLoading={previewLoading}
         previewError={previewError}
         profile={profile}
-        profilingLoading={profilingLoading}
-        profilingError={profilingError}
+        profilingLoading={effectiveTabularLoading}
+        profilingError={effectiveTabularError}
         transforms={transforms}
         isExporting={isExporting}
         currentPage={currentPage}
@@ -285,8 +468,8 @@ function EDAAnalysis() {
         onReanalyze={handleReanalyze}
         edaMode={edaMode}
         tsProfile={tsProfile}
-        tsLoading={tsLoading}
-        tsError={tsError}
+        tsLoading={effectiveTsLoading}
+        tsError={effectiveTsError}
       />
     </div>
   )

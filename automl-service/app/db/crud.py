@@ -73,12 +73,38 @@ async def get_jobs(
 
 
 async def get_jobs_by_statuses(
-    db: AsyncSession, statuses: list[JobStatus]
+    db: AsyncSession,
+    statuses: list[JobStatus],
+    execution_target: Optional[str] = None,
 ) -> Sequence[Job]:
     """Get jobs matching any of the given statuses, ordered by created_at (FIFO)."""
-    query = select(Job).where(Job.status.in_(statuses)).order_by(Job.created_at)
+    query = select(Job).where(Job.status.in_(statuses))
+    if execution_target is not None:
+        query = query.where(Job.execution_target == execution_target)
+    query = query.order_by(Job.created_at)
     result = await db.execute(query)
     return result.scalars().all()
+
+
+async def update_job_domino_fields(
+    db: AsyncSession,
+    job_id: str,
+    domino_job_id: Optional[str] = None,
+    domino_job_status: Optional[str] = None,
+) -> Optional[Job]:
+    """Update Domino execution metadata for a job."""
+    update_data: dict[str, Optional[str]] = {}
+    if domino_job_id is not None:
+        update_data["domino_job_id"] = domino_job_id
+    if domino_job_status is not None:
+        update_data["domino_job_status"] = domino_job_status
+
+    if not update_data:
+        return await get_job(db, job_id)
+
+    await db.execute(update(Job).where(Job.id == job_id).values(**update_data))
+    await db.commit()
+    return await get_job(db, job_id)
 
 
 async def update_job_status(

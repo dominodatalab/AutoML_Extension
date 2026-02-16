@@ -49,6 +49,9 @@ class Job(Base):
 
     # Status
     status: Mapped[JobStatus] = mapped_column(SQLEnum(JobStatus), default=JobStatus.PENDING)
+    execution_target: Mapped[str] = mapped_column(String(20), default="local", nullable=False)
+    domino_job_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    domino_job_status: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     progress: Mapped[int] = mapped_column(Integer, default=0)
     current_step: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

@@ -18,7 +18,8 @@ export HOST=${HOST:-0.0.0.0}
 export BACKEND_PORT=${BACKEND_PORT:-8000}
 export FRONTEND_PORT=${FRONTEND_PORT:-3000}
 export PORT=${PORT:-8888}
-export WORKERS=${WORKERS:-4}
+export WORKERS=${WORKERS:-1}
+export ENABLE_LOCAL_COMPUTE=${ENABLE_LOCAL_COMPUTE:-true}
 
 # Detect Domino environment
 IS_DOMINO=false
@@ -42,6 +43,30 @@ print_env() {
     echo "  DOMINO_PROJECT_NAME: ${DOMINO_PROJECT_NAME:-NOT SET}"
     echo "  DOMINO_PROJECT_OWNER: ${DOMINO_PROJECT_OWNER:-NOT SET}"
     echo ""
+}
+
+is_truthy() {
+    case "${1,,}" in
+        1|true|yes|y|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+validate_worker_config() {
+    local workers="${WORKERS:-1}"
+    local local_compute="${ENABLE_LOCAL_COMPUTE:-true}"
+
+    if ! [[ "$workers" =~ ^[0-9]+$ ]] || [ "$workers" -lt 1 ]; then
+        echo "ERROR: WORKERS must be a positive integer (received '$workers')."
+        exit 1
+    fi
+
+    if is_truthy "$local_compute" && [ "$workers" -gt 1 ]; then
+        echo "ERROR: Local compute is enabled but WORKERS=$workers."
+        echo "Local queue state is process-local and unsafe with multiple API workers."
+        echo "Set WORKERS=1, or set ENABLE_LOCAL_COMPUTE=false to force external execution only."
+        exit 1
+    fi
 }
 
 ensure_dirs() {
@@ -103,6 +128,7 @@ start_backend() {
         echo "Starting backend (dev mode with reload) on port $port..."
         exec uvicorn app.main:app --host "$HOST" --port "$port" --reload --log-level info
     else
+        validate_worker_config
         echo "Starting backend on port $port..."
         exec uvicorn app.main:app --host "$HOST" --port "$port" --workers "$WORKERS" --log-level info
     fi

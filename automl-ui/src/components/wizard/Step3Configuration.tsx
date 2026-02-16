@@ -19,6 +19,7 @@ function Step3Configuration() {
   const isMultimodal = modelType?.modelType === 'multimodal'
 
   const [localConfig, setLocalConfig] = useState({
+    executionTarget: training?.executionTarget || 'local',
     targetColumn: training?.targetColumn || '',
     timeColumn: training?.timeColumn || '',
     idColumn: training?.idColumn || '',
@@ -51,6 +52,7 @@ function Step3Configuration() {
   // Update wizard state when local config changes
   useEffect(() => {
     setTraining({
+      executionTarget: localConfig.executionTarget as 'local' | 'domino_job',
       targetColumn: localConfig.targetColumn,
       timeColumn: localConfig.timeColumn || undefined,
       idColumn: localConfig.idColumn || undefined,
@@ -195,6 +197,21 @@ function Step3Configuration() {
             AutoGluon Settings
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Select
+              label="Execution Target"
+              options={[
+                { value: 'local', label: 'Local (In-App Queue)' },
+                { value: 'domino_job', label: 'Domino Job (External)' },
+              ]}
+              value={localConfig.executionTarget}
+              onChange={(e) =>
+                setLocalConfig((prev) => ({
+                  ...prev,
+                  executionTarget: e.target.value as 'local' | 'domino_job',
+                }))
+              }
+            />
+
             <Select
               label="Preset"
               options={presetOptions}

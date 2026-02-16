@@ -16,8 +16,11 @@ logger = logging.getLogger(__name__)
 def _safe_deployment_result(result, invalid_message: str) -> dict:
     """Normalize deployment API responses for compatibility handlers."""
     if isinstance(result, dict):
-        return result
-    return {"success": True, "data": [], "error": invalid_message}
+        normalized = dict(result)
+        normalized.setdefault("success", False)
+        normalized.setdefault("data", [])
+        return normalized
+    return {"success": False, "data": [], "error": invalid_message}
 
 
 async def list_deployments_safe(
@@ -34,7 +37,7 @@ async def list_deployments_safe(
         return _safe_deployment_result(result, "Invalid response")
     except Exception as exc:
         logger.error(f"Error listing deployments: {exc}")
-        return {"success": True, "data": [], "error": str(exc)}
+        return {"success": False, "data": [], "error": str(exc)}
 
 
 async def list_model_apis_safe(project_id: Optional[str] = None) -> dict:
@@ -45,7 +48,7 @@ async def list_model_apis_safe(project_id: Optional[str] = None) -> dict:
         return _safe_deployment_result(result, "Invalid response")
     except Exception as exc:
         logger.error(f"Error listing model APIs: {exc}")
-        return {"success": True, "data": [], "error": str(exc)}
+        return {"success": False, "data": [], "error": str(exc)}
 
 
 async def deploy_from_job(

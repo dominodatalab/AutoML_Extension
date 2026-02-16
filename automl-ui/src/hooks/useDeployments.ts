@@ -35,6 +35,9 @@ export function useDeployments(): UseDeploymentsResult {
   const fetchDeploymentsOp = useAsyncOperation(
     async () => {
       const { data } = await api.get<{ success: boolean; data: Deployment[]; error?: string; warning?: string }>('deployments')
+      if (!data.success) {
+        throw new Error(data.error || data.warning || 'Failed to fetch deployments')
+      }
       const deploymentList = data.data || []
       setDeployments(deploymentList)
       return deploymentList
@@ -44,7 +47,10 @@ export function useDeployments(): UseDeploymentsResult {
 
   const fetchModelApisOp = useAsyncOperation(
     async () => {
-      const { data } = await api.get<{ success: boolean; data: ModelApi[] }>('modelapis')
+      const { data } = await api.get<{ success: boolean; data: ModelApi[]; error?: string; warning?: string }>('modelapis')
+      if (!data.success) {
+        throw new Error(data.error || data.warning || 'Failed to fetch model APIs')
+      }
       const apiList = data.data || []
       setModelApis(apiList)
       return apiList

@@ -22,10 +22,46 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _is_truthy(value: Optional[str]) -> bool:
+    """Parse common truthy string values from environment variables."""
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def validate_local_compute_worker_settings() -> None:
+    """Fail fast on unsupported local-queue + multi-worker configuration."""
+    local_compute_enabled = _is_truthy(os.environ.get("ENABLE_LOCAL_COMPUTE", "true"))
+    if not local_compute_enabled:
+        return
+
+    # Uvicorn reload mode runs a single worker process.
+    if _is_truthy(os.environ.get("RELOAD", "false")):
+        return
+
+    workers_raw = os.environ.get("WORKERS") or os.environ.get("WEB_CONCURRENCY")
+    if workers_raw is None:
+        return
+
+    try:
+        workers = int(workers_raw)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Invalid worker setting: WORKERS/WEB_CONCURRENCY='{workers_raw}'"
+        ) from exc
+
+    if workers > 1:
+        raise RuntimeError(
+            "Local compute is enabled, but multiple API workers are configured. "
+            "Set WORKERS=1 (or WEB_CONCURRENCY=1), or set ENABLE_LOCAL_COMPUTE=false."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup/shutdown events."""
     settings = get_settings()
+    validate_local_compute_worker_settings()
 
     logger.info(f"Starting {settings.app_name} v{settings.app_version}")
 
@@ -36,6 +72,7 @@ async def lifespan(app: FastAPI):
     os.makedirs(settings.temp_path, exist_ok=True)
     os.makedirs(settings.datasets_path, exist_ok=True)
     os.makedirs(settings.uploads_path, exist_ok=True)
+    os.makedirs(settings.eda_results_path, exist_ok=True)
     os.makedirs(os.path.join(settings.datasets_path, "uploads"), exist_ok=True)
     logger.info(f"Required directories created (uploads: {settings.uploads_path})")
 

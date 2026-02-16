@@ -89,6 +89,8 @@ def build_job_model(
     project_name: Optional[str],
 ) -> Job:
     """Build a Job ORM model from request and resolved context."""
+    execution_target = resolve_execution_target(job_request)
+
     return Job(
         name=job_request.name,
         description=job_request.description,
@@ -109,8 +111,16 @@ def build_job_model(
         eval_metric=job_request.eval_metric,
         experiment_name=job_request.experiment_name,
         status=JobStatus.PENDING,
+        execution_target=execution_target,
         autogluon_config=build_autogluon_config(job_request),
     )
+
+
+def resolve_execution_target(job_request: JobCreateRequest) -> str:
+    """Resolve training execution target, supporting legacy and explicit flags."""
+    if job_request.execution_target == "domino_job" or job_request.run_as_domino_job:
+        return "domino_job"
+    return "local"
 
 
 async def create_job_with_context(
@@ -131,6 +141,37 @@ async def create_job_with_context(
     validate_job_create_request(job_request)
     job = build_job_model(job_request, owner, project_id, project_name)
     job = await crud.create_job(db, job)
+
+    if job.execution_target == "domino_job":
+        from app.core.domino_job_launcher import get_domino_job_launcher
+
+        settings = get_settings()
+        launcher = get_domino_job_launcher()
+        launch_result = launcher.start_training_job(
+            job_id=job.id,
+            title=job.name,
+            hardware_tier_name=job_request.domino_hardware_tier_name or settings.domino_training_hardware_tier_name,
+            environment_id=job_request.domino_environment_id or settings.domino_training_environment_id,
+        )
+        if not launch_result.get("success"):
+            error_message = launch_result.get("error", "Failed to launch Domino Job")
+            await crud.update_job_status(
+                db=db,
+                job_id=job.id,
+                status=JobStatus.FAILED,
+                error_message=error_message,
+                completed_at=datetime.utcnow(),
+            )
+            raise HTTPException(status_code=502, detail=error_message)
+
+        await crud.update_job_domino_fields(
+            db=db,
+            job_id=job.id,
+            domino_job_id=launch_result.get("domino_job_id"),
+            domino_job_status=launch_result.get("domino_job_status", "Submitted"),
+        )
+        refreshed = await crud.get_job(db, job.id)
+        return refreshed or job
 
     from app.core.job_queue import get_job_queue
 
@@ -369,6 +410,34 @@ async def cancel_job(db: AsyncSession, job_id: str) -> dict:
             status_code=400,
             detail=f"Cannot cancel job with status: {job.status.value}",
         )
+
+    if getattr(job, "execution_target", "local") == "domino_job":
+        stop_success = False
+        stop_error = None
+        if job.domino_job_id:
+            from app.core.domino_job_launcher import get_domino_job_launcher
+
+            stop_result = get_domino_job_launcher().stop_job(job.domino_job_id)
+            stop_success = bool(stop_result.get("success"))
+            stop_error = stop_result.get("error")
+            await crud.update_job_domino_fields(
+                db=db,
+                job_id=job_id,
+                domino_job_status="Cancelled" if stop_success else "CancelFailed",
+            )
+        await crud.update_job_status(
+            db,
+            job_id,
+            JobStatus.CANCELLED,
+            completed_at=datetime.utcnow(),
+            error_message=stop_error if stop_error and not stop_success else None,
+        )
+        return {
+            "message": "Job cancelled",
+            "job_id": job_id,
+            "external_cancelled": stop_success,
+            "external_error": stop_error,
+        }
 
     from app.core.job_queue import get_job_queue
 

@@ -1,14 +1,18 @@
 """Data profiling endpoints."""
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.data_profiler import get_data_profiler
+from app.core.domino_job_launcher import get_domino_job_launcher
+from app.core.eda_job_store import get_eda_job_store
 from app.core.ts_profiler import get_ts_profiler
 from app.api.error_handler import handle_errors
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -360,6 +364,60 @@ class TimeSeriesProfileResponse(BaseModel):
     warnings: List[Warning] = []
 
 
+class AsyncProfileStartRequest(BaseModel):
+    """Request to start async EDA profiling in a Domino Job."""
+
+    mode: Literal["tabular", "timeseries"] = Field("tabular")
+    file_path: str = Field(..., description="Path to the data file")
+    sample_size: int = Field(50000, description="Max rows to sample for profiling")
+    sampling_strategy: str = Field(
+        "random",
+        description="Sampling strategy (tabular: random/stratified/head/full; TS: recent/oldest/uniform/full)",
+    )
+    stratify_column: Optional[str] = Field(None, description="Column for stratified tabular sampling")
+    time_column: Optional[str] = Field(None, description="Datetime column for timeseries profiling")
+    target_column: Optional[str] = Field(None, description="Target column for timeseries profiling")
+    id_column: Optional[str] = Field(None, description="Series id column for timeseries profiling")
+    rolling_window: Optional[int] = Field(None, description="Rolling window for timeseries profiling")
+    domino_hardware_tier_name: Optional[str] = Field(
+        None,
+        description="Optional Domino hardware tier name",
+    )
+    domino_environment_id: Optional[str] = Field(
+        None,
+        description="Optional Domino environment ID",
+    )
+
+
+class AsyncProfileStartResponse(BaseModel):
+    """Response for async profile start."""
+
+    request_id: str
+    status: str
+    mode: str
+    domino_job_id: Optional[str] = None
+    domino_job_status: Optional[str] = None
+    domino_job_url: Optional[str] = None
+
+
+class AsyncProfileStatusRequest(BaseModel):
+    """Request for async profile status polling."""
+
+    request_id: str = Field(..., description="EDA async request id")
+
+
+class AsyncProfileStatusResponse(BaseModel):
+    """Response for async profile status polling."""
+
+    request_id: str
+    status: str
+    mode: Optional[str] = None
+    domino_job_id: Optional[str] = None
+    domino_job_status: Optional[str] = None
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+
 @router.post("/profile/timeseries", response_model=TimeSeriesProfileResponse)
 @handle_errors("Time series profiling error")
 async def profile_timeseries(request: TimeSeriesProfileRequest):
@@ -393,3 +451,147 @@ async def profile_timeseries(request: TimeSeriesProfileRequest):
 
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"File not found: {request.file_path}")
+
+
+@router.post("/profile/async/start", response_model=AsyncProfileStartResponse)
+@handle_errors("Async profiling start error")
+async def start_profile_async(request: AsyncProfileStartRequest):
+    """Start async EDA profiling as an external Domino Job."""
+    if request.mode == "timeseries":
+        if not request.time_column or not request.target_column:
+            raise HTTPException(
+                status_code=400,
+                detail="time_column and target_column are required for timeseries profiling",
+            )
+
+    store = get_eda_job_store()
+    settings = get_settings()
+    request_id = str(uuid4())
+    store.create_request(
+        request_id=request_id,
+        mode=request.mode,
+        request_payload=request.model_dump(exclude_none=True),
+    )
+
+    launcher = get_domino_job_launcher()
+    launch_result = launcher.start_eda_job(
+        request_id=request_id,
+        mode=request.mode,
+        file_path=request.file_path,
+        sample_size=request.sample_size,
+        sampling_strategy=request.sampling_strategy,
+        stratify_column=request.stratify_column,
+        time_column=request.time_column,
+        target_column=request.target_column,
+        id_column=request.id_column,
+        rolling_window=request.rolling_window,
+        hardware_tier_name=request.domino_hardware_tier_name or settings.domino_eda_hardware_tier_name,
+        environment_id=request.domino_environment_id or settings.domino_eda_environment_id,
+    )
+    if not launch_result.get("success"):
+        error_message = launch_result.get("error", "Failed to launch async profiling job")
+        store.update_request(request_id, status="failed", error=error_message)
+        raise HTTPException(status_code=502, detail=error_message)
+
+    store.update_request(
+        request_id,
+        status="running",
+        domino_job_id=launch_result.get("domino_job_id"),
+        domino_job_status=launch_result.get("domino_job_status", "Submitted"),
+        domino_job_url=launch_result.get("domino_job_url"),
+        error=None,
+    )
+    return AsyncProfileStartResponse(
+        request_id=request_id,
+        status="running",
+        mode=request.mode,
+        domino_job_id=launch_result.get("domino_job_id"),
+        domino_job_status=launch_result.get("domino_job_status", "Submitted"),
+        domino_job_url=launch_result.get("domino_job_url"),
+    )
+
+
+def _build_async_status_response(request_id: str) -> AsyncProfileStatusResponse:
+    """Load async EDA status from file-backed metadata/results."""
+    store = get_eda_job_store()
+    launcher = get_domino_job_launcher()
+
+    metadata = store.get_request(request_id)
+    if metadata is None:
+        raise HTTPException(status_code=404, detail=f"Async profile request not found: {request_id}")
+
+    result_payload = store.get_result(request_id)
+    if result_payload and metadata.get("status") != "completed":
+        metadata = store.update_request(request_id, status="completed", error=None) or metadata
+
+    if result_payload:
+        return AsyncProfileStatusResponse(
+            request_id=request_id,
+            status="completed",
+            mode=result_payload.get("mode"),
+            domino_job_id=metadata.get("domino_job_id"),
+            domino_job_status=metadata.get("domino_job_status"),
+            result=result_payload.get("result"),
+        )
+
+    status = metadata.get("status", "pending")
+    domino_job_id = metadata.get("domino_job_id")
+    domino_job_status = metadata.get("domino_job_status")
+
+    if status in {"running", "pending"} and domino_job_id:
+        domino_status_result = launcher.get_job_status(domino_job_id)
+        if domino_status_result.get("success"):
+            latest_domino_status = domino_status_result.get("domino_job_status")
+            if latest_domino_status and latest_domino_status != domino_job_status:
+                metadata = store.update_request(
+                    request_id,
+                    domino_job_status=latest_domino_status,
+                ) or metadata
+                domino_job_status = latest_domino_status
+
+            if latest_domino_status and latest_domino_status.lower() in {
+                "failed",
+                "error",
+                "killed",
+                "stopped",
+                "cancelled",
+            }:
+                error_message = f"Domino profiling job ended with status: {latest_domino_status}"
+                metadata = store.update_request(
+                    request_id,
+                    status="failed",
+                    error=error_message,
+                ) or metadata
+                status = "failed"
+
+    if status == "failed":
+        return AsyncProfileStatusResponse(
+            request_id=request_id,
+            status="failed",
+            mode=metadata.get("mode"),
+            domino_job_id=metadata.get("domino_job_id"),
+            domino_job_status=metadata.get("domino_job_status"),
+            error=metadata.get("error") or store.get_error(request_id) or "Async profiling failed",
+        )
+
+    return AsyncProfileStatusResponse(
+        request_id=request_id,
+        status=status,
+        mode=metadata.get("mode"),
+        domino_job_id=metadata.get("domino_job_id"),
+        domino_job_status=metadata.get("domino_job_status"),
+    )
+
+
+@router.post("/profile/async/status", response_model=AsyncProfileStatusResponse)
+@handle_errors("Async profiling status error")
+async def get_profile_async_status(request: AsyncProfileStatusRequest):
+    """Poll async EDA job status/result."""
+    return _build_async_status_response(request.request_id)
+
+
+@router.get("/profile/async/{request_id}", response_model=AsyncProfileStatusResponse)
+@handle_errors("Async profiling status error")
+async def get_profile_async_status_get(request_id: str):
+    """GET variant for async EDA status polling."""
+    return _build_async_status_response(request_id)

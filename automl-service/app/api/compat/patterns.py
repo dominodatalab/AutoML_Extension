@@ -37,6 +37,8 @@ def register_pattern_routes(app: FastAPI) -> None:
         ("/svcprofile", "app.api.routes.profiling", "profile_data", "ProfileRequest"),
         ("/svcsuggesttarget", "app.api.routes.profiling", "suggest_target_column", "ProfileRequest"),
         ("/svcprofiletimeseries", "app.api.routes.profiling", "profile_timeseries", "TimeSeriesProfileRequest"),
+        ("/svcprofileasyncstart", "app.api.routes.profiling", "start_profile_async", "AsyncProfileStartRequest"),
+        ("/svcprofileasyncstatus", "app.api.routes.profiling", "get_profile_async_status", "AsyncProfileStatusRequest"),
         ("/svcregistermodel", "app.api.routes.registry", "register_model", "RegisterModelRequest"),
         ("/svctransitionstage", "app.api.routes.registry", "transition_model_stage", "TransitionStageRequest"),
         ("/svcupdatedescription", "app.api.routes.registry", "update_model_description", "UpdateDescriptionRequest"),

@@ -58,6 +58,9 @@ async def run_migrations():
         ("jobs", "models_trained", "INTEGER DEFAULT 0"),
         ("jobs", "current_model", "VARCHAR(255)"),
         ("jobs", "eta_seconds", "INTEGER"),
+        ("jobs", "execution_target", "VARCHAR(20) DEFAULT 'local'"),
+        ("jobs", "domino_job_id", "VARCHAR(255)"),
+        ("jobs", "domino_job_status", "VARCHAR(100)"),
     ]
 
     async with engine.begin() as conn:
@@ -73,6 +76,14 @@ async def run_migrations():
                     pass
                 else:
                     logger.debug(f"Migration skipped: {column} on {table} - {e}")
+
+        # Backfill execution_target for rows created before the column existed.
+        try:
+            await conn.execute(
+                text("UPDATE jobs SET execution_target = 'local' WHERE execution_target IS NULL")
+            )
+        except Exception as e:
+            logger.debug(f"Migration skipped: execution_target backfill - {e}")
 
 
 async def drop_tables():

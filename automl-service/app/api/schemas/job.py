@@ -397,6 +397,24 @@ class JobCreateRequest(BaseModel):
         None, description="Name for registered model"
     )
 
+    # Execution target
+    execution_target: Literal["local", "domino_job"] = Field(
+        "local",
+        description="Where to run training: in-app local queue or external Domino Job",
+    )
+    run_as_domino_job: bool = Field(
+        False,
+        description="Legacy flag for Domino execution; equivalent to execution_target='domino_job'",
+    )
+    domino_hardware_tier_name: Optional[str] = Field(
+        None,
+        description="Optional Domino hardware tier name for external training jobs",
+    )
+    domino_environment_id: Optional[str] = Field(
+        None,
+        description="Optional Domino environment ID for external training jobs",
+    )
+
 
 class JobResponse(BaseModel):
     """Response schema for a job."""
@@ -410,6 +428,9 @@ class JobResponse(BaseModel):
     model_type: str
     problem_type: Optional[str] = None
     status: str
+    execution_target: str = "local"
+    domino_job_id: Optional[str] = None
+    domino_job_status: Optional[str] = None
     progress: Optional[int] = None
     current_step: Optional[str] = None
     data_source: str

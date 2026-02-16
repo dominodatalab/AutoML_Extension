@@ -2,6 +2,9 @@ import { useState, useCallback } from 'react'
 import api from '../api'
 import { useAsyncOperation } from './useAsyncOperation'
 import type {
+  AsyncProfileStartRequest,
+  AsyncProfileStartResponse,
+  AsyncProfileStatusResponse,
   DataProfile,
   TargetSuggestion,
   QuickProfile,
@@ -40,6 +43,10 @@ interface UseProfilingResult {
   fetchMetrics: () => Promise<MetricsByProblemType | null>
   fetchPresets: () => Promise<PresetsByModelType | null>
   profileTimeSeries: (request: TimeSeriesProfileRequest) => Promise<TimeSeriesProfile | null>
+  startAsyncProfile: (request: AsyncProfileStartRequest) => Promise<AsyncProfileStartResponse>
+  getAsyncProfileStatus: (requestId: string) => Promise<AsyncProfileStatusResponse>
+  setProfileData: (value: DataProfile | null) => void
+  setTsProfileData: (value: TimeSeriesProfile | null) => void
 }
 
 export function useProfiling(): UseProfilingResult {
@@ -168,6 +175,26 @@ export function useProfiling(): UseProfilingResult {
     return result ?? null
   }, [tsProfileOp.execute])
 
+  const startAsyncProfile = useCallback(async (request: AsyncProfileStartRequest) => {
+    const { data } = await api.post<AsyncProfileStartResponse>('profileasyncstart', request)
+    return data
+  }, [])
+
+  const getAsyncProfileStatus = useCallback(async (requestId: string) => {
+    const { data } = await api.post<AsyncProfileStatusResponse>('profileasyncstatus', {
+      request_id: requestId,
+    })
+    return data
+  }, [])
+
+  const setProfileData = useCallback((value: DataProfile | null) => {
+    setProfile(value)
+  }, [])
+
+  const setTsProfileData = useCallback((value: TimeSeriesProfile | null) => {
+    setTsProfile(value)
+  }, [])
+
   return {
     profile,
     quickProfile,
@@ -187,5 +214,9 @@ export function useProfiling(): UseProfilingResult {
     fetchMetrics,
     fetchPresets,
     profileTimeSeries,
+    startAsyncProfile,
+    getAsyncProfileStatus,
+    setProfileData,
+    setTsProfileData,
   }
 }

@@ -97,6 +97,10 @@ function Step4Review() {
             Training Settings
           </h3>
           <div className="bg-domino-bg-tertiary p-4">
+            <ReviewItem
+              label="Execution Target"
+              value={training?.executionTarget === 'domino_job' ? 'Domino Job' : 'Local'}
+            />
             <ReviewItem label="Target Column" value={training?.targetColumn} />
             {training?.timeColumn && (
               <ReviewItem label="Time Column" value={training.timeColumn} />

@@ -22,11 +22,17 @@ from app.core.model_loader import load_predictor, load_dataframe
 logger = logging.getLogger(__name__)
 
 
-async def _check_cancelled(job_id: str) -> None:
-    """Raise CancelledError if the job has been cancelled via the queue."""
+async def _check_cancelled(job_id: str, db_session: Optional[Any] = None) -> None:
+    """Raise CancelledError if the job has been cancelled via queue or DB status."""
     from app.core.job_queue import get_job_queue
     if get_job_queue().is_job_cancelled(job_id):
         raise asyncio.CancelledError(f"Job {job_id} cancelled via queue")
+
+    # Domino jobs run outside the in-process queue, so cancellation is reflected in DB.
+    if db_session is not None:
+        job = await crud.get_job(db_session, job_id)
+        if job and job.status == JobStatus.CANCELLED:
+            raise asyncio.CancelledError(f"Job {job_id} cancelled via database status")
 
 
 def parse_advanced_config(config_dict: Dict[str, Any]) -> AdvancedConfig:
@@ -132,7 +138,7 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                 logger.error(f"Job not found: {job_id}")
                 return
 
-            await _check_cancelled(job_id)
+            await _check_cancelled(job_id, db)
 
             # Update status to running
             await crud.update_job_status(
@@ -160,7 +166,7 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
             logger.info(f"[TRAINING DEBUG] Resolved data_path: {data_path}")
             await crud.add_job_log(db, job_id, f"[DEBUG] Data path resolved to: {data_path}", "INFO")
 
-            await _check_cancelled(job_id)
+            await _check_cancelled(job_id, db)
 
             # Check if file exists
             import os
@@ -270,7 +276,7 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
             )
 
             await crud.add_job_log(db, job_id, "Training completed successfully")
-            await _check_cancelled(job_id)
+            await _check_cancelled(job_id, db)
 
             # Update progress with actual models trained from results
             num_models = result.get("metrics", {}).get("num_models", 0)
@@ -358,7 +364,7 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
             )
 
             await crud.add_job_log(db, job_id, f"Model runs logged to MLflow experiment")
-            await _check_cancelled(job_id)
+            await _check_cancelled(job_id, db)
 
             # Update progress: finalizing
             await crud.update_job_progress(

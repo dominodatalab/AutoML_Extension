@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     temp_path: str = ""
     datasets_path: str = ""
     uploads_path: str = ""
+    eda_results_path: str = ""
 
     def model_post_init(self, __context):
         """Set path defaults based on environment (Domino vs local)."""
@@ -33,6 +34,7 @@ class Settings(BaseSettings):
             "temp_path": "/mnt/automl-service/uploads" if is_domino else "./local_data/temp",
             "datasets_path": "/mnt/data/datasets" if is_domino else "./local_data/datasets",
             "uploads_path": "/mnt/automl-service/uploads" if is_domino else "./local_data/uploads",
+            "eda_results_path": "/mnt/data/automl/eda_results" if is_domino else "./local_data/eda_results",
         }
         for field, default in defaults.items():
             if not getattr(self, field):
@@ -47,6 +49,10 @@ class Settings(BaseSettings):
     domino_project_owner: Optional[str] = None
     domino_starting_username: Optional[str] = None
     domino_run_id: Optional[str] = None
+    domino_training_hardware_tier_name: Optional[str] = None
+    domino_training_environment_id: Optional[str] = None
+    domino_eda_hardware_tier_name: Optional[str] = None
+    domino_eda_environment_id: Optional[str] = None
 
     @property
     def effective_api_key(self) -> Optional[str]:
@@ -82,8 +88,14 @@ class Settings(BaseSettings):
 
     @property
     def is_domino_environment(self) -> bool:
-        """Check if running in Domino environment."""
-        return self.domino_api_host is not None and self.effective_api_key is not None
+        """Check if Domino runtime config exists for API calls/job launches.
+
+        Domino Apps/Runs can authenticate through DOMINO_API_PROXY without an
+        explicit API key environment variable.
+        """
+        has_proxy_auth = bool(os.environ.get("DOMINO_API_PROXY"))
+        has_key_auth = self.effective_api_key is not None
+        return self.domino_api_host is not None and (has_proxy_auth or has_key_auth)
 
 
 _settings_instance: Optional[Settings] = None

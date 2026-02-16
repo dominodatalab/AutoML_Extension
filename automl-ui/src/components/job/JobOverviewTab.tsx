@@ -52,6 +52,16 @@ export function JobOverviewTab({ job, isLoading, currentStatus }: JobOverviewTab
             <MetadataRow label="Status">
               <Badge status={currentStatus as JobStatus} isRegistered={job?.is_registered} />
             </MetadataRow>
+            <MetadataRow
+              label="Execution target"
+              value={job?.execution_target === 'domino_job' ? 'Domino Job' : 'Local'}
+            />
+            {job?.domino_job_id && (
+              <MetadataRow label="Domino Job ID" value={job.domino_job_id} mono />
+            )}
+            {job?.domino_job_status && (
+              <MetadataRow label="Domino Job Status" value={job.domino_job_status} />
+            )}
             {job?.experiment_name && (
               <MetadataRow label="Experiment" value={job.experiment_name} />
             )}

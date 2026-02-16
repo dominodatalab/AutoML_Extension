@@ -37,7 +37,11 @@ class JobQueueManager:
         """
         async with async_session_maker() as db:
             # Reset RUNNING → PENDING (interrupted by restart)
-            running_jobs = await crud.get_jobs_by_statuses(db, [JobStatus.RUNNING])
+            running_jobs = await crud.get_jobs_by_statuses(
+                db,
+                [JobStatus.RUNNING],
+                execution_target="local",
+            )
             for job in running_jobs:
                 await crud.update_job_status(db, job.id, JobStatus.PENDING)
                 await crud.update_job_progress(
@@ -46,7 +50,11 @@ class JobQueueManager:
                 logger.info(f"Recovering interrupted job: {job.id} ({job.name})")
 
             # Re-enqueue all PENDING jobs in FIFO order
-            pending_jobs = await crud.get_jobs_by_statuses(db, [JobStatus.PENDING])
+            pending_jobs = await crud.get_jobs_by_statuses(
+                db,
+                [JobStatus.PENDING],
+                execution_target="local",
+            )
             for job in pending_jobs:
                 await self.enqueue(job.id)
                 logger.info(f"Re-enqueued pending job: {job.id} ({job.name})")
@@ -128,7 +136,11 @@ class JobQueueManager:
 
         # Mark any still-RUNNING jobs as PENDING for next-restart recovery
         async with async_session_maker() as db:
-            running_jobs = await crud.get_jobs_by_statuses(db, [JobStatus.RUNNING])
+            running_jobs = await crud.get_jobs_by_statuses(
+                db,
+                [JobStatus.RUNNING],
+                execution_target="local",
+            )
             for job in running_jobs:
                 await crud.update_job_status(db, job.id, JobStatus.PENDING)
                 await crud.update_job_progress(

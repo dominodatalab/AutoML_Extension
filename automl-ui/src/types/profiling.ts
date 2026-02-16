@@ -222,3 +222,34 @@ export interface TimeSeriesProfile {
   recommendations: DataRecommendation[]
   warnings: DataWarning[]
 }
+
+export interface AsyncProfileStartRequest {
+  mode: 'tabular' | 'timeseries'
+  file_path: string
+  sample_size?: number
+  sampling_strategy?: string
+  stratify_column?: string
+  time_column?: string
+  target_column?: string
+  id_column?: string
+  rolling_window?: number
+}
+
+export interface AsyncProfileStartResponse {
+  request_id: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  mode: 'tabular' | 'timeseries'
+  domino_job_id?: string
+  domino_job_status?: string
+  domino_job_url?: string
+}
+
+export interface AsyncProfileStatusResponse {
+  request_id: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  mode?: 'tabular' | 'timeseries'
+  domino_job_id?: string
+  domino_job_status?: string
+  result?: DataProfile | TimeSeriesProfile
+  error?: string
+}

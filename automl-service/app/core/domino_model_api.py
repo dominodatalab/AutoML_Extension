@@ -22,70 +22,92 @@ class DominoModelAPIClient:
     def __init__(self):
         self.settings = get_settings()
         self._client: Optional[httpx.AsyncClient] = None
-        self._token: Optional[str] = None
 
-    def _get_token_sync(self) -> str:
-        """Get authentication token for Domino API (synchronous)."""
-        if self._token:
-            return self._token
+    def _resolve_api_host(self) -> str:
+        """Resolve Domino API host/proxy URL without hardcoded tenant fallbacks."""
+        api_host = (
+            os.environ.get("DOMINO_API_PROXY")
+            or self.settings.domino_api_host
+            or os.environ.get("DOMINO_API_HOST")
+        )
+        if not api_host:
+            raise ValueError(
+                "Domino API host is not configured. Set DOMINO_API_PROXY or DOMINO_API_HOST."
+            )
+        return api_host.rstrip("/")
 
-        # Try local token endpoint first (works in Domino Apps) - this is the preferred method
+    async def _get_ephemeral_token(self) -> Optional[str]:
+        """Get a short-lived Domino access token for this request."""
         try:
-            import requests
-            response = requests.get("http://localhost:8899/access-token", timeout=5)
+            async with httpx.AsyncClient(timeout=5.0) as token_client:
+                response = await token_client.get("http://localhost:8899/access-token")
             if response.status_code == 200 and response.text:
-                self._token = response.text.strip()
-                logger.info("Got token from local endpoint")
-                return self._token
-        except Exception as e:
-            logger.debug(f"Local token endpoint not available: {e}")
+                return response.text.strip()
+        except Exception as exc:
+            logger.debug(f"Local token endpoint not available: {exc}")
+        return None
 
-        # Get API key from environment variables (DOMINO_API_KEY is primary)
-        token = (
-            os.environ.get("DOMINO_API_KEY") or
-            os.environ.get("DOMINO_USER_API_KEY") or
-            self.settings.effective_api_key
+    @staticmethod
+    def _to_bearer_header(token: str) -> str:
+        token = token.strip()
+        if token.lower().startswith("bearer "):
+            return token
+        return f"Bearer {token}"
+
+    async def _get_auth_headers(self) -> Dict[str, str]:
+        """Build auth headers for each request.
+
+        Domino app tokens are short-lived, so we re-acquire from localhost on every call.
+        """
+        api_key_override = os.environ.get("API_KEY_OVERRIDE")
+        if api_key_override:
+            return {"X-Domino-Api-Key": api_key_override}
+
+        token = await self._get_ephemeral_token()
+        if token:
+            return {"Authorization": self._to_bearer_header(token)}
+
+        api_key = (
+            os.environ.get("DOMINO_API_KEY")
+            or os.environ.get("DOMINO_USER_API_KEY")
+            or self.settings.effective_api_key
+        )
+        if api_key:
+            return {"X-Domino-Api-Key": api_key}
+
+        raise ValueError(
+            "No Domino credentials available. Configure API_KEY_OVERRIDE, "
+            "local access token, or DOMINO_API_KEY/DOMINO_USER_API_KEY."
         )
 
-        # Try reading from token file
-        if not token:
-            token_file = os.environ.get("DOMINO_TOKEN_FILE")
-            if token_file and os.path.exists(token_file):
-                with open(token_file, 'r') as f:
-                    token = f.read().strip()
-
-        if token:
-            self._token = token
-            logger.info("Using token from environment variable")
-            return self._token
-
-        raise ValueError("No Domino API token available")
-
-    async def _get_token(self) -> str:
-        """Get authentication token for Domino API (async wrapper)."""
-        return self._get_token_sync()
+    @staticmethod
+    def _extract_error(response: httpx.Response) -> str:
+        content_type = response.headers.get("content-type", "")
+        if "text/html" in content_type:
+            return (
+                f"Received HTML from Domino API (status {response.status_code}). "
+                "This usually indicates an authentication failure."
+            )
+        try:
+            payload = response.json()
+            if isinstance(payload, dict):
+                detail = payload.get("detail") or payload.get("error") or payload.get("message")
+                if detail:
+                    return str(detail)
+        except ValueError:
+            pass
+        text = response.text.strip()
+        if text:
+            return text
+        return f"Domino API request failed with status {response.status_code}"
 
     async def _get_client(self) -> httpx.AsyncClient:
-        """Get HTTP client with authentication headers."""
-        if self._client is None:
-            # Get API key from environment
-            api_key = os.environ.get("DOMINO_API_KEY", "")
-            if not api_key:
-                raise ValueError("DOMINO_API_KEY environment variable not set")
-
-            # Use the external Domino API host
-            # The internal host (nucleus-frontend) doesn't work for Model Serving API
-            api_host = os.environ.get("DOMINO_API_PROXY", "https://se-demo.domino.tech")
-
+        """Get HTTP client configured with Domino API base URL."""
+        if self._client is None or self._client.is_closed:
+            api_host = self._resolve_api_host()
             logger.info(f"Connecting to Domino API at {api_host}")
-
-            # Use X-Domino-Api-Key header (not Bearer token)
             self._client = httpx.AsyncClient(
                 base_url=api_host,
-                headers={
-                    "X-Domino-Api-Key": api_key,
-                    "Content-Type": "application/json",
-                },
                 timeout=30.0
             )
         return self._client
@@ -106,34 +128,72 @@ class DominoModelAPIClient:
         """Make an HTTP request to the Domino API."""
         try:
             client = await self._get_client()
+            auth_headers = await self._get_auth_headers()
         except ValueError as e:
             logger.warning(f"Domino API not configured: {e}")
-            return {"success": True, "data": [], "warning": str(e)}
+            return {"success": False, "data": [], "error": str(e)}
 
         try:
+            request_headers: Dict[str, str] = {
+                **auth_headers,
+                "Accept": "application/json",
+            }
+            if json_data is not None:
+                request_headers["Content-Type"] = "application/json"
+
             response = await client.request(
                 method=method,
                 url=path,
                 params=params,
                 json=json_data,
+                headers=request_headers,
             )
-            response.raise_for_status()
 
             # Check if response is HTML (authentication error)
             content_type = response.headers.get("content-type", "")
             if "text/html" in content_type:
-                logger.error("Received HTML response - likely authentication issue")
-                return {"success": True, "data": [], "warning": "Authentication required for Domino API"}
+                error_message = self._extract_error(response)
+                logger.error(f"Received HTML response from Domino API for {path}: {error_message}")
+                return {
+                    "success": False,
+                    "data": [],
+                    "error": error_message,
+                    "status_code": response.status_code,
+                }
+
+            response.raise_for_status()
 
             # Parse response
             if method == "DELETE":
                 return {"success": True, "message": f"Resource deleted successfully"}
 
-            result = response.json()
+            if not response.text:
+                return {"success": True, "data": {}}
+
+            try:
+                result = response.json()
+            except ValueError:
+                error_message = "Domino API returned non-JSON response"
+                logger.error(f"{error_message} for {path}")
+                return {
+                    "success": False,
+                    "data": [],
+                    "error": error_message,
+                    "status_code": response.status_code,
+                }
             return {"success": True, "data": result}
+        except httpx.HTTPStatusError as e:
+            error_message = self._extract_error(e.response)
+            logger.error(f"Domino API HTTP error for {path}: {error_message}")
+            return {
+                "success": False,
+                "data": [],
+                "error": error_message,
+                "status_code": e.response.status_code,
+            }
         except Exception as e:
             logger.error(f"Error making request to {path}: {e}")
-            return {"success": False, "error": str(e)}
+            return {"success": False, "data": [], "error": str(e)}
 
 
 class ModelAPIManager:
