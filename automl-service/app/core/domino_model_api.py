@@ -512,6 +512,7 @@ class ModelVersionManager:
         function_name: str,
         environment_id: Optional[str] = None,
         description: str = "",
+        should_deploy: bool = False,
     ) -> Dict[str, Any]:
         """Create a new version of a Model API.
 
@@ -549,7 +550,7 @@ class ModelVersionManager:
                     "monitoringEnabled": False,
                     "description": description,
                     "recordInvocation": False,
-                    "shouldDeploy": False,
+                    "shouldDeploy": should_deploy,
                 }
                 if include_environment and environment_id:
                     payload["environmentId"] = environment_id
@@ -879,9 +880,24 @@ class DominoModelAPI:
         """List all versions of a Model API."""
         return await self.versions.list_model_api_versions(model_api_id)
 
-    async def create_model_api_version(self, model_api_id: str, model_file: str, function_name: str, environment_id: Optional[str] = None, description: str = "") -> Dict[str, Any]:
+    async def create_model_api_version(
+        self,
+        model_api_id: str,
+        model_file: str,
+        function_name: str,
+        environment_id: Optional[str] = None,
+        description: str = "",
+        should_deploy: bool = False,
+    ) -> Dict[str, Any]:
         """Create a new version of a Model API."""
-        return await self.versions.create_model_api_version(model_api_id, model_file, function_name, environment_id, description)
+        return await self.versions.create_model_api_version(
+            model_api_id,
+            model_file,
+            function_name,
+            environment_id,
+            description,
+            should_deploy,
+        )
 
     async def get_model_api_version(self, model_api_id: str, version_id: str) -> Dict[str, Any]:
         """Get a specific version of a Model API."""
@@ -985,6 +1001,7 @@ class DominoModelAPI:
                 function_name=function_name,
                 environment_id=environment_id,
                 description=description,
+                should_deploy=auto_start,
             )
             if not version_result["success"]:
                 result["error"] = f"Failed to create version: {version_result.get('error')}"
@@ -993,35 +1010,25 @@ class DominoModelAPI:
             version_id = version_result["data"].get("id")
             result["version_id"] = version_id
             result["steps_completed"].append("create_version")
-
-            # Step 3: Create Deployment
-            deploy_result = await self.create_deployment(
-                model_api_id=model_api_id,
-                model_api_version_id=version_id,
-                name=f"{model_name}-deployment",
-                description=description,
-                environment_id=environment_id,
-                hardware_tier_id=hardware_tier_id,
-                min_replicas=min_replicas,
-                max_replicas=max_replicas,
-            )
-            if not deploy_result["success"]:
-                result["error"] = f"Failed to create deployment: {deploy_result.get('error')}"
-                return result
-
-            deployment_id = deploy_result["data"].get("id")
-            result["deployment_id"] = deployment_id
-            result["steps_completed"].append("create_deployment")
-
-            # Step 4: Start deployment if requested
             if auto_start:
-                start_result = await self.start_deployment(deployment_id)
-                if start_result["success"]:
-                    result["steps_completed"].append("start_deployment")
+                result["steps_completed"].append("deploy_version")
+
+            deployment_info = version_result.get("data", {}).get("deployment")
+            if isinstance(deployment_info, dict):
+                result["deployment_status"] = deployment_info.get("status")
+                if deployment_info.get("id"):
+                    result["deployment_id"] = deployment_info.get("id")
 
             result["success"] = True
-            result["message"] = f"Model '{model_name}' deployed successfully"
-            result["endpoint_url"] = deploy_result["data"].get("url")
+            result["message"] = (
+                f"Model '{model_name}' deployment requested successfully"
+                if auto_start
+                else f"Model '{model_name}' version created successfully"
+            )
+            result["endpoint_url"] = (
+                version_result.get("data", {}).get("url")
+                or api_result.get("data", {}).get("url")
+            )
 
         except Exception as e:
             logger.error(f"Error in deploy_model: {e}")
