@@ -24,10 +24,10 @@ export function useWizard() {
         return (
           wizard.training !== null &&
           wizard.training.targetColumn !== '' &&
-          wizard.jobName !== ''
+          wizard.jobName.trim() !== ''
         )
       case 3:
-        return wizard.jobName !== ''
+        return wizard.jobName.trim() !== ''
       default:
         return false
     }
@@ -59,7 +59,7 @@ export function useWizard() {
     }
 
     const request: JobCreateRequest = {
-      name: wizard.jobName,
+      name: wizard.jobName.trim(),
       description: wizard.jobDescription || undefined,
       model_type: wizard.modelType.modelType,
       problem_type: wizard.modelType.problemType,

@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import HTTPException, Request
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas.job import (
@@ -41,6 +42,28 @@ _DOMINO_MISSING_ERROR_MARKERS = (
     "no run",
     "archiv",
 )
+
+
+def _normalize_job_name(name: str) -> str:
+    """Return canonical job name used for validation and persistence."""
+    return name.strip()
+
+
+def _job_name_conflict_detail(name: str) -> str:
+    """Build a consistent duplicate-name error message."""
+    return (
+        f"A job named '{name}' already exists in this project for this user. "
+        "Please choose a different name."
+    )
+
+
+def _is_job_name_unique_violation(exc: IntegrityError) -> bool:
+    """Return True when the DB rejects duplicate scoped job names."""
+    error_text = str(getattr(exc, "orig", exc)).lower()
+    return (
+        "uq_jobs_owner_project_name_ci" in error_text
+        or ("unique constraint" in error_text and "jobs" in error_text and "name" in error_text)
+    )
 
 
 def get_request_owner(request: Optional[Request]) -> str:
@@ -86,6 +109,31 @@ def validate_job_create_request(job_request: JobCreateRequest) -> None:
             )
 
 
+async def validate_job_name_availability(
+    db: AsyncSession,
+    name: str,
+    owner: Optional[str],
+    project_id: Optional[str],
+    project_name: Optional[str],
+) -> str:
+    """Ensure job name is non-empty and unique within owner+project scope."""
+    normalized_name = _normalize_job_name(name)
+    if not normalized_name:
+        raise HTTPException(status_code=400, detail="name must not be blank")
+
+    existing_job = await crud.get_job_by_scoped_name(
+        db=db,
+        name=normalized_name,
+        owner=owner,
+        project_id=project_id,
+        project_name=project_name,
+    )
+    if existing_job:
+        raise HTTPException(status_code=409, detail=_job_name_conflict_detail(normalized_name))
+
+    return normalized_name
+
+
 def build_autogluon_config(job_request: JobCreateRequest) -> Optional[dict]:
     """Build persisted AutoGluon config blob from request sections."""
     autogluon_config: dict = {}
@@ -100,6 +148,7 @@ def build_autogluon_config(job_request: JobCreateRequest) -> Optional[dict]:
 
 def build_job_model(
     job_request: JobCreateRequest,
+    job_name: str,
     owner: str,
     project_id: Optional[str],
     project_name: Optional[str],
@@ -108,7 +157,7 @@ def build_job_model(
     execution_target = resolve_execution_target(job_request)
 
     return Job(
-        name=job_request.name,
+        name=job_name,
         description=job_request.description,
         owner=owner,
         project_id=project_id,
@@ -155,8 +204,29 @@ async def create_job_with_context(
     logger.info(f"[JOB CREATE DEBUG] dataset_id: {job_request.dataset_id}")
 
     validate_job_create_request(job_request)
-    job = build_job_model(job_request, owner, project_id, project_name)
-    job = await crud.create_job(db, job)
+    normalized_job_name = await validate_job_name_availability(
+        db=db,
+        name=job_request.name,
+        owner=owner,
+        project_id=project_id,
+        project_name=project_name,
+    )
+    job = build_job_model(
+        job_request=job_request,
+        job_name=normalized_job_name,
+        owner=owner,
+        project_id=project_id,
+        project_name=project_name,
+    )
+    try:
+        job = await crud.create_job(db, job)
+    except IntegrityError as exc:
+        if _is_job_name_unique_violation(exc):
+            raise HTTPException(
+                status_code=409,
+                detail=_job_name_conflict_detail(normalized_job_name),
+            ) from exc
+        raise
 
     if job.execution_target == "domino_job":
         from app.core.domino_job_launcher import get_domino_job_launcher

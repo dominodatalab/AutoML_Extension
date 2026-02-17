@@ -85,6 +85,24 @@ async def run_migrations():
         except Exception as e:
             logger.debug(f"Migration skipped: execution_target backfill - {e}")
 
+        try:
+            await conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_jobs_owner_project_name_ci "
+                    "ON jobs ("
+                    "COALESCE(owner, ''), "
+                    "COALESCE(project_id, project_name, ''), "
+                    "lower(trim(name))"
+                    ")"
+                )
+            )
+        except Exception as e:
+            logger.warning(
+                "Migration skipped: scoped unique job-name index - %s. "
+                "Existing duplicate names may need cleanup before this index can be created.",
+                e,
+            )
+
 
 async def drop_tables():
     """Drop all database tables."""

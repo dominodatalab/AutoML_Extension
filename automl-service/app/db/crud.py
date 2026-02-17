@@ -14,9 +14,39 @@ from app.db.models import Job, JobLog, JobStatus, ModelType, RegisteredModel
 async def create_job(db: AsyncSession, job: Job) -> Job:
     """Create a new job."""
     db.add(job)
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
     await db.refresh(job)
     return job
+
+
+async def get_job_by_scoped_name(
+    db: AsyncSession,
+    name: str,
+    owner: Optional[str] = None,
+    project_id: Optional[str] = None,
+    project_name: Optional[str] = None,
+) -> Optional[Job]:
+    """Get a job by normalized name within owner+project scope."""
+    normalized_name = name.strip().lower()
+    owner_scope = owner.strip() if owner else ""
+    project_scope = (project_id or project_name or "").strip()
+
+    query = (
+        select(Job)
+        .where(
+            func.lower(func.trim(Job.name)) == normalized_name,
+            func.coalesce(Job.owner, "") == owner_scope,
+            func.coalesce(Job.project_id, Job.project_name, "") == project_scope,
+        )
+        .order_by(desc(Job.created_at))
+        .limit(1)
+    )
+    result = await db.execute(query)
+    return result.scalars().first()
 
 
 async def get_job(db: AsyncSession, job_id: str) -> Optional[Job]:
