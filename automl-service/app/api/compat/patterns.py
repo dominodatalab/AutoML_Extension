@@ -15,7 +15,6 @@ def register_pattern_routes(app: FastAPI) -> None:
         "/svcloadedmodels": ("app.api.routes.predictions", "get_loaded_models"),
         "/svcmetrics": ("app.api.routes.profiling", "get_available_metrics"),
         "/svcpresets": ("app.api.routes.profiling", "get_available_presets"),
-        "/svcregisteredmodels": ("app.api.routes.registry", "list_registered_models"),
         "/svcexportformats": ("app.api.routes.export", "get_supported_formats"),
         "/svcqueuestatus": ("app.api.compat.adapters.jobs", "get_queue_status"),
     }
@@ -24,6 +23,23 @@ def register_pattern_routes(app: FastAPI) -> None:
         def _handler(m=mod, f=fn):
             async def endpoint():
                 return await lazy_import(m, f)()
+
+            endpoint.__name__ = f"svc_{f}"
+            return endpoint
+
+        app.get(path)(_handler())
+
+    # Pattern 1b: Simple GET + DB -> async function(db)
+    simple_gets_db = {
+        "/svcregisteredmodels": ("app.api.routes.registry", "list_registered_models"),
+    }
+
+    for path, (mod, fn) in simple_gets_db.items():
+        def _handler(m=mod, f=fn):
+            async def endpoint():
+                func = lazy_import(m, f)
+                async with get_db_session() as db:
+                    return await func(db)
 
             endpoint.__name__ = f"svc_{f}"
             return endpoint
@@ -39,7 +55,6 @@ def register_pattern_routes(app: FastAPI) -> None:
         ("/svcprofiletimeseries", "app.api.routes.profiling", "profile_timeseries", "TimeSeriesProfileRequest"),
         ("/svcprofileasyncstart", "app.api.routes.profiling", "start_profile_async", "AsyncProfileStartRequest"),
         ("/svcprofileasyncstatus", "app.api.routes.profiling", "get_profile_async_status", "AsyncProfileStatusRequest"),
-        ("/svcregistermodel", "app.api.routes.registry", "register_model", "RegisterModelRequest"),
         ("/svctransitionstage", "app.api.routes.registry", "transition_model_stage", "TransitionStageRequest"),
         ("/svcupdatedescription", "app.api.routes.registry", "update_model_description", "UpdateDescriptionRequest"),
         ("/svcmodelcard", "app.api.routes.registry", "generate_model_card", "ModelCardRequest"),
@@ -104,6 +119,7 @@ def register_pattern_routes(app: FastAPI) -> None:
         ("/svclearningcurves", "app.api.routes.export", "get_learning_curves", "LearningCurvesRequest"),
         ("/svcexportnotebook", "app.api.routes.export", "export_notebook", "ExportNotebookRequest"),
         ("/svcjobcleanup", "app.api.compat.adapters.jobs", "bulk_cleanup", "CleanupRequest"),
+        ("/svcregistermodel", "app.api.routes.registry", "register_model", "RegisterModelRequest"),
     ]
 
     for path, mod, fn, cls in post_request_db:
