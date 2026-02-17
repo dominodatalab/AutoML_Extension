@@ -1,6 +1,6 @@
 """Generate Jupyter notebooks from job configurations."""
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 def make_cell(cell_type: str, source: List[str], execution_count: int = None) -> Dict[str, Any]:
@@ -578,12 +578,12 @@ def generate_binary_classification_notebook(job) -> Dict[str, Any]:
     return notebook
 
 
-def _resolve_data_path(job) -> str:
+def _resolve_data_path(job, resolved_data_path: Optional[str] = None) -> str:
     """Resolve a usable notebook data path from job metadata."""
+    if resolved_data_path:
+        return resolved_data_path
     if getattr(job, "file_path", None):
         return job.file_path
-    if getattr(job, "dataset_id", None):
-        return f"/mnt/data/{job.dataset_id}"
     return "path/to/your/data.csv"
 
 
@@ -606,12 +606,12 @@ def _normalize_tabular_problem_type(job) -> str:
     return str(job.problem_type)
 
 
-def generate_tabular_notebook(job) -> Dict[str, Any]:
+def generate_tabular_notebook(job, data_path: Optional[str] = None) -> Dict[str, Any]:
     """Generate a notebook for any tabular problem type."""
     cells = []
 
     problem_type = _normalize_tabular_problem_type(job)
-    data_path = _resolve_data_path(job)
+    data_path = _resolve_data_path(job, resolved_data_path=data_path)
     model_save_path = f"./AutogluonModels/{job.name.replace(' ', '_')}_tabular"
     advanced_config = {}
     if isinstance(job.autogluon_config, dict):
@@ -825,13 +825,13 @@ def generate_tabular_notebook(job) -> Dict[str, Any]:
     return notebook
 
 
-def generate_timeseries_notebook(job) -> Dict[str, Any]:
+def generate_timeseries_notebook(job, data_path: Optional[str] = None) -> Dict[str, Any]:
     """Generate a Jupyter notebook for time series training."""
     cells = []
 
     raw_preset = job.preset.value if hasattr(job.preset, "value") else str(job.preset)
     preset = _normalize_timeseries_preset(raw_preset)
-    data_path = _resolve_data_path(job)
+    data_path = _resolve_data_path(job, resolved_data_path=data_path)
     model_save_path = f"./AutogluonModels/{job.name.replace(' ', '_')}_timeseries"
     timeseries_config = {}
     if isinstance(job.autogluon_config, dict):

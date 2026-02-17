@@ -168,7 +168,7 @@ export function ExportDockerDialog({
                 <Input
                   value={outputDir}
                   onChange={(e) => setOutputDir(e.target.value)}
-                  placeholder="/mnt/data/exports/project/job (Domino) or ./local_data/exports/project/job"
+                  placeholder="/mnt/data/<project>/exports/<job> (Domino) or ./local_data/exports/<project>/<job>"
                   required
                 />
               </div>

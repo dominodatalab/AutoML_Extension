@@ -196,7 +196,7 @@ For Domino proxy constraints, the backend also exposes single-segment `/svc*` ro
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `DATABASE_URL` | No | SQLite URL (default local: `sqlite:///./automl.db`, Domino: `sqlite:////mnt/data/automl.db`) |
+| `DATABASE_URL` | No | SQLite URL (default local: `sqlite:///./automl.db`, Domino: `sqlite:////mnt/data/<safe_project_name>/automl.db`) |
 | `MODELS_PATH` | No | Model storage directory |
 | `DATASETS_PATH` | No | Dataset storage directory |
 | `UPLOADS_PATH` | No | Upload directory |
@@ -219,6 +219,16 @@ For Domino proxy constraints, the backend also exposes single-segment `/svc*` ro
 | `MLFLOW_TRACKING_TOKEN` | Optional | MLflow auth token |
 | `ENABLE_LOCAL_COMPUTE` | No | Enable local in-app queue execution (`true`/`false`) |
 | `WORKERS` | No | Uvicorn worker count (use `1` for local queue mode) |
+
+In Domino, default writable paths are scoped per project under `/mnt/data/<safe_project_name>/`.
+`<safe_project_name>` resolves in this order: `DOMINO_PROJECT_NAME` -> `DOMINO_PROJECT_ID` -> `default_project`,
+then non-path-safe characters are replaced with `_`.
+Derived defaults:
+- `MODELS_PATH`: `/mnt/data/<safe_project_name>/models`
+- `DATASETS_PATH`: `/mnt/data/<safe_project_name>/datasets`
+- `UPLOADS_PATH`: `/mnt/data/<safe_project_name>/uploads`
+- `TEMP_PATH`: `/mnt/data/<safe_project_name>/temp`
+- `EDA_RESULTS_PATH`: `/mnt/data/<safe_project_name>/eda_results`
 
 ## Technology Stack
 

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.model_export import get_model_exporter
 from app.core.model_diagnostics import get_model_diagnostics
+from app.core.dataset_manager import DominoDatasetManager
 from app.core.notebook_generator import generate_tabular_notebook, generate_timeseries_notebook
 from app.dependencies import get_db
 from app.db import crud
@@ -103,6 +104,28 @@ def _normalize_model_type(raw_model_type: Any) -> Optional[str]:
         return "timeseries"
 
     return normalized or None
+
+
+async def _resolve_notebook_data_path(job: Any) -> Optional[str]:
+    """Resolve concrete data path for notebook export."""
+    if getattr(job, "file_path", None):
+        return str(job.file_path)
+
+    dataset_id = getattr(job, "dataset_id", None)
+    if not dataset_id:
+        return None
+
+    try:
+        dataset_manager = DominoDatasetManager()
+        return await dataset_manager.get_dataset_file_path(str(dataset_id))
+    except Exception as exc:
+        logger.warning(
+            "Failed to resolve notebook dataset path for job %s (dataset_id=%s): %s",
+            getattr(job, "id", "unknown"),
+            dataset_id,
+            exc,
+        )
+        return None
 
 
 @router.post("/export/onnx", response_model=ExportONNXResponse)
@@ -249,11 +272,18 @@ async def export_notebook(
         raise HTTPException(status_code=404, detail=f"Job not found: {request.job_id}")
 
     model_type = _normalize_model_type(job.model_type)
+    resolved_data_path = await _resolve_notebook_data_path(job)
+
+    if job.data_source == "domino_dataset" and not resolved_data_path:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not resolve a mounted file path for dataset_id={job.dataset_id}",
+        )
 
     if model_type == "tabular":
-        notebook_content = generate_tabular_notebook(job)
+        notebook_content = generate_tabular_notebook(job, data_path=resolved_data_path)
     elif model_type == "timeseries":
-        notebook_content = generate_timeseries_notebook(job)
+        notebook_content = generate_timeseries_notebook(job, data_path=resolved_data_path)
     else:
         raise HTTPException(
             status_code=400,

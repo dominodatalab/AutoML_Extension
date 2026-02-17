@@ -1,10 +1,19 @@
 """Configuration management using Pydantic settings."""
 
 import os
-from functools import lru_cache
+import re
 from typing import Optional
 
 from pydantic_settings import BaseSettings
+
+
+def sanitize_project_name(value: Optional[str]) -> str:
+    """Normalize project name into a filesystem-safe segment."""
+    raw = (value or "").strip()
+    if not raw:
+        return "default_project"
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", raw).strip("._-")
+    return safe or "default_project"
 
 
 class Settings(BaseSettings):
@@ -18,26 +27,61 @@ class Settings(BaseSettings):
     # Database
     database_url: str = ""
 
-    # Paths - /mnt paths for Domino, ./local_data for local dev
+    # Paths - project-scoped under /mnt/data in Domino, ./local_data for local dev
     models_path: str = ""
     temp_path: str = ""
     datasets_path: str = ""
     uploads_path: str = ""
     eda_results_path: str = ""
 
+    def _is_domino_runtime(self) -> bool:
+        """Detect Domino runtime based on mounted paths or run metadata."""
+        return os.path.isdir("/mnt/data") or bool(os.environ.get("DOMINO_RUN_ID"))
+
+    @property
+    def resolved_project_name(self) -> str:
+        """Resolve project name with env-first fallback for path scoping."""
+        return sanitize_project_name(
+            self.domino_project_name
+            or os.environ.get("DOMINO_PROJECT_NAME")
+            or self.domino_project_id
+            or os.environ.get("DOMINO_PROJECT_ID")
+            or "default_project"
+        )
+
+    @property
+    def project_storage_root(self) -> str:
+        """Project-scoped writable root path."""
+        if self._is_domino_runtime():
+            return f"/mnt/data/{self.resolved_project_name}"
+        return "./local_data"
+
     def model_post_init(self, __context):
         """Set path defaults based on environment (Domino vs local)."""
-        is_domino = os.path.isdir("/mnt/data") or os.environ.get("DOMINO_RUN_ID")
+        is_domino = self._is_domino_runtime()
+        project_root = self.project_storage_root
         defaults = {
-            "database_url": "sqlite:////mnt/data/automl.db" if is_domino else "sqlite:///./automl.db",
-            "models_path": "/mnt/data/models" if is_domino else "./local_data/models",
-            "temp_path": "/mnt/automl-service/uploads" if is_domino else "./local_data/temp",
-            "datasets_path": "/mnt/data/datasets" if is_domino else "./local_data/datasets",
-            "uploads_path": "/mnt/automl-service/uploads" if is_domino else "./local_data/uploads",
-            "eda_results_path": "/mnt/data/automl/eda_results" if is_domino else "./local_data/eda_results",
+            "database_url": f"sqlite:////{project_root.lstrip('/')}/automl.db" if is_domino else "sqlite:///./automl.db",
+            "models_path": f"{project_root}/models" if is_domino else "./local_data/models",
+            "temp_path": f"{project_root}/temp" if is_domino else "./local_data/temp",
+            "datasets_path": f"{project_root}/datasets" if is_domino else "./local_data/datasets",
+            "uploads_path": f"{project_root}/uploads" if is_domino else "./local_data/uploads",
+            "eda_results_path": f"{project_root}/eda_results" if is_domino else "./local_data/eda_results",
+        }
+        domino_local_placeholders = {
+            "database_url": {"sqlite:///./automl.db"},
+            "models_path": {"./local_data/models"},
+            "temp_path": {"./local_data/temp"},
+            "datasets_path": {"./local_data/datasets"},
+            "uploads_path": {"./local_data/uploads"},
+            "eda_results_path": {"./local_data/eda_results"},
         }
         for field, default in defaults.items():
-            if not getattr(self, field):
+            current_value = getattr(self, field)
+            should_override = not current_value or (
+                is_domino and current_value in domino_local_placeholders.get(field, set())
+            )
+            if should_override:
                 object.__setattr__(self, field, default)
 
     # Domino environment (auto-populated in Domino)

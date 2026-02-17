@@ -24,7 +24,7 @@ export RELOAD=${RELOAD:-true}
 
 # Detect Domino environment
 IS_DOMINO=false
-if [ -n "$DOMINO_RUN_ID" ]; then
+if [ -n "$DOMINO_RUN_ID" ] || [ -n "$DOMINO_PROJECT_NAME" ] || [ -n "$DOMINO_PROJECT_ID" ]; then
     IS_DOMINO=true
 fi
 
@@ -43,6 +43,13 @@ print_env() {
     echo "  DOMINO_USER_API_KEY: ${DOMINO_USER_API_KEY:+SET (hidden)}"
     echo "  DOMINO_PROJECT_NAME: ${DOMINO_PROJECT_NAME:-NOT SET}"
     echo "  DOMINO_PROJECT_OWNER: ${DOMINO_PROJECT_OWNER:-NOT SET}"
+    echo "  SAFE_PROJECT_NAME: ${SAFE_PROJECT_NAME:-NOT SET}"
+    echo "  PROJECT_STORAGE_ROOT: ${PROJECT_STORAGE_ROOT:-NOT SET}"
+    echo "  MODELS_PATH: ${MODELS_PATH:-NOT SET}"
+    echo "  DATASETS_PATH: ${DATASETS_PATH:-NOT SET}"
+    echo "  TEMP_PATH: ${TEMP_PATH:-NOT SET}"
+    echo "  UPLOADS_PATH: ${UPLOADS_PATH:-NOT SET}"
+    echo "  EDA_RESULTS_PATH: ${EDA_RESULTS_PATH:-NOT SET}"
     echo ""
 }
 
@@ -51,6 +58,38 @@ is_truthy() {
         1|true|yes|y|on) return 0 ;;
         *) return 1 ;;
     esac
+}
+
+sanitize_path_segment() {
+    local raw="${1:-default_project}"
+    local safe
+    safe="$(printf '%s' "$raw" | sed -E 's/[^A-Za-z0-9._-]+/_/g; s/^[-._]+//; s/[-._]+$//; s/_{2,}/_/g')"
+    if [ -z "$safe" ]; then
+        safe="default_project"
+    fi
+    printf '%s' "$safe"
+}
+
+init_storage_paths() {
+    if [ "$IS_DOMINO" = true ]; then
+        local project_name="${DOMINO_PROJECT_NAME:-${DOMINO_PROJECT_ID:-default_project}}"
+        local resolved_project_name
+        resolved_project_name="$(sanitize_path_segment "$project_name")"
+
+        export SAFE_PROJECT_NAME="${SAFE_PROJECT_NAME:-$resolved_project_name}"
+        export PROJECT_STORAGE_ROOT="${PROJECT_STORAGE_ROOT:-/mnt/data/${SAFE_PROJECT_NAME}}"
+        export DATABASE_URL="${DATABASE_URL:-sqlite:////mnt/data/${SAFE_PROJECT_NAME}/automl.db}"
+    else
+        export SAFE_PROJECT_NAME="${SAFE_PROJECT_NAME:-local}"
+        export PROJECT_STORAGE_ROOT="${PROJECT_STORAGE_ROOT:-${SCRIPT_DIR}/local_data}"
+        export DATABASE_URL="${DATABASE_URL:-sqlite:///./automl.db}"
+    fi
+
+    export MODELS_PATH="${MODELS_PATH:-${PROJECT_STORAGE_ROOT}/models}"
+    export DATASETS_PATH="${DATASETS_PATH:-${PROJECT_STORAGE_ROOT}/datasets}"
+    export TEMP_PATH="${TEMP_PATH:-${PROJECT_STORAGE_ROOT}/temp}"
+    export UPLOADS_PATH="${UPLOADS_PATH:-${PROJECT_STORAGE_ROOT}/uploads}"
+    export EDA_RESULTS_PATH="${EDA_RESULTS_PATH:-${PROJECT_STORAGE_ROOT}/eda_results}"
 }
 
 validate_worker_config() {
@@ -71,10 +110,7 @@ validate_worker_config() {
 }
 
 ensure_dirs() {
-    mkdir -p /mnt/data/models 2>/dev/null || mkdir -p "${SCRIPT_DIR}/local_data/models"
-    mkdir -p /mnt/data/datasets 2>/dev/null || mkdir -p "${SCRIPT_DIR}/local_data/datasets"
-    mkdir -p /mnt/data/temp 2>/dev/null || mkdir -p "${SCRIPT_DIR}/local_data/temp"
-    mkdir -p /mnt/automl-service/uploads 2>/dev/null || mkdir -p "${SCRIPT_DIR}/local_data/uploads"
+    mkdir -p "$MODELS_PATH" "$DATASETS_PATH" "$TEMP_PATH" "$UPLOADS_PATH" "$EDA_RESULTS_PATH"
 }
 
 ensure_node() {
@@ -168,6 +204,7 @@ start_backend_background() {
 }
 
 # ── Modes ────────────────────────────────────────────────────────────
+init_storage_paths
 
 case "$MODE" in
     --backend)
