@@ -17,6 +17,14 @@ class ModelExporter:
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
 
+    @staticmethod
+    def _remove_path_if_exists(path: str) -> None:
+        """Remove an existing file, symlink, or directory."""
+        if os.path.islink(path) or os.path.isfile(path):
+            os.unlink(path)
+        elif os.path.isdir(path):
+            shutil.rmtree(path)
+
     def export_to_onnx(
         self,
         model_path: str,
@@ -161,6 +169,7 @@ class ModelExporter:
 
             # Copy model
             model_dest = os.path.join(deploy_dir, "model")
+            self._remove_path_if_exists(model_dest)
             if os.path.isdir(model_path):
                 shutil.copytree(model_path, model_dest)
             else:
