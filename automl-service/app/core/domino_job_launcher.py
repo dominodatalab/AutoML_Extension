@@ -1,5 +1,6 @@
 """Launch and manage external Domino Jobs for AutoML workflows."""
 
+import json
 import logging
 import os
 import shlex
@@ -161,7 +162,7 @@ class DominoJobLauncher:
     @staticmethod
     def _is_commit_not_found_error(error: Exception) -> bool:
         """Best-effort matcher for Domino commit-resolution failures."""
-        message = str(error).lower()
+        message = DominoJobLauncher._error_context(error).lower()
         has_commit_hint = "commit" in message or "revision" in message
         has_lookup_failure_hint = any(
             hint in message
@@ -176,6 +177,64 @@ class DominoJobLauncher:
             )
         )
         return has_commit_hint and has_lookup_failure_hint
+
+    @staticmethod
+    def _response_status_code(error: Exception) -> Optional[int]:
+        response = getattr(error, "response", None)
+        status_code = getattr(response, "status_code", None)
+        return status_code if isinstance(status_code, int) else None
+
+    @staticmethod
+    def _response_body(error: Exception) -> str:
+        response = getattr(error, "response", None)
+        if response is None:
+            return ""
+
+        candidates: list[str] = []
+
+        response_text = getattr(response, "text", None)
+        if isinstance(response_text, str) and response_text.strip():
+            candidates.append(response_text.strip())
+
+        try:
+            payload = response.json()
+        except Exception:
+            payload = None
+
+        if payload not in (None, "", [], {}):
+            try:
+                candidates.append(json.dumps(payload, ensure_ascii=True, sort_keys=True))
+            except Exception:
+                candidates.append(str(payload))
+
+        deduped: list[str] = []
+        for candidate in candidates:
+            if candidate not in deduped:
+                deduped.append(candidate)
+        return " | ".join(deduped)
+
+    @classmethod
+    def _error_context(cls, error: Exception) -> str:
+        parts: list[str] = []
+        message = str(error).strip()
+        if message:
+            parts.append(message)
+        status_code = cls._response_status_code(error)
+        if status_code is not None:
+            parts.append(f"http_status={status_code}")
+        response_body = cls._response_body(error)
+        if response_body:
+            parts.append(response_body)
+        return " | ".join(parts)
+
+    @classmethod
+    def _is_uninformative_bad_request(cls, error: Exception) -> bool:
+        return cls._response_status_code(error) == 400 and not cls._response_body(error)
+
+    @classmethod
+    def _summarize_error(cls, error: Exception, *, max_chars: int = 2000) -> str:
+        summary = cls._error_context(error) or str(error)
+        return summary if len(summary) <= max_chars else f"{summary[:max_chars]}..."
 
     def _job_start(
         self,
@@ -223,13 +282,16 @@ class DominoJobLauncher:
             if (
                 pinned_commit
                 and commit_source == "git_head"
-                and self._is_commit_not_found_error(e)
+                and (
+                    self._is_commit_not_found_error(e)
+                    or self._is_uninformative_bad_request(e)
+                )
             ):
                 logger.warning(
                     "Domino could not resolve git-derived commit %s (%s). "
                     "Retrying launch without commit pin.",
                     str(pinned_commit)[:12],
-                    e,
+                    self._summarize_error(e),
                 )
                 kwargs.pop("commit_id", None)
                 return domino.job_start(**kwargs)
@@ -285,7 +347,7 @@ class DominoJobLauncher:
             }
         except Exception as e:
             logger.exception("Failed to launch Domino training job")
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": self._summarize_error(e)}
 
     def start_eda_job(
         self,
@@ -349,7 +411,7 @@ class DominoJobLauncher:
             }
         except Exception as e:
             logger.exception("Failed to launch Domino EDA job")
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": self._summarize_error(e)}
 
     def get_job_status(self, domino_job_id: str) -> dict[str, Any]:
         """Fetch Domino job status."""
