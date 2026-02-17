@@ -16,7 +16,7 @@ interface TransformConfig {
 
 function EDAAnalysis() {
   const [searchParams] = useSearchParams()
-  const { data: datasetsData, isLoading: loadingDatasets } = useDatasets()
+  const { data: datasetsData, isLoading: loadingDatasets, error: datasetsError } = useDatasets()
   const uploadMutation = useUploadFile()
   const addNotification = useStore((state) => state.addNotification)
   const {
@@ -49,6 +49,7 @@ function EDAAnalysis() {
   const [querySelectionApplied, setQuerySelectionApplied] = useState(false)
 
   const datasets = datasetsData?.datasets || []
+  const datasetLoadError = datasetsError instanceof Error ? datasetsError.message : null
 
   useEffect(() => {
     if (querySelectionApplied) return
@@ -390,6 +391,7 @@ function EDAAnalysis() {
           setSourceType={setSourceType}
           datasets={datasets}
           loadingDatasets={loadingDatasets}
+          datasetsError={datasetLoadError}
           selectedDataset={selectedDataset}
           uploadIsPending={uploadMutation.isPending}
           onDrop={onDrop}

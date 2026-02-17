@@ -14,6 +14,7 @@ interface DataSourceSelectorProps {
   setSourceType: (type: 'upload' | 'dataset') => void
   datasets: Dataset[]
   loadingDatasets: boolean
+  datasetsError?: string | null
   selectedDataset: Dataset | null
   uploadIsPending: boolean
   onDrop: (acceptedFiles: File[]) => void
@@ -27,6 +28,7 @@ export function DataSourceSelector({
   setSourceType,
   datasets,
   loadingDatasets,
+  datasetsError,
   selectedDataset,
   uploadIsPending,
   onDrop,
@@ -117,6 +119,12 @@ export function DataSourceSelector({
           {loadingDatasets ? (
             <div className="flex justify-center py-8">
               <Spinner />
+            </div>
+          ) : datasetsError ? (
+            <div className="text-center py-8">
+              <CircleStackIcon className="h-12 w-12 text-domino-accent-red mx-auto mb-4" />
+              <p className="text-domino-accent-red">Failed to load mounted datasets</p>
+              <p className="text-sm text-domino-text-muted mt-2">{datasetsError}</p>
             </div>
           ) : datasets.length === 0 ? (
             <div className="text-center py-8">

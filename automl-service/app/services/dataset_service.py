@@ -19,10 +19,9 @@ from app.api.schemas.dataset import (
     FileUploadResponse,
 )
 from app.config import get_settings
+from app.core.dataset_mounts import resolve_dataset_mount_paths
 from app.core.dataset_manager import DominoDatasetManager
 
-DEFAULT_DOMINO_DATASET_ROOT = "/domino/datasets/local"
-DATASET_MOUNT_PATH_ENV = "DOMINO_DATASET_MOUNT_PATH"
 ALLOWED_UPLOAD_EXTENSIONS = (".csv", ".parquet", ".pq")
 DEFAULT_PREVIEW_LIMIT = 100
 MAX_PREVIEW_LIMIT = 1000
@@ -46,31 +45,62 @@ def _safe_int(value: Any, field_name: str) -> int:
 
 def get_dataset_mount_root() -> str:
     """Resolve dataset mount root for current runtime."""
-    env_path = os.environ.get(DATASET_MOUNT_PATH_ENV)
-    if env_path:
-        return env_path
-    if os.path.exists(DEFAULT_DOMINO_DATASET_ROOT):
-        return DEFAULT_DOMINO_DATASET_ROOT
+    mount_paths = resolve_dataset_mount_paths(fallback_path=get_settings().datasets_path)
+    if mount_paths:
+        return mount_paths[0]
     return get_settings().datasets_path
+
+
+def get_dataset_mount_roots() -> list[str]:
+    """Resolve all candidate dataset mount roots for the active runtime."""
+    return resolve_dataset_mount_paths(fallback_path=get_settings().datasets_path)
+
+
+def _extract_file_path(file_entry: Any) -> Optional[str]:
+    if isinstance(file_entry, dict):
+        path = file_entry.get("path")
+        return str(path) if path else None
+    if hasattr(file_entry, "path"):
+        path = getattr(file_entry, "path")
+        return str(path) if path else None
+    return None
 
 
 def filter_local_datasets(
     datasets: Sequence[Any],
     local_path: Optional[str] = None,
+    local_paths: Optional[Sequence[str]] = None,
 ) -> list[Any]:
     """Return only datasets that are mounted in the active dataset path."""
     filtered_datasets: list[Any] = []
-    resolved_local_path = local_path or get_dataset_mount_root()
+    resolved_paths = list(local_paths) if local_paths else []
+    if local_path:
+        resolved_paths.append(local_path)
+    if not resolved_paths:
+        resolved_paths = get_dataset_mount_roots()
 
     for ds in datasets:
         ds_name = getattr(ds, "name", None)
         ds_id = str(getattr(ds, "id", ""))
+        ds_files = getattr(ds, "files", []) or []
 
         if not ds_name or ds_name.startswith("/") or ds_id.startswith("/"):
             continue
 
-        dataset_path = os.path.join(resolved_local_path, ds_name)
-        if os.path.exists(dataset_path) or ds_id.startswith("domino:"):
+        found_on_mount = False
+        for root in resolved_paths:
+            if os.path.exists(os.path.join(root, ds_name)):
+                found_on_mount = True
+                break
+
+        if not found_on_mount:
+            for file_entry in ds_files:
+                file_path = _extract_file_path(file_entry)
+                if file_path and os.path.exists(file_path):
+                    found_on_mount = True
+                    break
+
+        if found_on_mount or ds_id.startswith("domino:"):
             filtered_datasets.append(ds)
 
     return filtered_datasets
@@ -81,11 +111,14 @@ async def list_datasets_response(
 ) -> DatasetListResponse:
     """List available local datasets in API response shape."""
     datasets = await dataset_manager.list_datasets()
-    dataset_mount_root = get_dataset_mount_root()
-    filtered_datasets = filter_local_datasets(datasets, local_path=dataset_mount_root)
+    dataset_mount_roots = get_dataset_mount_roots()
+    filtered_datasets = filter_local_datasets(datasets, local_paths=dataset_mount_roots)
 
     logger.info(
-        f"Returning {len(filtered_datasets)} datasets (filtered from {len(datasets)}) using root {dataset_mount_root}"
+        "Returning %s datasets (filtered from %s) using roots %s",
+        len(filtered_datasets),
+        len(datasets),
+        ", ".join(dataset_mount_roots) if dataset_mount_roots else "(none)",
     )
     return DatasetListResponse(datasets=filtered_datasets, total=len(filtered_datasets))
 

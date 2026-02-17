@@ -19,6 +19,7 @@ from app.api.schemas.job import (
     RegisterModelResponse,
 )
 from app.config import get_settings
+from app.core.dataset_mounts import resolve_dataset_mount_paths
 from app.db.models import Job, JobStatus, ModelType, ProblemType
 from app.db import crud
 from app.workers.training_worker import register_trained_model
@@ -404,11 +405,15 @@ async def _resolve_job_data_path(job: Job) -> Optional[str]:
         return None
 
     dataset_name = job.dataset_id.replace("domino:", "", 1)
-    dataset_path = os.path.join(get_settings().datasets_path, dataset_name)
-    if os.path.isfile(dataset_path):
-        return dataset_path
-    if os.path.isdir(dataset_path):
-        return _first_dataset_file(dataset_path)
+    mount_paths = resolve_dataset_mount_paths(fallback_path=get_settings().datasets_path)
+    for mount_path in mount_paths:
+        dataset_path = os.path.join(mount_path, dataset_name)
+        if os.path.isfile(dataset_path):
+            return dataset_path
+        if os.path.isdir(dataset_path):
+            first_file = _first_dataset_file(dataset_path)
+            if first_file:
+                return first_file
     return None
 
 

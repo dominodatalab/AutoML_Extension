@@ -10,7 +10,7 @@ import { Dataset, DatasetFile } from '../../types/dataset'
 
 function Step1DataSource() {
   const { dataSource, setDataSource } = useWizard()
-  const { data: datasetsData, isLoading: loadingDatasets } = useDatasets()
+  const { data: datasetsData, isLoading: loadingDatasets, error: datasetsError } = useDatasets()
   const uploadMutation = useUploadFile()
   const addNotification = useStore((state) => state.addNotification)
   const [sourceType, setSourceType] = useState<'upload' | 'domino_dataset'>(
@@ -19,6 +19,7 @@ function Step1DataSource() {
   const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null)
 
   const datasets = datasetsData?.datasets || []
+  const datasetLoadError = datasetsError instanceof Error ? datasetsError.message : null
 
   // Fetch preview/schema only for Domino datasets (uploaded files already have columns from upload response)
   const previewFilePath = dataSource?.type === 'domino_dataset' && dataSource?.filePath ? dataSource.filePath : ''
@@ -200,6 +201,12 @@ function Step1DataSource() {
           {loadingDatasets ? (
             <div className="flex justify-center py-8">
               <Spinner />
+            </div>
+          ) : datasetLoadError ? (
+            <div className="text-center py-8">
+              <CircleStackIcon className="h-12 w-12 text-domino-accent-red mx-auto mb-4" />
+              <p className="text-domino-accent-red">Failed to load mounted datasets</p>
+              <p className="text-sm text-domino-text-muted mt-2">{datasetLoadError}</p>
             </div>
           ) : datasets.length === 0 ? (
             <div className="text-center py-8">

@@ -6,17 +6,26 @@ from typing import Optional, Any
 from pydantic import BaseModel, Field
 
 
+class DatasetFileResponse(BaseModel):
+    """Response schema for a mounted dataset file."""
+
+    name: str
+    path: str
+    size: int = 0
+
+
 class DatasetResponse(BaseModel):
     """Response schema for a dataset."""
 
     id: str
     name: str
+    path: Optional[str] = None
     description: Optional[str] = None
     size_bytes: int = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     file_count: int = 0
-    files: list[str] = []
+    files: list[DatasetFileResponse] = []
 
 
 class DatasetListResponse(BaseModel):
