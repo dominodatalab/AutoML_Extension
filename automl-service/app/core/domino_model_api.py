@@ -202,6 +202,64 @@ class ModelAPIManager:
     def __init__(self, client: DominoModelAPIClient):
         self.client = client
 
+    def _resolve_project_id(self, project_id: Optional[str]) -> Optional[str]:
+        """Resolve project id from request args or Domino environment."""
+        return project_id or self.client.settings.domino_project_id or os.environ.get("DOMINO_PROJECT_ID")
+
+    def _resolve_environment_id(self, environment_id: Optional[str]) -> Optional[str]:
+        """Resolve environment id for model API creation."""
+        return (
+            environment_id
+            or os.environ.get("DOMINO_MODEL_API_ENVIRONMENT_ID")
+            or self.client.settings.domino_training_environment_id
+            or os.environ.get("DOMINO_TRAINING_ENVIRONMENT_ID")
+            or os.environ.get("DOMINO_ENVIRONMENT_ID")
+            or self.client.settings.domino_eda_environment_id
+            or os.environ.get("DOMINO_EDA_ENVIRONMENT_ID")
+        )
+
+    @staticmethod
+    def _is_validation_shape_error(error: str) -> bool:
+        """Return true when Domino rejects request JSON shape/fields."""
+        normalized = (error or "").lower()
+        shape_markers = (
+            "json validation error",
+            "error.path.missing",
+            "error.expected",
+            "error.invalid",
+        )
+        return any(marker in normalized for marker in shape_markers)
+
+    @staticmethod
+    def _build_model_api_payload_variants(
+        *,
+        name: str,
+        description: str,
+        project_id: str,
+        environment_id: str,
+        owner_id: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        """Build payload variants for Domino version compatibility."""
+        base_payload: Dict[str, Any] = {
+            "name": name,
+            "description": description,
+            "projectId": project_id,
+            "environmentId": environment_id,
+            "strictNodeAntiAffinity": False,
+            "isAsync": False,
+        }
+        if owner_id:
+            base_payload["ownerId"] = owner_id
+
+        variants: List[Dict[str, Any]] = []
+        for environment_variables in ({}, []):
+            for version in (1, "1"):
+                payload = dict(base_payload)
+                payload["environmentVariables"] = environment_variables
+                payload["version"] = version
+                variants.append(payload)
+        return variants
+
     # ========== Model APIs (Endpoint Definitions) ==========
 
     async def list_model_apis(self, project_id: Optional[str] = None) -> Dict[str, Any]:
@@ -231,20 +289,72 @@ class ModelAPIManager:
         description: str = "",
         project_id: Optional[str] = None,
         owner_id: Optional[str] = None,
+        environment_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create a new Model API.
 
         POST /api/modelServing/v1/modelApis
         """
-        payload = {
-            "name": name,
-            "description": description,
-            "projectId": project_id or self.client.settings.domino_project_id,
-        }
-        if owner_id:
-            payload["ownerId"] = owner_id
+        resolved_project_id = self._resolve_project_id(project_id)
+        if not resolved_project_id:
+            return {
+                "success": False,
+                "data": [],
+                "error": (
+                    "Missing project id for Model API creation. "
+                    "Set DOMINO_PROJECT_ID or provide project_id."
+                ),
+            }
 
-        return await self.client._make_request("POST", "/api/modelServing/v1/modelApis", json_data=payload)
+        resolved_environment_id = self._resolve_environment_id(environment_id)
+        if not resolved_environment_id:
+            return {
+                "success": False,
+                "data": [],
+                "error": (
+                    "Missing environment id for Model API creation. "
+                    "Set DOMINO_MODEL_API_ENVIRONMENT_ID, DOMINO_TRAINING_ENVIRONMENT_ID, "
+                    "or DOMINO_ENVIRONMENT_ID."
+                ),
+            }
+
+        payload_variants = self._build_model_api_payload_variants(
+            name=name,
+            description=description,
+            project_id=resolved_project_id,
+            environment_id=resolved_environment_id,
+            owner_id=owner_id,
+        )
+
+        last_error: Optional[str] = None
+        for index, payload in enumerate(payload_variants):
+            result = await self.client._make_request(
+                "POST",
+                "/api/modelServing/v1/modelApis",
+                json_data=payload,
+            )
+            if result.get("success"):
+                return result
+
+            last_error = str(result.get("error") or "")
+            if not self._is_validation_shape_error(last_error):
+                return result
+
+            logger.warning(
+                "Model API create payload variant %s/%s rejected by Domino validation: %s",
+                index + 1,
+                len(payload_variants),
+                last_error,
+            )
+
+        return {
+            "success": False,
+            "data": [],
+            "error": (
+                "Failed to create Model API after trying compatibility payload variants. "
+                f"Last error: {last_error or 'Unknown error'}"
+            ),
+        }
 
     async def get_model_api(self, model_api_id: str) -> Dict[str, Any]:
         """Get a specific Model API.
@@ -576,9 +686,22 @@ class DominoModelAPI:
         """List all Model APIs."""
         return await self.model_apis.list_model_apis(project_id)
 
-    async def create_model_api(self, name: str, description: str = "", project_id: Optional[str] = None, owner_id: Optional[str] = None) -> Dict[str, Any]:
+    async def create_model_api(
+        self,
+        name: str,
+        description: str = "",
+        project_id: Optional[str] = None,
+        owner_id: Optional[str] = None,
+        environment_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Create a new Model API."""
-        return await self.model_apis.create_model_api(name, description, project_id, owner_id)
+        return await self.model_apis.create_model_api(
+            name,
+            description,
+            project_id,
+            owner_id,
+            environment_id,
+        )
 
     async def get_model_api(self, model_api_id: str) -> Dict[str, Any]:
         """Get a specific Model API."""
@@ -683,6 +806,7 @@ class DominoModelAPI:
             api_result = await self.create_model_api(
                 name=model_name,
                 description=description,
+                environment_id=environment_id,
             )
             if not api_result["success"]:
                 result["error"] = f"Failed to create Model API: {api_result.get('error')}"
