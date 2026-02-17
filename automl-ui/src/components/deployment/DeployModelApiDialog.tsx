@@ -34,6 +34,8 @@ function toModelApiName(name: string): string {
   return `automlapp-${normalized}`.slice(0, 64)
 }
 
+const PYTHON_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
+
 export function DeployModelApiDialog({
   jobId,
   defaultModelName,
@@ -75,6 +77,11 @@ export function DeployModelApiDialog({
       return
     }
 
+    if (!PYTHON_IDENTIFIER.test(fn)) {
+      setSubmitError('Prediction function must be a valid Python identifier')
+      return
+    }
+
     if (maxReplicas < minReplicas) {
       setSubmitError('Max replicas must be greater than or equal to min replicas')
       return
@@ -98,7 +105,12 @@ export function DeployModelApiDialog({
       return
     }
 
-    setSubmitError(result?.error || 'Failed to publish Domino Model API')
+    // If the request threw, useDeployments.error carries the backend message.
+    if (!result) {
+      return
+    }
+
+    setSubmitError(result.error || result.message || 'Failed to publish Domino Model API')
   }
 
   const displayError = submitError || error
@@ -203,4 +215,3 @@ export function DeployModelApiDialog({
     </div>
   )
 }
-
