@@ -1,17 +1,14 @@
 """Domino Model Registry integration using MLflow."""
 
 import os
-import json
 import logging
-import shutil
+import tempfile
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
-from pathlib import Path
 from datetime import datetime
 
 import mlflow
 from mlflow import MlflowClient
-from mlflow.store.artifact.runs_artifact_repo import RunsArtifactRepository
 
 from app.config import get_settings
 
@@ -87,9 +84,12 @@ class DominoModelRegistry:
                 os.environ["MLFLOW_TRACKING_TOKEN"] = api_key
                 logger.info("Set MLFLOW_TRACKING_TOKEN from DOMINO_API_KEY")
 
-        # Enable multipart upload for large models
-        os.environ['MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD'] = "true"
-        os.environ['MLFLOW_MULTIPART_UPLOAD_CHUNK_SIZE'] = '200000000'
+        # Domino's proxy multipart endpoint can mis-handle MLflow logged-model artifact paths
+        # (models:/m-...); keep multipart opt-in instead of forcing it on.
+        if "MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD" not in os.environ:
+            os.environ["MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD"] = "false"
+        if os.environ.get("MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD", "").lower() == "true":
+            os.environ.setdefault("MLFLOW_MULTIPART_UPLOAD_CHUNK_SIZE", "200000000")
 
     @property
     def client(self) -> MlflowClient:
@@ -109,10 +109,10 @@ class DominoModelRegistry:
         params: Optional[Dict[str, Any]] = None,
         experiment_name: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Register a trained model to the Domino Model Registry using mlflow.pyfunc.log_model.
+        """Register a trained model to the Domino Model Registry.
 
-        This follows the same pattern as the notebooks for proper model registration.
-        The model is registered to the same experiment used during training.
+        Logs a pyfunc model under the active run artifacts, then registers that
+        run artifact URI in the model registry.
 
         Args:
             experiment_name: The experiment name used during training. If not provided,
@@ -195,46 +195,63 @@ class DominoModelRegistry:
                 else:
                     wrapper_class = AutoGluonTabularWrapper
 
-                # Register model using mlflow.pyfunc.log_model (like notebooks do)
-                mlflow.pyfunc.log_model(
-                    artifact_path="model",
-                    python_model=wrapper_class(),
-                    artifacts={"model_path": model_path},
-                    conda_env=conda_env,
-                    registered_model_name=model_name,
-                )
-
+                # Use run artifacts + explicit model registration to stay compatible
+                # with tracking servers that don't support logged-model artifact uploads.
+                with tempfile.TemporaryDirectory(prefix="mlflow_model_") as tmp_dir:
+                    local_model_dir = os.path.join(tmp_dir, "model")
+                    mlflow.pyfunc.save_model(
+                        path=local_model_dir,
+                        python_model=wrapper_class(),
+                        artifacts={"model_path": model_path},
+                        conda_env=conda_env,
+                    )
+                    mlflow.log_artifacts(local_model_dir, artifact_path="model")
                 result["artifact_uri"] = f"runs:/{run_id}/model"
-                logger.info(f"Registered model using pyfunc.log_model: {model_name}")
+                created_version = mlflow.register_model(
+                    model_uri=result["artifact_uri"],
+                    name=model_name,
+                    await_registration_for=300,
+                )
+                if created_version:
+                    result["model_version"] = str(created_version.version)
+                logger.info(f"Registered model from run artifact URI: {result['artifact_uri']}")
 
-            # Get the version that was created
+            # Resolve version and update metadata/tags
             try:
-                versions = self.client.search_model_versions(f"name='{model_name}'")
-                if versions:
-                    latest = max(versions, key=lambda v: int(v.version))
-                    result["model_version"] = latest.version
+                version = result.get("model_version")
+                if not version:
+                    versions = self.client.search_model_versions(f"name='{model_name}'")
+                    if versions:
+                        latest = max(versions, key=lambda v: int(v.version))
+                        version = str(latest.version)
+                        result["model_version"] = version
 
-                    # Update description if provided
-                    if description:
-                        self.client.update_registered_model(model_name, description=description)
+                # Update description if provided
+                if description:
+                    self.client.update_registered_model(model_name, description=description)
+                    if version:
                         self.client.update_model_version(
-                            model_name, latest.version,
-                            description=f"AutoGluon {model_type} model. {description}"
+                            model_name,
+                            version,
+                            description=f"AutoGluon {model_type} model. {description}",
                         )
 
-                    # Set version tags with metrics
-                    if metrics:
-                        for key, value in metrics.items():
-                            if isinstance(value, (int, float)):
-                                try:
-                                    self.client.set_model_version_tag(
-                                        model_name, latest.version, key, f"{value:.4f}"
-                                    )
-                                except Exception:
-                                    pass
+                # Set version tags with metrics
+                if metrics and version:
+                    for key, value in metrics.items():
+                        if isinstance(value, (int, float)):
+                            try:
+                                self.client.set_model_version_tag(
+                                    model_name, version, key, f"{value:.4f}"
+                                )
+                            except Exception:
+                                pass
 
-                    result["success"] = True
-                    logger.info(f"Model {model_name} version {latest.version} registered successfully")
+                result["success"] = True
+                if version:
+                    logger.info(f"Model {model_name} version {version} registered successfully")
+                else:
+                    logger.info(f"Model {model_name} registered successfully")
 
             except Exception as e:
                 logger.warning(f"Could not get version info: {e}")
