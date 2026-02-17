@@ -64,59 +64,33 @@ class DominoJobLauncher:
         return self._domino_client
 
     @staticmethod
-    def _build_cli_args(args: dict[str, Any]) -> str:
+    def _build_cli_args(args: dict[str, Any]) -> list[str]:
         parts: list[str] = []
         for key, value in args.items():
             if value is None:
                 continue
             flag = f"--{key.replace('_', '-')}"
             parts.extend([flag, str(value)])
-        return " ".join(shlex.quote(part) for part in parts)
-
-    @staticmethod
-    def _build_script_command(script_path: str, cli_args: str) -> str:
-        command = f'"$PYTHON_BIN" {shlex.quote(script_path)}'
-        if cli_args:
-            command = f"{command} {cli_args}"
-        return command
-
-    @staticmethod
-    def _build_module_command(module: str, cli_args: str) -> str:
-        command = f'"$PYTHON_BIN" -m {shlex.quote(module)}'
-        if cli_args:
-            command = f"{command} {cli_args}"
-        return command
+        return parts
 
     def _build_command(self, module: str, args: dict[str, Any]) -> str:
-        """Build a Domino Job command that works from repo root or service dir."""
+        """Build a Domino Job command using a direct Python script invocation.
+
+        Domino's /v4/jobs/start endpoint can reject complex shell wrappers
+        (for example, `bash -lc 'if ...'`) as invalid commands. Keep the
+        command string simple and explicit.
+        """
         cli_args = self._build_cli_args(args)
-        script_path = f"{module.replace('.', '/')}.py"
-        script_command = self._build_script_command(script_path, cli_args)
-        module_command = self._build_module_command(module, cli_args)
+        script_rel_path = f"{module.replace('.', '/')}.py"
         service_dir = os.environ.get("AUTOML_SERVICE_DIR", "automl-service")
-        quoted_service_dir = shlex.quote(service_dir)
-        quoted_script_path = shlex.quote(script_path)
-        shell_script = (
-            f"if [ -d {quoted_service_dir} ]; then "
-            f"cd {quoted_service_dir}; "
-            "elif [ ! -f app/main.py ]; then "
-            "echo 'Unable to locate AutoML service directory. "
-            "Set AUTOML_SERVICE_DIR to the backend path.' >&2; "
-            "exit 1; "
-            "fi; "
-            "PYTHON_BIN=\"${PYTHON_BIN:-$(command -v python || command -v python3)}\"; "
-            "if [ -z \"$PYTHON_BIN\" ]; then "
-            "echo 'Unable to locate python interpreter (python/python3).' >&2; "
-            "exit 1; "
-            "fi; "
-            f"if [ -f {quoted_script_path} ]; then "
-            f"{script_command}; "
-            "else "
-            f"echo 'Runner script {script_path} not found; falling back to module import.' >&2; "
-            f"{module_command}; "
-            "fi"
-        )
-        return f"bash -lc {shlex.quote(shell_script)}"
+        normalized_service_dir = (service_dir or "").strip().rstrip("/")
+        if not normalized_service_dir or normalized_service_dir in {".", "./"}:
+            runner_path = script_rel_path
+        else:
+            runner_path = f"{normalized_service_dir}/{script_rel_path}"
+
+        parts = ["python", runner_path, *cli_args]
+        return " ".join(shlex.quote(part) for part in parts)
 
     @staticmethod
     def _extract_job_id(response: dict[str, Any]) -> Optional[str]:
