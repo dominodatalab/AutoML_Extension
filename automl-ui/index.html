@@ -2,6 +2,28 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      (function () {
+        var pathname = window.location.pathname || '/'
+        var appsMatch = pathname.match(/^\/apps(?:-internal)?\/[a-z0-9._-]+/i)
+        var proxyMatch = pathname.match(/^\/notebookSession\/[^/]+\/proxy\/\d+/)
+        var basePath = '/'
+
+        if (appsMatch) {
+          basePath = appsMatch[0]
+        } else if (proxyMatch) {
+          basePath = proxyMatch[0]
+        }
+
+        if (!basePath.endsWith('/')) {
+          basePath += '/'
+        }
+
+        var baseEl = document.createElement('base')
+        baseEl.setAttribute('href', basePath)
+        document.head.appendChild(baseEl)
+      })()
+    </script>
     <!-- Use relative path for favicon to work with Domino proxy -->
     <link rel="icon" type="image/svg+xml" href="./domino-logo.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
