@@ -26,7 +26,7 @@ The AutoML Extension is a full-stack web application that runs as a Domino App. 
   3. Configure Training
           │
           ▼
-  4. Evaluate Models
+  4. Train and Evaluate Models
           │
           ▼
   5. Deploy / Export
@@ -65,7 +65,7 @@ The AutoML Extension is a full-stack web application that runs as a Domino App. 
 │  └──────────────────────────────────────────────────────────┘  │
 │                               │                                │
 │           ┌───────────────────┼─────────────┐                  │
-│           ▼                ▼                ▼                  │
+│           ▼                   ▼             ▼                  │
 │   ┌───────────────┐ ┌────────────┐ ┌─────────────────┐         │
 │   │ Domino APIs   │ │ MLflow     │ │ /mnt/data       │         │
 │   │ (Jobs, Model  │ │ Tracking   │ │ (Shared Storage)│         │
@@ -87,14 +87,8 @@ The AutoML Extension is a full-stack web application that runs as a Domino App. 
 | Styling | Tailwind CSS 3.4 with Domino design tokens (`domino-*`) |
 | State | Zustand (client), TanStack React Query (server) |
 | Routing | React Router v6 with dynamic `basename` detection |
-| API layer | Single-segment `/svc*` paths for Domino proxy compatibility |
+| API layer | RESTful `/svc/v1/*` paths via fetch with runtime base path detection |
 
-**Base path detection** — The SPA detects its URL prefix at runtime by matching `window.location.pathname` against two Domino proxy patterns:
-
-- **Apps**: `/apps/<app-name>` or `/apps-internal/<app-name>`
-- **Workspace proxy**: `/notebookSession/<session-id>/proxy/<port>`
-
-This prefix is applied to `<BrowserRouter basename>` and all API fetch calls.
 
 ### 3.2 Backend
 
@@ -109,47 +103,20 @@ This prefix is applied to `<BrowserRouter basename>` and all API fetch calls.
 
 **Route structure** — 8 RESTful routers mounted at multi-segment prefixes:
 
-| Router | Prefix | Endpoints |
-|--------|--------|-----------|
-| Health | `/svc/v1/health` | 3 |
-| Jobs | `/svc/v1/jobs` | 15 |
-| Datasets | `/svc/v1/datasets` | 6 |
-| Predictions | `/svc/v1/predictions` | 12 |
-| Profiling | `/svc/v1/profiling` | 10 |
-| Registry | `/svc/v1/registry` | 12 |
-| Export | `/svc/v1/export` | 6 |
-| Deployments | `/svc/v1/deployments` | 24 |
+| Router | Prefix | 
+|--------|--------|
+| Health | `/svc/v1/health` |
+| Jobs | `/svc/v1/jobs` |
+| Datasets | `/svc/v1/datasets` |
+| Predictions | `/svc/v1/predictions` | 
+| Profiling | `/svc/v1/profiling` | 
+| Registry | `/svc/v1/registry` | 
+| Export | `/svc/v1/export` | 
+| Deployments | `/svc/v1/deployments` | 
 
 Plus 1 WebSocket endpoint (`/ws/jobs/{job_id}`) for real-time job progress.
 
 **Singleton services** — Stateful components (job queue, model cache, WebSocket manager) are instantiated as singletons via `@lru_cache()` on factory functions.
-
-### 3.3 Compat Route System
-
-**Problem**: Domino's nginx proxy only forwards requests where the path after the app prefix is a single segment (no additional `/` separators). RESTful multi-segment paths like `/svc/v1/jobs/{job_id}/status` are not routable.
-
-**Solution**: 70 single-segment `/svc*` compat routes that flatten RESTful paths:
-
-| RESTful Path | Compat Path | Transformation |
-|---|---|---|
-| `GET /svc/v1/health` | `GET /svchealth` | Direct mapping |
-| `POST /svc/v1/predictions/predict` | `POST /svcpredict` | Body contains request payload |
-| `GET /svc/v1/jobs/{job_id}/status` | `POST /svcjobstatus` | Path params move to POST body |
-| `POST /svc/v1/profiling/profile/timeseries` | `POST /svcprofiletimeseries` | Segments concatenated |
-
-**5 declarative patterns** generate most compat routes from a config table:
-
-| Pattern | Signature | When Used |
-|---------|-----------|-----------|
-| 1. Simple GET | `() → func()` | Parameterless reads |
-| 2. POST + RequestClass | `(body) → func(Cls(**body))` | Pydantic-validated inputs |
-| 3. POST + key extraction | `(body) → func(*extracted_args)` | Specific keys from body dict |
-| 4. POST + RequestClass + DB | `(body) → func(Cls(**body), db)` | Validated input + DB session |
-| 5. POST + keys + DB | `(body) → func(db, *args)` | Key extraction + DB session |
-
-16 additional custom compat routes handle complex cases (file uploads, custom headers, composite responses).
-
-**Implication for Extensions framework**: Extensions need either single-segment routing support or the proxy needs to allow multi-segment paths.
 
 ---
 
@@ -183,10 +150,11 @@ This section details everything the extension requires from the Domino platform.
 | `DOMINO_USER_API_KEY` | Domino (legacy) | Optional | `None` | Legacy API key (fallback) | Skipped; auth chain continues to `DOMINO_TOKEN_FILE` → ephemeral token. |
 | `DOMINO_TOKEN_FILE` | Domino | Optional | `None` | Path to file containing a Domino auth token (fallback) | Skipped; auth chain continues to API key → ephemeral token. |
 | `DOMINO_API_PROXY` | Domino (Apps only) | Optional | `None` | Domino API proxy endpoint; used inside Domino Apps | Must configure explicit `DOMINO_API_KEY` + `DOMINO_API_HOST` instead. |
+| `API_KEY_OVERRIDE` | Extension | Optional | `None` | Overrides entire auth chain for the Model API client | Normal auth resolution chain is used. |
 
 \*At least one of `DOMINO_API_KEY`, `DOMINO_USER_API_KEY`, `DOMINO_TOKEN_FILE`, or `DOMINO_API_PROXY` must be set for any Domino integration to work.
 
-**Auth resolution order**: `DOMINO_API_KEY` → `DOMINO_USER_API_KEY` → contents of `DOMINO_TOKEN_FILE` → ephemeral token from `localhost:8899`
+**Auth resolution order**: `API_KEY_OVERRIDE` (bypasses everything) → `DOMINO_API_KEY` → `DOMINO_USER_API_KEY` → contents of `DOMINO_TOKEN_FILE` → ephemeral token from `localhost:8899` (may not be available outside Domino Apps)
 
 #### Compute Configuration
 
@@ -197,8 +165,18 @@ This section details everything the extension requires from the Domino platform.
 | `DOMINO_EDA_HARDWARE_TIER_NAME` | Extension | Optional | `None` | Hardware tier for external EDA jobs | Uses project default tier; can be overridden per-request. |
 | `DOMINO_EDA_ENVIRONMENT_ID` | Extension | Optional | `None` | Environment ID for EDA job containers | Uses project default environment. |
 | `DOMINO_MODEL_API_ENVIRONMENT_ID` | Extension | Optional | `None` | Environment ID for Model API creation | Falls through: `DOMINO_TRAINING_ENVIRONMENT_ID` → `DOMINO_ENVIRONMENT_ID` → `DOMINO_EDA_ENVIRONMENT_ID` → project default (via API). |
+| `DOMINO_ENVIRONMENT_ID` | Domino | Optional | `None` | General fallback environment ID (used in Model API environment resolution chain) | Skipped in resolution chain; continues to next fallback. |
+| `AUTOML_SERVICE_DIR` | Extension | Optional | `None` | Base directory for the automl-service code (used for runner path construction in job launcher) | Defaults to auto-detected service directory. |
 
 **Environment ID resolution for Model APIs**: explicit param → `DOMINO_MODEL_API_ENVIRONMENT_ID` → `DOMINO_TRAINING_ENVIRONMENT_ID` → `DOMINO_ENVIRONMENT_ID` → `DOMINO_EDA_ENVIRONMENT_ID` → project default (via API)
+
+#### Link Generation
+
+| Variable | Source | Criticality | Default | Purpose | When Missing |
+|----------|--------|-------------|---------|---------|-------------|
+| `DOMINO_EXTERNAL_HOST` | Domino | Optional | `None` | External Domino host for generating user-facing links (e.g., job overview, experiment links) | Falls back to `DOMINO_LINK_HOST` → `DOMINO_USER_HOST` → `DOMINO_API_HOST`. |
+| `DOMINO_LINK_HOST` | Domino | Optional | `None` | Domino host for link generation (fallback) | Falls back to `DOMINO_USER_HOST` → `DOMINO_API_HOST`. |
+| `DOMINO_USER_HOST` | Domino | Optional | `None` | User-facing Domino host | Falls back to `DOMINO_API_HOST`. |
 
 #### Storage Paths
 
@@ -215,6 +193,8 @@ When neither env var is set, defaults to: `/domino/datasets/local`, `/mnt/data`,
 |----------|--------|-------------|---------|---------|-------------|
 | `MLFLOW_TRACKING_URI` | Domino | Recommended | `None` | MLflow tracking server URI | Experiment tracking is offline-only (local MLflow backend). Model Registry page is non-functional. Job overview cannot generate experiment links. |
 | `MLFLOW_TRACKING_TOKEN` | Extension | Optional | `None` | MLflow auth token (auto-set from `DOMINO_API_KEY` at runtime) | Auto-derived from `DOMINO_API_KEY` at runtime; must set explicitly if no API key. |
+| `MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD` | Extension | Optional | `false` | Enable multipart upload for MLflow artifacts | Standard single-part upload used. |
+| `MLFLOW_MULTIPART_UPLOAD_CHUNK_SIZE` | Extension | Optional | `200000000` | Chunk size in bytes for multipart upload | Default 200 MB chunk size used. |
 
 #### Git / Commit
 
@@ -283,6 +263,9 @@ The extension supports multiple auth mechanisms to work across Domino contexts (
 ┌────────────────────────────────────────────────────┐
 │            Auth Resolution Chain                   │
 │                                                    │
+│  0. API_KEY_OVERRIDE env var                       │
+│     └─► Bypasses entire chain; used directly       │
+│                                                    │
 │  1. DOMINO_API_KEY env var                         │
 │     └─► Used as X-Domino-Api-Key header            │
 │                                                    │
@@ -294,7 +277,7 @@ The extension supports multiple auth mechanisms to work across Domino contexts (
 │                                                    │
 │  4. Ephemeral token (localhost:8899)               │
 │     └─► Used as Authorization: Bearer header       │
-│     └─► Only available inside Domino Apps          │
+│     └─► May not be available outside Domino Apps   │
 │                                                    │
 │  5. DOMINO_API_PROXY (transparent proxy auth)      │
 │     └─► No explicit key needed; proxy handles it   │
@@ -363,7 +346,7 @@ Dataset IDs use a prefix scheme:
 |-------|-------------|---------------------|
 | **EDA** | Automated data profiling — distributions, correlations, missing values, time series analysis (ACF/PACF, ADF test, decomposition) | In-process compute or external Domino Job (via `python-domino`) |
 | **Training** | AutoGluon trains and ensembles multiple models (XGBoost, LightGBM, neural nets, etc.) within a configurable time budget | In-process async queue or external Domino Job; hardware tier and environment configurable via env vars |
-| **Evaluation** | Leaderboard with model comparison, feature importance, SHAP explanations, confusion matrices, residual plots | Results stored in SQLite and on filesystem |
+| **Evaluation** | Leaderboard with model comparison, feature importance, SHAP explanations (when available), confusion matrices, residual plots | Results stored in SQLite and on filesystem |
 | **Registry** | Register trained models to Domino Model Registry via MLflow | MLflow tracking server (`MLFLOW_TRACKING_URI`), experiment logging, model artifact upload |
 | **Deployment** | One-click deploy from a completed training job — creates Model API, version, and deployment in a single flow | Model Serving API (3 create endpoints), environment resolution; backend client covers 19 endpoints for future lifecycle management |
 
@@ -430,7 +413,7 @@ These are the key integration points the Extensions framework needs to address:
 
 | Area | Current Behavior | Framework Implication |
 |------|-----------------|----------------------|
-| **Proxy routing** | Single-segment `/svc*` paths required; 70 compat routes maintain compatibility | Framework should either support multi-segment paths or define a routing standard |
+| **Proxy routing** | RESTful multi-segment paths (`/svc/v1/*`) used directly; Domino proxy confirmed to support multi-segment routing | Framework should support multi-segment path forwarding |
 | **Env var contract** | ~30 env vars across 6 categories (see Section 4.1) | Framework should define which env vars are injected and guarantee their availability |
 | **Authentication** | 5-step fallback chain across multiple mechanisms | Framework should provide a single, consistent auth mechanism |
 | **Storage isolation** | Project-scoped paths under `/mnt/data/<project>/` | Framework should define storage contracts and persistence guarantees |
@@ -449,7 +432,7 @@ For the AutoML Extension to function correctly on the Extensions framework:
 
 **Must have**:
 - `/mnt/data` must be writable and persistent across app restarts
-- Domino proxy must support single-segment paths (`/svc*`) OR framework provides multi-segment routing
+- Domino proxy must support multi-segment paths (`/svc/v1/*`)
 - `domino-username` header must be injected by the proxy for all requests
 - Ephemeral token endpoint (`localhost:8899`) must be available for app-internal auth
 - Dataset mounts must be readable at known paths (`/domino/datasets/local`, `/mnt/data`, `/mnt/imported/data`)
