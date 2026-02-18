@@ -40,6 +40,12 @@ export function JobHeader({
   const deployDropdownRef = useRef<HTMLDivElement>(null)
   const actionsDropdownRef = useRef<HTMLDivElement>(null)
   const executionTargetLabel = job?.execution_target === 'domino_job' ? 'Domino Job' : 'Local'
+  const normalizedCurrentStatus = normalizeStatus(currentStatus)
+  const normalizedDominoStatus = normalizeStatus(currentDominoStatus)
+  const showDominoStatusDiff =
+    job?.execution_target === 'domino_job' &&
+    !!normalizedDominoStatus &&
+    normalizedDominoStatus !== normalizedCurrentStatus
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -67,8 +73,11 @@ export function JobHeader({
             <span className="px-2 py-0.5 border border-domino-border rounded-[2px] text-domino-text-primary bg-domino-bg-tertiary">
               {executionTargetLabel}
             </span>
-            {job.execution_target === 'domino_job' && currentDominoStatus && (
-              <span className="text-domino-text-muted">Status: {currentDominoStatus}</span>
+            <span className="text-domino-text-muted">Status: {formatStatusLabel(currentStatus)}</span>
+            {showDominoStatusDiff && (
+              <span className="text-domino-text-muted">
+                (Domino: {formatStatusLabel(currentDominoStatus)})
+              </span>
             )}
           </div>
         )}
@@ -147,4 +156,18 @@ export function JobHeader({
       </div>
     </div>
   )
+}
+
+function normalizeStatus(status?: string): string {
+  return (status || '').trim().toLowerCase()
+}
+
+function formatStatusLabel(status?: string): string {
+  if (!status) return '\u2014'
+  const normalized = status.replace(/[_-]+/g, ' ').trim()
+  if (!normalized) return '\u2014'
+  return normalized
+    .split(/\s+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ')
 }

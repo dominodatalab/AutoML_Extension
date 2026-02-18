@@ -16,6 +16,11 @@ export function useJobs(params?: { skip?: number; limit?: number; status?: strin
   return useQuery({
     queryKey: ['jobs', params],
     queryFn: () => getJobs(params),
+    refetchInterval: (query) => {
+      const jobs = query.state.data?.jobs ?? []
+      const hasActiveJobs = jobs.some((job) => ['pending', 'running'].includes(job.status))
+      return hasActiveJobs ? 5000 : false
+    },
   })
 }
 

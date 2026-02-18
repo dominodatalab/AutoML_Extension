@@ -33,6 +33,8 @@ _DOMINO_RUNNING_STATUSES = {"running", "executing"}
 _DOMINO_COMPLETED_STATUSES = {"succeeded", "success", "successful", "completed", "complete", "done", "finished"}
 _DOMINO_FAILED_STATUSES = {"failed", "error"}
 _DOMINO_CANCELLED_STATUSES = {"stopped", "cancelled", "canceled", "archived"}
+_DOMINO_TERMINAL_METADATA_SCAN_LIMIT = 100
+_DOMINO_TERMINAL_METADATA_SYNC_LIMIT = 20
 _DOMINO_MISSING_JOB_MESSAGE = "External Domino job is no longer accessible (archived or deleted)."
 _MISSING_DATA_MESSAGE = "Training data is no longer available for this job (dataset/file was deleted)."
 _DOMINO_MISSING_ERROR_MARKERS = (
@@ -273,6 +275,7 @@ async def list_jobs_basic(
     status: Optional[str] = None,
 ) -> list[Job]:
     """List jobs with optional basic status filtering."""
+    await _sync_active_domino_jobs_for_overview(db)
     status_filter = JobStatus(status) if status else None
     jobs = await crud.get_jobs(db, skip=skip, limit=limit, status=status_filter)
     return list(jobs)
@@ -284,6 +287,7 @@ async def list_jobs_filtered(
     request: Optional[Request] = None,
 ) -> list[Job]:
     """List jobs using advanced POST filters."""
+    await _sync_active_domino_jobs_for_overview(db)
     (
         status_filter,
         model_type_filter,
@@ -308,6 +312,46 @@ async def list_jobs_filtered(
         project_name=project_name_filter,
     )
     return list(jobs)
+
+
+async def _sync_active_domino_jobs_for_overview(db: AsyncSession) -> None:
+    """Refresh active Domino-backed jobs so list views show current status."""
+    active_jobs = await crud.get_jobs_by_statuses(
+        db,
+        [JobStatus.PENDING, JobStatus.RUNNING],
+        execution_target="domino_job",
+    )
+    if active_jobs:
+        for job in active_jobs:
+            if not job.domino_job_id:
+                continue
+            await _sync_domino_job_state(db, job)
+
+    await _sync_recent_terminal_domino_metadata_for_overview(db)
+
+
+async def _sync_recent_terminal_domino_metadata_for_overview(db: AsyncSession) -> None:
+    """Refresh stale Domino terminal metadata for recently listed jobs."""
+    recent_jobs = await crud.get_jobs(db, skip=0, limit=_DOMINO_TERMINAL_METADATA_SCAN_LIMIT)
+    if not recent_jobs:
+        return
+
+    candidates: list[Job] = []
+    for job in recent_jobs:
+        if getattr(job, "execution_target", "local") != "domino_job":
+            continue
+        if job.status not in _TERMINAL_JOB_STATUSES:
+            continue
+        if not job.domino_job_id:
+            continue
+        if _is_domino_terminal_status(job.domino_job_status):
+            continue
+        candidates.append(job)
+        if len(candidates) >= _DOMINO_TERMINAL_METADATA_SYNC_LIMIT:
+            break
+
+    for job in candidates:
+        await _sync_domino_job_state(db, job, sync_terminal_metadata=True)
 
 
 async def get_job_logs(
@@ -447,6 +491,16 @@ def _terminal_status_from_domino(status: Optional[str]) -> Optional[JobStatus]:
     return None
 
 
+def _is_domino_terminal_status(status: Optional[str]) -> bool:
+    """Return True if Domino status is already terminal."""
+    normalized = _normalize_domino_status(status)
+    return (
+        normalized in _DOMINO_COMPLETED_STATUSES
+        or normalized in _DOMINO_FAILED_STATUSES
+        or normalized in _DOMINO_CANCELLED_STATUSES
+    )
+
+
 def _is_domino_missing_error(error: Optional[str]) -> bool:
     """Return True when Domino reports a run as missing/archived."""
     normalized = (error or "").strip().lower()
@@ -529,6 +583,7 @@ async def _sync_domino_job_state(
     db: AsyncSession,
     job: Job,
     finalize_missing: bool = False,
+    sync_terminal_metadata: bool = False,
 ) -> Job:
     """Sync local status for externally executed Domino jobs.
 
@@ -537,7 +592,13 @@ async def _sync_domino_job_state(
     """
     if getattr(job, "execution_target", "local") != "domino_job":
         return job
-    if not job.domino_job_id or job.status in _TERMINAL_JOB_STATUSES:
+    if not job.domino_job_id:
+        return job
+
+    is_terminal_local = job.status in _TERMINAL_JOB_STATUSES
+    if is_terminal_local and not sync_terminal_metadata:
+        return job
+    if is_terminal_local and sync_terminal_metadata and _is_domino_terminal_status(job.domino_job_status):
         return job
 
     try:
@@ -567,12 +628,14 @@ async def _sync_domino_job_state(
                 job.domino_job_id,
                 error,
             )
-        if finalize_missing and _is_domino_missing_error(error):
+        if (finalize_missing or sync_terminal_metadata) and _is_domino_missing_error(error):
             await crud.update_job_domino_fields(
                 db=db,
                 job_id=job.id,
                 domino_job_status="ArchivedOrMissing",
             )
+            job.domino_job_status = "ArchivedOrMissing"
+        if finalize_missing and _is_domino_missing_error(error):
             error_message = job.error_message or _DOMINO_MISSING_JOB_MESSAGE
             updated = await crud.update_job_status(
                 db=db,
@@ -603,6 +666,10 @@ async def _sync_domino_job_state(
             domino_job_status=latest_domino_status,
         )
         job.domino_job_status = latest_domino_status
+
+    # If local status is already terminal, this pass is metadata-only.
+    if is_terminal_local and sync_terminal_metadata:
+        return job
 
     # Promote pending -> running based on external execution signal.
     if normalized in _DOMINO_RUNNING_STATUSES and job.status == JobStatus.PENDING:
@@ -746,7 +813,7 @@ def normalize_job_leaderboard(job: Job) -> Job:
 async def get_job_response(db: AsyncSession, job_id: str) -> Job:
     """Get job payload normalized for API response compatibility."""
     job = await get_job_or_404(db, job_id)
-    job = await _sync_domino_job_state(db, job)
+    job = await _sync_domino_job_state(db, job, sync_terminal_metadata=True)
     return normalize_job_leaderboard(job)
 
 
@@ -764,7 +831,7 @@ def extract_metrics_leaderboard(job: Job) -> Optional[list[dict]]:
 async def get_job_status_response(db: AsyncSession, job_id: str) -> JobStatusResponse:
     """Build status response payload for a job."""
     job = await get_job_or_404(db, job_id)
-    job = await _sync_domino_job_state(db, job)
+    job = await _sync_domino_job_state(db, job, sync_terminal_metadata=True)
     return JobStatusResponse(
         id=job.id,
         status=job.status.value,
@@ -788,7 +855,7 @@ async def get_job_metrics_response(db: AsyncSession, job_id: str) -> JobMetricsR
 async def get_job_progress_response(db: AsyncSession, job_id: str) -> JobProgressResponse:
     """Build progress response payload for a job."""
     job = await get_job_or_404(db, job_id)
-    job = await _sync_domino_job_state(db, job)
+    job = await _sync_domino_job_state(db, job, sync_terminal_metadata=True)
     return JobProgressResponse(
         id=job.id,
         status=job.status.value,
