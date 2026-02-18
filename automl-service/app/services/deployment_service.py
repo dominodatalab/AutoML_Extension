@@ -20,7 +20,9 @@ from app.dependencies import get_db_session
 
 logger = logging.getLogger(__name__)
 
-STATIC_MODEL_API_SOURCE_FILE = "model_api.py"
+# Keep source file under automl-service where it is consistently present
+# in Domino project code snapshots used by model serving.
+STATIC_MODEL_API_SOURCE_FILE = "automl-service/model_api.py"
 
 
 def _is_valid_python_identifier(name: str) -> bool:
