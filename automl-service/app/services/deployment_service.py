@@ -20,7 +20,7 @@ from app.dependencies import get_db_session
 
 logger = logging.getLogger(__name__)
 
-STATIC_MODEL_API_SOURCE_FILE = "automl-service/app/serving/model_api_entrypoint.py"
+STATIC_MODEL_API_SOURCE_FILE = "model_api.py"
 
 
 def _is_valid_python_identifier(name: str) -> bool:
