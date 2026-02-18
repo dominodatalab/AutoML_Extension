@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { format } from 'date-fns'
 import { useJob, useJobStatus, useJobLogs, useCancelJob, useDeleteJob } from '../hooks/useJobs'
@@ -40,6 +40,15 @@ function JobDetail() {
   const navigate = useNavigate()
   const deleteJobMutation = useDeleteJob()
 
+  useEffect(() => {
+    if (!job || !statusData?.status) {
+      return
+    }
+    if (statusData.status !== job.status) {
+      refetch()
+    }
+  }, [job?.status, statusData?.status, refetch])
+
   const handleDeleteJob = async () => {
     try {
       await deleteJobMutation.mutateAsync(job!.id)
@@ -63,14 +72,15 @@ function JobDetail() {
 
   // Handle loading state - use defaults when job not yet loaded
   const jobStatus = job?.status || 'running'
-  const isJobTerminal = ['completed', 'failed', 'cancelled'].includes(jobStatus)
-  const validPolledProgress = !isJobTerminal && progressJobId === jobId ? polledProgress : null
-  const currentStatus = isJobTerminal ? jobStatus : (validPolledProgress?.status || statusData?.status || jobStatus)
+  const validPolledProgress = progressJobId === jobId ? polledProgress : null
+  const currentStatus = statusData?.status || validPolledProgress?.status || jobStatus
+  const currentDominoStatus = statusData?.domino_job_status || job?.domino_job_status
+  const isJobTerminal = ['completed', 'failed', 'cancelled'].includes(currentStatus)
   const rawProgress = validPolledProgress?.progress ?? job?.progress ?? 0
 
   // Use simulated progress for smooth time-based animation
   const currentProgress = isJobTerminal
-    ? (jobStatus === 'completed' ? 100 : rawProgress)
+    ? (currentStatus === 'completed' ? 100 : rawProgress)
     : Math.max(simulatedProgress, rawProgress)
 
   const handleCancel = async () => {
@@ -98,6 +108,7 @@ function JobDetail() {
       <JobHeader
         job={job}
         currentStatus={currentStatus}
+        currentDominoStatus={currentDominoStatus}
         cancelIsPending={cancelMutation.isPending}
         showDeployDropdown={showDeployDropdown}
         showActionsDropdown={showActionsDropdown}
@@ -132,7 +143,7 @@ function JobDetail() {
       />
 
       {/* Progress bar for running jobs */}
-      {['pending', 'running'].includes(jobStatus) && activeTab === 'overview' && (
+      {['pending', 'running'].includes(currentStatus) && activeTab === 'overview' && (
         <div className="mb-6">
           <SimpleProgressBar
             progress={currentProgress}
@@ -143,7 +154,12 @@ function JobDetail() {
 
       {/* Tab content */}
       {activeTab === 'overview' && (
-        <JobOverviewTab job={job} isLoading={isLoading} currentStatus={currentStatus} />
+        <JobOverviewTab
+          job={job}
+          isLoading={isLoading}
+          currentStatus={currentStatus}
+          currentDominoStatus={currentDominoStatus}
+        />
       )}
 
       {activeTab === 'leaderboard' && currentStatus === 'completed' && job && (

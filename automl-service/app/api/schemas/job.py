@@ -431,6 +431,7 @@ class JobStatusResponse(BaseModel):
 
     id: str
     status: str
+    domino_job_status: Optional[str] = None
     error_message: Optional[str] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None

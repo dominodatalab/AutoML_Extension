@@ -5,6 +5,7 @@ import type { Job } from '../../types/job'
 interface JobHeaderProps {
   job: Job | undefined
   currentStatus: string
+  currentDominoStatus?: string
   cancelIsPending: boolean
   showDeployDropdown: boolean
   showActionsDropdown: boolean
@@ -22,6 +23,7 @@ interface JobHeaderProps {
 export function JobHeader({
   job,
   currentStatus,
+  currentDominoStatus,
   cancelIsPending,
   showDeployDropdown,
   showActionsDropdown,
@@ -65,8 +67,8 @@ export function JobHeader({
             <span className="px-2 py-0.5 border border-domino-border rounded-[2px] text-domino-text-primary bg-domino-bg-tertiary">
               {executionTargetLabel}
             </span>
-            {job.execution_target === 'domino_job' && job.domino_job_status && (
-              <span className="text-domino-text-muted">Status: {job.domino_job_status}</span>
+            {job.execution_target === 'domino_job' && currentDominoStatus && (
+              <span className="text-domino-text-muted">Status: {currentDominoStatus}</span>
             )}
           </div>
         )}

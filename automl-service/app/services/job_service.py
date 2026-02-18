@@ -749,6 +749,7 @@ async def get_job_status_response(db: AsyncSession, job_id: str) -> JobStatusRes
     return JobStatusResponse(
         id=job.id,
         status=job.status.value,
+        domino_job_status=job.domino_job_status,
         error_message=job.error_message,
         started_at=job.started_at,
         completed_at=job.completed_at,

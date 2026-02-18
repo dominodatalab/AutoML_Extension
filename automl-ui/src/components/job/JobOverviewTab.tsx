@@ -8,9 +8,10 @@ interface JobOverviewTabProps {
   job: Job | undefined
   isLoading: boolean
   currentStatus: string
+  currentDominoStatus?: string
 }
 
-export function JobOverviewTab({ job, isLoading, currentStatus }: JobOverviewTabProps) {
+export function JobOverviewTab({ job, isLoading, currentStatus, currentDominoStatus }: JobOverviewTabProps) {
   const datasetLabel = getDatasetLabel(job, isLoading)
   const datasetLink = getDatasetLink(job)
   const datasetDetails = job?.file_path || job?.dataset_id || ''
@@ -77,8 +78,8 @@ export function JobOverviewTab({ job, isLoading, currentStatus }: JobOverviewTab
             {job?.domino_job_id && (
               <MetadataRow label="Domino Job ID" value={job.domino_job_id} mono />
             )}
-            {job?.domino_job_status && (
-              <MetadataRow label="Domino Job Status" value={job.domino_job_status} />
+            {currentDominoStatus && (
+              <MetadataRow label="Domino Job Status" value={currentDominoStatus} />
             )}
             {job?.experiment_name && (
               <MetadataRow label="Experiment" value={job.experiment_name} />

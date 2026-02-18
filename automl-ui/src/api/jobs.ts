@@ -14,6 +14,15 @@ interface JobMetricsResponse {
   leaderboard: Record<string, unknown>[] | null
 }
 
+export interface JobStatusResponse {
+  id: string
+  status: string
+  domino_job_status?: string
+  error_message?: string
+  started_at?: string
+  completed_at?: string
+}
+
 export interface OrphanArtifact {
   path: string
   size_bytes: number
@@ -52,8 +61,8 @@ export async function getJob(jobId: string): Promise<Job> {
   return response.data
 }
 
-export async function getJobStatus(jobId: string): Promise<{ id: string; status: string; error_message?: string }> {
-  const response = await api.post<{ id: string; status: string; error_message?: string }>('/jobstatus', { job_id: jobId })
+export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
+  const response = await api.post<JobStatusResponse>('/jobstatus', { job_id: jobId })
   return response.data
 }
 
