@@ -5,7 +5,7 @@ import os
 import logging
 from datetime import datetime
 from typing import Optional
-from urllib.parse import quote, urlparse, urlunparse
+from urllib.parse import quote
 
 from fastapi import HTTPException, Request
 from sqlalchemy.exc import IntegrityError
@@ -86,16 +86,6 @@ def get_project_context() -> tuple[Optional[str], Optional[str]]:
     )
 
 
-def _resolve_domino_host() -> Optional[str]:
-    """Resolve Domino host used for external UI links."""
-    settings = get_settings()
-    host = settings.domino_api_host or os.environ.get("DOMINO_API_HOST")
-    if not host:
-        return None
-    host = host.strip()
-    return host or None
-
-
 def _resolve_project_owner() -> Optional[str]:
     """Resolve Domino project owner for project-scoped UI links."""
     settings = get_settings()
@@ -124,16 +114,15 @@ def _build_domino_job_url(job: Job) -> Optional[str]:
     if not job.domino_job_id:
         return None
 
-    host = _resolve_domino_host()
     owner = _resolve_project_owner()
     project_name = _resolve_project_name(job)
-    if not host or not owner or not project_name:
+    if not owner or not project_name:
         return None
 
     encoded_owner = quote(owner, safe="")
     encoded_project = quote(project_name, safe="")
     encoded_run_id = quote(job.domino_job_id, safe="")
-    return f"{host.rstrip('/')}/projects/{encoded_owner}/{encoded_project}/runs/{encoded_run_id}"
+    return f"/jobs/{encoded_owner}/{encoded_project}/{encoded_run_id}/logs?status=all"
 
 
 def _resolve_experiment_id(job: Job) -> Optional[str]:
@@ -180,37 +169,20 @@ def _resolve_experiment_id(job: Job) -> Optional[str]:
     return None
 
 
-def _mlflow_ui_base_url() -> Optional[str]:
-    """Resolve MLflow UI base URL from tracking URI with Domino fallback."""
-    tracking_uri = get_settings().mlflow_tracking_uri or os.environ.get("MLFLOW_TRACKING_URI")
-    if tracking_uri:
-        parsed = urlparse(tracking_uri.strip())
-        if parsed.scheme in {"http", "https"} and parsed.netloc:
-            path = (parsed.path or "").rstrip("/")
-            for api_suffix in ("/api/2.0/mlflow", "/api/2.0/preview/mlflow"):
-                if path.endswith(api_suffix):
-                    path = path[: -len(api_suffix)]
-                    break
-            return urlunparse((parsed.scheme, parsed.netloc, path, "", "", ""))
-
-    host = _resolve_domino_host()
-    if host:
-        return f"{host.rstrip('/')}/mlflow"
-    return None
-
-
 def _build_experiment_run_url(job: Job, experiment_id: Optional[str]) -> Optional[str]:
-    """Build deep link to MLflow run UI."""
-    if not job.experiment_run_id or not experiment_id:
+    """Build deep link to Domino Experiment Manager."""
+    if not experiment_id:
         return None
 
-    base_url = _mlflow_ui_base_url()
-    if not base_url:
+    owner = _resolve_project_owner()
+    project_name = _resolve_project_name(job)
+    if not owner or not project_name:
         return None
 
+    encoded_owner = quote(owner, safe="")
+    encoded_project = quote(project_name, safe="")
     encoded_experiment_id = quote(str(experiment_id), safe="")
-    encoded_run_id = quote(job.experiment_run_id, safe="")
-    return f"{base_url.rstrip('/')}/#/experiments/{encoded_experiment_id}/runs/{encoded_run_id}"
+    return f"/experiments/{encoded_owner}/{encoded_project}/{encoded_experiment_id}"
 
 
 def _attach_external_links(job: Job) -> Job:

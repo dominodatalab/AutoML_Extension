@@ -97,8 +97,8 @@ export function JobOverviewTab({ job, isLoading, currentStatus, currentDominoSta
             {job?.experiment_name && (
               <MetadataRow label="Experiment" value={job.experiment_name} />
             )}
-            {job?.experiment_run_id && (
-              <MetadataRow label="MLflow run ID" mono>
+            {(job?.experiment_id || job?.experiment_run_id) && (
+              <MetadataRow label="Experiment ID" mono>
                 {job.experiment_run_url ? (
                   <a
                     href={job.experiment_run_url}
@@ -107,10 +107,10 @@ export function JobOverviewTab({ job, isLoading, currentStatus, currentDominoSta
                     className="text-domino-accent-purple hover:underline break-all"
                     title="Open Experiment Run"
                   >
-                    {job.experiment_run_id}
+                    {job.experiment_id || job.experiment_run_id}
                   </a>
                 ) : (
-                  job.experiment_run_id
+                  job.experiment_id || job.experiment_run_id
                 )}
               </MetadataRow>
             )}
