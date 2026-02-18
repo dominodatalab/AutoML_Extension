@@ -4,6 +4,7 @@ This module integrates with Domino's Model Serving API to manage model deploymen
 API Reference: https://docs.dominodatalab.com/en/latest/api_guide/8c929e/rest-api-reference/
 """
 
+import asyncio
 import os
 import logging
 from functools import lru_cache
@@ -1019,6 +1020,120 @@ class DominoModelAPI:
 
     # ========== Helper Methods ==========
 
+    @staticmethod
+    def _extract_version_id_from_create_payload(payload: Any) -> Optional[str]:
+        """Extract a model API version id from create-model-api response payloads."""
+        if not isinstance(payload, dict):
+            return None
+
+        direct_keys = (
+            "modelApiVersionId",
+            "versionId",
+            "latestVersionId",
+            "latestModelApiVersionId",
+        )
+        for key in direct_keys:
+            value = payload.get(key)
+            if value:
+                return str(value)
+
+        nested_keys = ("version", "latestVersion", "modelApiVersion")
+        for key in nested_keys:
+            nested = payload.get(key)
+            if isinstance(nested, dict):
+                nested_id = nested.get("id")
+                if nested_id:
+                    return str(nested_id)
+
+        versions = payload.get("versions")
+        if isinstance(versions, list):
+            for version in versions:
+                if isinstance(version, dict):
+                    version_id = version.get("id")
+                    if version_id:
+                        return str(version_id)
+
+        return None
+
+    @staticmethod
+    def _extract_version_id_from_versions_payload(payload: Any) -> Optional[str]:
+        """Extract latest version id from list-model-api-versions payloads."""
+        versions: List[Dict[str, Any]] = []
+
+        if isinstance(payload, list):
+            versions = [item for item in payload if isinstance(item, dict)]
+        elif isinstance(payload, dict):
+            if isinstance(payload.get("items"), list):
+                versions = [item for item in payload["items"] if isinstance(item, dict)]
+            elif isinstance(payload.get("versions"), list):
+                versions = [item for item in payload["versions"] if isinstance(item, dict)]
+
+        if not versions:
+            return None
+
+        versions.sort(
+            key=lambda item: str(
+                item.get("createdAt")
+                or item.get("updatedAt")
+                or item.get("created")
+                or item.get("updated")
+                or ""
+            ),
+            reverse=True,
+        )
+
+        for version in versions:
+            version_id = version.get("id") or version.get("modelApiVersionId") or version.get("versionId")
+            if version_id:
+                return str(version_id)
+
+        return None
+
+    @staticmethod
+    def _extract_endpoint_url(payload: Any) -> Optional[str]:
+        """Extract endpoint URL from Domino deployment/model API payloads."""
+        if not isinstance(payload, dict):
+            return None
+
+        for key in ("url", "endpointUrl", "endpointURL"):
+            value = payload.get(key)
+            if value:
+                return str(value)
+
+        for key in ("deployment", "modelDeployment"):
+            nested = payload.get(key)
+            if isinstance(nested, dict):
+                nested_url = DominoModelAPI._extract_endpoint_url(nested)
+                if nested_url:
+                    return nested_url
+
+        return None
+
+    async def _wait_for_created_version_id(
+        self,
+        model_api_id: str,
+        initial_payload: Optional[Dict[str, Any]] = None,
+        attempts: int = 6,
+        delay_seconds: float = 1.0,
+    ) -> Optional[str]:
+        """Resolve version id created as part of model API creation."""
+        if initial_payload:
+            version_id = self._extract_version_id_from_create_payload(initial_payload)
+            if version_id:
+                return version_id
+
+        for attempt in range(attempts):
+            list_result = await self.list_model_api_versions(model_api_id)
+            if list_result.get("success"):
+                version_id = self._extract_version_id_from_versions_payload(list_result.get("data"))
+                if version_id:
+                    return version_id
+
+            if attempt < attempts - 1:
+                await asyncio.sleep(delay_seconds)
+
+        return None
+
     async def deploy_model(
         self,
         model_name: str,
@@ -1033,7 +1148,7 @@ class DominoModelAPI:
     ) -> Dict[str, Any]:
         """High-level method to deploy a model end-to-end.
 
-        This creates a Model API, version, and deployment in one call.
+        This creates a Model API and exactly one version, then optionally deploys it.
         """
         result = {
             "success": False,
@@ -1051,40 +1166,71 @@ class DominoModelAPI:
                 environment_id=environment_id,
                 source_file=model_file,
                 source_function=function_name,
-                include_version=False,
+                include_version=True,
             )
             if not api_result["success"]:
                 result["error"] = f"Failed to create Model API: {api_result.get('error')}"
                 return result
 
-            model_api_id = api_result["data"].get("id")
+            api_data = api_result.get("data")
+            if not isinstance(api_data, dict):
+                result["error"] = "Failed to create Model API: invalid response payload"
+                return result
+
+            model_api_id = api_data.get("id")
+            if not model_api_id:
+                result["error"] = "Failed to create Model API: missing model API id in response"
+                return result
+
             result["model_api_id"] = model_api_id
             result["steps_completed"].append("create_model_api")
 
-            # Step 2: Create Version
-            version_result = await self.create_model_api_version(
-                model_api_id=model_api_id,
-                model_file=model_file,
-                function_name=function_name,
-                environment_id=environment_id,
-                description=description,
-                should_deploy=auto_start,
+            # Step 2: Resolve version created along with the model API.
+            version_id = await self._wait_for_created_version_id(
+                model_api_id=str(model_api_id),
+                initial_payload=api_data,
             )
-            if not version_result["success"]:
-                result["error"] = f"Failed to create version: {version_result.get('error')}"
+            if not version_id:
+                result["error"] = (
+                    "Model API was created but version id could not be resolved. "
+                    "No extra version was created to avoid duplicate publishes."
+                )
                 return result
 
-            version_id = version_result["data"].get("id")
             result["version_id"] = version_id
             result["steps_completed"].append("create_version")
-            if auto_start:
-                result["steps_completed"].append("deploy_version")
 
-            deployment_info = version_result.get("data", {}).get("deployment")
-            if isinstance(deployment_info, dict):
-                result["deployment_status"] = deployment_info.get("status")
-                if deployment_info.get("id"):
-                    result["deployment_id"] = deployment_info.get("id")
+            # Step 3: Optionally create deployment for this single version.
+            deployment_data: Dict[str, Any] = {}
+            if auto_start:
+                deployment_result = await self.create_deployment(
+                    model_api_id=str(model_api_id),
+                    model_api_version_id=str(version_id),
+                    description=description,
+                    environment_id=environment_id,
+                    hardware_tier_id=hardware_tier_id,
+                    min_replicas=min_replicas,
+                    max_replicas=max_replicas,
+                )
+                if not deployment_result.get("success"):
+                    result["error"] = (
+                        "Failed to deploy version: "
+                        f"{deployment_result.get('error')}"
+                    )
+                    return result
+
+                result["steps_completed"].append("deploy_version")
+                deployment_payload = deployment_result.get("data")
+                if isinstance(deployment_payload, dict):
+                    deployment_data = deployment_payload
+
+                deployment_id = deployment_data.get("id") or deployment_result.get("deployment_id")
+                if deployment_id:
+                    result["deployment_id"] = deployment_id
+
+                deployment_status = deployment_data.get("status")
+                if deployment_status:
+                    result["deployment_status"] = deployment_status
 
             result["success"] = True
             result["message"] = (
@@ -1093,8 +1239,8 @@ class DominoModelAPI:
                 else f"Model '{model_name}' version created successfully"
             )
             result["endpoint_url"] = (
-                version_result.get("data", {}).get("url")
-                or api_result.get("data", {}).get("url")
+                self._extract_endpoint_url(deployment_data)
+                or self._extract_endpoint_url(api_data)
             )
 
         except Exception as e:
