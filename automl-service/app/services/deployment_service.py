@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import textwrap
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -175,11 +176,13 @@ def _prepare_model_api_source_bundle(job_id: str, model_path: str, function_name
     if not os.path.isdir(model_path):
         raise HTTPException(status_code=400, detail=f"Model directory not found: {model_path}")
 
-    bundle_dir = get_model_api_source_bundle_gc().bundle_dir_for_job(job_id)
+    bundle_gc = get_model_api_source_bundle_gc()
+    bundle_root = bundle_gc.bundle_root()
+    bundle_root.mkdir(parents=True, exist_ok=True)
+    bundle_suffix = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
+    bundle_dir = (bundle_root / f"job_{job_id}_{bundle_suffix}").resolve()
 
     try:
-        if bundle_dir.exists():
-            shutil.rmtree(bundle_dir)
         shutil.copytree(model_path, bundle_dir)
         _ensure_model_entrypoint(str(bundle_dir), function_name, overwrite=True)
     except Exception as exc:
@@ -188,7 +191,7 @@ def _prepare_model_api_source_bundle(job_id: str, model_path: str, function_name
             detail=f"Failed to prepare model API source bundle for job {job_id}: {exc}",
         ) from exc
 
-    source_file = Path(".automl_model_api_sources") / bundle_dir.name / "model.py"
+    source_file = Path("automl_model_api_sources") / bundle_dir.name / "model.py"
 
     source_file_str = source_file.as_posix()
     bundle_dir_str = str(bundle_dir)

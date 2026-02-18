@@ -76,7 +76,21 @@ class ModelApiSourceBundleGC:
     def bundle_root() -> Path:
         """Return absolute root directory for staged model-api source bundles."""
         service_root = Path(__file__).resolve().parents[2]
+        return (service_root / "automl_model_api_sources").resolve()
+
+    @staticmethod
+    def legacy_bundle_root() -> Path:
+        """Return legacy hidden root used by earlier bundle staging logic."""
+        service_root = Path(__file__).resolve().parents[2]
         return (service_root / ".automl_model_api_sources").resolve()
+
+    def _allowed_bundle_roots(self) -> tuple[Path, ...]:
+        """Return allowed bundle roots for path normalization and cleanup."""
+        current = self.bundle_root()
+        legacy = self.legacy_bundle_root()
+        if legacy == current:
+            return (current,)
+        return (current, legacy)
 
     def bundle_dir_for_job(self, job_id: str) -> Path:
         """Return absolute bundle directory path for a training job id."""
@@ -89,9 +103,9 @@ class ModelApiSourceBundleGC:
         except Exception:
             return None
 
-        root = self.bundle_root()
-        if resolved == root or root in resolved.parents:
-            return resolved
+        for root in self._allowed_bundle_roots():
+            if resolved == root or root in resolved.parents:
+                return resolved
         return None
 
     async def startup(self) -> None:
@@ -300,13 +314,14 @@ class ModelApiSourceBundleGC:
                 if normalized is not None:
                     tracked_bundle_paths.add(normalized)
 
-        orphan_dirs_deleted, orphan_bytes_freed = self._delete_orphan_bundle_dirs(
-            root=root,
-            tracked_bundle_paths=tracked_bundle_paths,
-            now=now,
-        )
-        bundle_dirs_deleted += orphan_dirs_deleted
-        bytes_freed += orphan_bytes_freed
+        for cleanup_root in self._allowed_bundle_roots():
+            orphan_dirs_deleted, orphan_bytes_freed = self._delete_orphan_bundle_dirs(
+                root=cleanup_root,
+                tracked_bundle_paths=tracked_bundle_paths,
+                now=now,
+            )
+            bundle_dirs_deleted += orphan_dirs_deleted
+            bytes_freed += orphan_bytes_freed
 
         logger.info(
             "Model API bundle GC pass complete: stale_rows_deleted=%s bundle_dirs_deleted=%s bytes_freed=%s domino_reconciled=%s",
