@@ -22,23 +22,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-class ExportONNXRequest(BaseModel):
-    """Request for ONNX export."""
-    job_id: str = Field(..., description="ID of the completed training job")
-    model_type: Optional[str] = Field(None, description="Type: tabular, timeseries (optional)")
-    output_path: Optional[str] = Field(None, description="Optional output path")
-
-
-class ExportONNXResponse(BaseModel):
-    """Response from ONNX export."""
-    success: bool
-    output_path: Optional[str] = None
-    format: str = "onnx"
-    model_used: Optional[str] = None
-    features: Optional[list] = None
-    error: Optional[str] = None
-
-
 class DeploymentPackageRequest(BaseModel):
     """Request for deployment package export."""
     job_id: str = Field(..., description="ID of the completed training job")
@@ -128,26 +111,6 @@ async def _resolve_notebook_data_path(job: Any) -> Optional[str]:
         return None
 
 
-@router.post("/export/onnx", response_model=ExportONNXResponse)
-async def export_to_onnx(
-    request: ExportONNXRequest,
-    db: AsyncSession = Depends(get_db)
-):
-    """Export model to ONNX format (identified by job_id)."""
-    # Look up job to get model_path
-    model_path, model_type, _, _ = await get_job_paths(db, request.job_id)
-    actual_model_type = request.model_type or model_type
-
-    exporter = get_model_exporter()
-    result = exporter.export_to_onnx(
-        model_path=model_path,
-        model_type=actual_model_type,
-        output_path=request.output_path
-    )
-
-    return ExportONNXResponse(**result)
-
-
 @router.post("/export/deployment", response_model=DeploymentPackageResponse)
 async def export_deployment_package(
     request: DeploymentPackageRequest,
@@ -213,11 +176,6 @@ async def get_supported_formats():
     """Get list of supported export formats by model type."""
     return {
         "tabular": {
-            "onnx": {
-                "supported": True,
-                "description": "ONNX format for sklearn-compatible models",
-                "requirements": ["skl2onnx"]
-            },
             "deployment_package": {
                 "supported": True,
                 "description": "Complete deployment package with inference script"
@@ -234,10 +192,6 @@ async def get_supported_formats():
             }
         },
         "timeseries": {
-            "onnx": {
-                "supported": False,
-                "description": "ONNX export not yet supported for time series"
-            },
             "deployment_package": {
                 "supported": True,
                 "description": "Complete deployment package with inference script"

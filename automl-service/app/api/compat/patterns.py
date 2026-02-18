@@ -118,7 +118,6 @@ def register_pattern_routes(app: FastAPI) -> None:
         ("/svcroccurve", "app.api.routes.predictions", "get_roc_curve", "DiagnosticsRequest"),
         ("/svcprecisionrecall", "app.api.routes.predictions", "get_precision_recall_curve", "DiagnosticsRequest"),
         ("/svcregressiondiagnostics", "app.api.routes.predictions", "get_regression_diagnostics", "DiagnosticsRequest"),
-        ("/svcexportonnx", "app.api.routes.export", "export_to_onnx", "ExportONNXRequest"),
         ("/svcexportdeployment", "app.api.routes.export", "export_deployment_package", "DeploymentPackageRequest"),
         ("/svclearningcurves", "app.api.routes.export", "get_learning_curves", "LearningCurvesRequest"),
         ("/svcexportnotebook", "app.api.routes.export", "export_notebook", "ExportNotebookRequest"),

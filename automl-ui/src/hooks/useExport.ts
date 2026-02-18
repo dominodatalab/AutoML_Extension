@@ -1,22 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../api'
 
-// Types - using job_id instead of model_path
-export interface ExportONNXRequest {
-  job_id: string
-  model_type?: string
-  output_path?: string
-}
-
-export interface ExportONNXResponse {
-  success: boolean
-  output_path?: string
-  format: string
-  model_used?: string
-  features?: string[]
-  error?: string
-}
-
 export interface DeploymentPackageRequest {
   job_id: string
   model_type?: string
@@ -59,21 +43,6 @@ export interface ExportFormat {
 export interface SupportedFormats {
   tabular: Record<string, ExportFormat>
   timeseries: Record<string, ExportFormat>
-}
-
-// Hook for exporting to ONNX
-export function useExportONNX() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async (request: ExportONNXRequest) => {
-      const { data } = await api.post<ExportONNXResponse>('exportonnx', request)
-      return data
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['exports'] })
-    },
-  })
 }
 
 // Hook for creating deployment package

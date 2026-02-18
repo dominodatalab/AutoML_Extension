@@ -1,8 +1,5 @@
 # AutoML Extension — Design Document
 
-> Reference for the Domino Extensions framework team and product stakeholders.
-> Last updated: February 2026
-
 ---
 
 ## 1. Problem Statement
