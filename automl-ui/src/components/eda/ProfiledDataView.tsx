@@ -21,6 +21,20 @@ import { formatCompactNumber } from '../../utils/formatters'
 
 type EDATab = 'data' | 'columns' | 'correlations' | 'quality' | 'transforms' | 'ts-overview' | 'ts-stationarity' | 'ts-acf'
 
+function TabContent({ loading, error, data, emptyMessage, children }: {
+  loading: boolean
+  error: string | null
+  data: unknown
+  emptyMessage?: string
+  children: React.ReactNode
+}) {
+  if (loading) return <div className="flex items-center justify-center py-20"><Spinner /></div>
+  if (error) return <div className="text-center py-20 text-domino-accent-red">{error}</div>
+  if (!data && emptyMessage) return <div className="text-center py-20 text-domino-text-muted">{emptyMessage}</div>
+  if (!data) return null
+  return <>{children}</>
+}
+
 interface ProfiledDataViewProps {
   selectedFilePath: string
   selectedFileName: string
@@ -248,46 +262,26 @@ export function ProfiledDataView({
         )}
 
         {activeTab === 'columns' && (
-          profilingLoading ? (
-            <div className="flex items-center justify-center py-20">
-              <Spinner />
-            </div>
-          ) : profilingError ? (
-            <div className="text-center py-20 text-domino-accent-red">{profilingError}</div>
-          ) : profile ? (
-            <ColumnExplorer columns={profile.columns} filePath={selectedFilePath} />
-          ) : null
+          <TabContent loading={profilingLoading} error={profilingError} data={profile}>
+            {profile && <ColumnExplorer columns={profile.columns} filePath={selectedFilePath} />}
+          </TabContent>
         )}
 
         {activeTab === 'correlations' && (
-          profilingLoading ? (
-            <div className="flex items-center justify-center py-20">
-              <Spinner />
-            </div>
-          ) : profile?.correlations ? (
-            <CorrelationMatrix correlations={profile.correlations} columns={profile.columns} />
-          ) : (
-            <div className="text-center py-20 text-domino-text-muted">
-              No correlation data available
-            </div>
-          )
+          <TabContent loading={profilingLoading} error={profilingError} data={profile?.correlations} emptyMessage="No correlation data available">
+            {profile?.correlations && <CorrelationMatrix correlations={profile.correlations} columns={profile.columns} />}
+          </TabContent>
         )}
 
         {activeTab === 'quality' && (
-          profilingLoading ? (
-            <div className="flex items-center justify-center py-20">
-              <Spinner />
-            </div>
-          ) : profile ? (
-            <div className="space-y-6">
-              <MissingValuesChart columns={profile.columns} />
-              <DataQualityPanel
-                warnings={profile.warnings}
-                recommendations={profile.recommendations}
-                columns={profile.columns}
-              />
-            </div>
-          ) : null
+          <TabContent loading={profilingLoading} error={profilingError} data={profile}>
+            {profile && (
+              <div className="space-y-6">
+                <MissingValuesChart columns={profile.columns} />
+                <DataQualityPanel warnings={profile.warnings} recommendations={profile.recommendations} columns={profile.columns} />
+              </div>
+            )}
+          </TabContent>
         )}
 
         {activeTab === 'transforms' && profile && (
@@ -300,45 +294,21 @@ export function ProfiledDataView({
         )}
 
         {activeTab === 'ts-overview' && (
-          tsLoading ? (
-            <div className="flex items-center justify-center py-20"><Spinner /></div>
-          ) : tsError ? (
-            <div className="text-center py-20 text-domino-accent-red">{tsError}</div>
-          ) : tsProfile ? (
-            <TimeSeriesOverview profile={tsProfile} />
-          ) : (
-            <div className="text-center py-20 text-domino-text-muted">
-              Configure time series columns and run analysis to see temporal overview
-            </div>
-          )
+          <TabContent loading={!!tsLoading} error={tsError ?? null} data={tsProfile} emptyMessage="Configure time series columns and run analysis to see temporal overview">
+            {tsProfile && <TimeSeriesOverview profile={tsProfile} />}
+          </TabContent>
         )}
 
         {activeTab === 'ts-stationarity' && (
-          tsLoading ? (
-            <div className="flex items-center justify-center py-20"><Spinner /></div>
-          ) : tsError ? (
-            <div className="text-center py-20 text-domino-accent-red">{tsError}</div>
-          ) : tsProfile ? (
-            <StationarityTrendPanel profile={tsProfile} />
-          ) : (
-            <div className="text-center py-20 text-domino-text-muted">
-              Configure time series columns and run analysis to see stationarity results
-            </div>
-          )
+          <TabContent loading={!!tsLoading} error={tsError ?? null} data={tsProfile} emptyMessage="Configure time series columns and run analysis to see stationarity results">
+            {tsProfile && <StationarityTrendPanel profile={tsProfile} />}
+          </TabContent>
         )}
 
         {activeTab === 'ts-acf' && (
-          tsLoading ? (
-            <div className="flex items-center justify-center py-20"><Spinner /></div>
-          ) : tsError ? (
-            <div className="text-center py-20 text-domino-accent-red">{tsError}</div>
-          ) : tsProfile ? (
-            <ACFPanel profile={tsProfile} />
-          ) : (
-            <div className="text-center py-20 text-domino-text-muted">
-              Configure time series columns and run analysis to see ACF results
-            </div>
-          )
+          <TabContent loading={!!tsLoading} error={tsError ?? null} data={tsProfile} emptyMessage="Configure time series columns and run analysis to see ACF results">
+            {tsProfile && <ACFPanel profile={tsProfile} />}
+          </TabContent>
         )}
       </div>
     </>

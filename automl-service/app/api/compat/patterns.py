@@ -7,6 +7,44 @@ from app.dependencies import get_db_session
 from app.api.compat.common import lazy_import
 
 
+def _make_endpoint(mod, fn, cls=None, keys=None, use_db=False, db_first=False, method="post"):
+    """Create a compat endpoint closure for any of the 5 patterns."""
+    def _handler(m=mod, f=fn, c=cls, k=keys):
+        if c:
+            # Pattern 2/4: RequestClass-based
+            async def endpoint(body: dict = Body(default={})):
+                func, req_cls = lazy_import(m, f, c)
+                if use_db:
+                    async with get_db_session() as db:
+                        return await func(req_cls(**body), db)
+                return await func(req_cls(**body))
+        elif k is not None:
+            # Pattern 3/5: key-extraction
+            async def endpoint(body: dict = Body(default={})):
+                func = lazy_import(m, f)
+                args = [body.get(*key) for key in k]
+                if use_db:
+                    async with get_db_session() as db:
+                        if db_first:
+                            return await func(db, *args)
+                        return await func(*args, db)
+                return await func(*args)
+        elif use_db:
+            # Pattern 1b: Simple GET + DB
+            async def endpoint():
+                func = lazy_import(m, f)
+                async with get_db_session() as db:
+                    return await func(db)
+        else:
+            # Pattern 1: Simple GET
+            async def endpoint():
+                return await lazy_import(m, f)()
+
+        endpoint.__name__ = f"svc_{f}"
+        return endpoint
+    return _handler()
+
+
 def register_pattern_routes(app: FastAPI) -> None:
     """Register compatibility routes that share common endpoint patterns."""
     # Pattern 1: Simple GET -> async function()
@@ -20,14 +58,7 @@ def register_pattern_routes(app: FastAPI) -> None:
     }
 
     for path, (mod, fn) in simple_gets.items():
-        def _handler(m=mod, f=fn):
-            async def endpoint():
-                return await lazy_import(m, f)()
-
-            endpoint.__name__ = f"svc_{f}"
-            return endpoint
-
-        app.get(path)(_handler())
+        app.get(path)(_make_endpoint(mod, fn, method="get"))
 
     # Pattern 1b: Simple GET + DB -> async function(db)
     simple_gets_db = {
@@ -35,16 +66,7 @@ def register_pattern_routes(app: FastAPI) -> None:
     }
 
     for path, (mod, fn) in simple_gets_db.items():
-        def _handler(m=mod, f=fn):
-            async def endpoint():
-                func = lazy_import(m, f)
-                async with get_db_session() as db:
-                    return await func(db)
-
-            endpoint.__name__ = f"svc_{f}"
-            return endpoint
-
-        app.get(path)(_handler())
+        app.get(path)(_make_endpoint(mod, fn, use_db=True, method="get"))
 
     # Pattern 2: POST body -> RequestClass -> func(request)
     post_request = [
@@ -65,18 +87,9 @@ def register_pattern_routes(app: FastAPI) -> None:
     ]
 
     for path, mod, fn, cls in post_request:
-        def _handler(m=mod, f=fn, c=cls):
-            async def endpoint(body: dict = Body(default={})):
-                func, req_cls = lazy_import(m, f, c)
-                return await func(req_cls(**body))
-
-            endpoint.__name__ = f"svc_{f}"
-            return endpoint
-
-        app.post(path)(_handler())
+        app.post(path)(_make_endpoint(mod, fn, cls=cls))
 
     # Pattern 3: POST body.get(keys) -> func(*args)
-    # Each key is (name,) or (name, default)
     post_keys = [
         ("/svcmodelinfo", "app.api.routes.predictions", "get_model_info", [("model_id",), ("model_type",)]),
         ("/svcprofilequick", "app.api.routes.profiling", "quick_profile", [("file_path",)]),
@@ -95,16 +108,7 @@ def register_pattern_routes(app: FastAPI) -> None:
     ]
 
     for path, mod, fn, keys in post_keys:
-        def _handler(m=mod, f=fn, k=keys):
-            async def endpoint(body: dict = Body(default={})):
-                func = lazy_import(m, f)
-                args = [body.get(*key) for key in k]
-                return await func(*args)
-
-            endpoint.__name__ = f"svc_{f}"
-            return endpoint
-
-        app.post(path)(_handler())
+        app.post(path)(_make_endpoint(mod, fn, keys=keys))
 
     # Pattern 4: POST body -> RequestClass + DB -> func(req, db)
     post_request_db = [
@@ -123,37 +127,25 @@ def register_pattern_routes(app: FastAPI) -> None:
     ]
 
     for path, mod, fn, cls in post_request_db:
-        def _handler(m=mod, f=fn, c=cls):
-            async def endpoint(body: dict = Body(default={})):
-                func, req_cls = lazy_import(m, f, c)
-                async with get_db_session() as db:
-                    return await func(req_cls(**body), db)
+        app.post(path)(_make_endpoint(mod, fn, cls=cls, use_db=True))
 
-            endpoint.__name__ = f"svc_{f}"
-            return endpoint
+    # Pattern 5: POST body.get(keys) + DB -> func(db, *args) [service direct]
+    post_keys_db_first = [
+        ("/svcjobget", "app.services.job_service", "get_job_response", [("job_id",)]),
+        ("/svcjobcancel", "app.services.job_service", "cancel_job", [("job_id",)]),
+        ("/svcjobdelete", "app.services.job_service", "delete_job", [("job_id",)]),
+        ("/svcjobstatus", "app.services.job_service", "get_job_status_response", [("job_id",)]),
+        ("/svcjobmetrics", "app.services.job_service", "get_job_metrics_response", [("job_id",)]),
+        ("/svcjobprogress", "app.services.job_service", "get_job_progress_response", [("job_id",)]),
+    ]
 
-        app.post(path)(_handler())
+    for path, mod, fn, keys in post_keys_db_first:
+        app.post(path)(_make_endpoint(mod, fn, keys=keys, use_db=True, db_first=True))
 
-    # Pattern 5: POST body.get(keys) + DB -> func(*args, db)
+    # Pattern 5b: POST body.get(keys) + DB -> func(*args, db) [adapter with logic]
     post_keys_db = [
-        ("/svcjobget", "app.api.compat.adapters.jobs", "get_job", [("job_id",)]),
-        ("/svcjobcancel", "app.api.compat.adapters.jobs", "cancel_job", [("job_id",)]),
-        ("/svcjobdelete", "app.api.compat.adapters.jobs", "delete_job", [("job_id",)]),
-        ("/svcjobstatus", "app.api.compat.adapters.jobs", "get_job_status", [("job_id",)]),
-        ("/svcjobmetrics", "app.api.compat.adapters.jobs", "get_job_metrics", [("job_id",)]),
         ("/svcjoblogs", "app.api.compat.adapters.jobs", "get_job_logs", [("job_id",), ("limit", 100)]),
-        ("/svcjobprogress", "app.api.compat.adapters.jobs", "get_job_progress", [("job_id",)]),
     ]
 
     for path, mod, fn, keys in post_keys_db:
-        def _handler(m=mod, f=fn, k=keys):
-            async def endpoint(body: dict = Body(default={})):
-                func = lazy_import(m, f)
-                args = [body.get(*key) for key in k]
-                async with get_db_session() as db:
-                    return await func(*args, db)
-
-            endpoint.__name__ = f"svc_{f}"
-            return endpoint
-
-        app.post(path)(_handler())
+        app.post(path)(_make_endpoint(mod, fn, keys=keys, use_db=True))

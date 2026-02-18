@@ -1,5 +1,6 @@
-import { useRef, useState, useCallback } from 'react'
 import type { TimeSeriesProfile } from '../../types/profiling'
+import { useSVGHover, getTooltipStyle } from '../../hooks/useSVGHover'
+import { formatTimestamp, formatTimestampFull, formatTickPrecise } from '../../utils/formatters'
 
 interface StationarityTrendPanelProps {
   profile: TimeSeriesProfile
@@ -14,20 +15,6 @@ function StatCard({ label, value, color }: { label: string; value: string | numb
   )
 }
 
-function formatTick(v: number): string {
-  return Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(2)
-}
-
-function formatTimestamp(ts: string): string {
-  const d = new Date(ts)
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
-
-function formatTimestampFull(ts: string): string {
-  const d = new Date(ts)
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-}
-
 function SVGLineChart({
   title,
   datasets,
@@ -39,9 +26,6 @@ function SVGLineChart({
   timestamps?: string[]
   fullWidth?: boolean
 }) {
-  const svgRef = useRef<SVGSVGElement>(null)
-  const [hoverIndex, setHoverIndex] = useState<number | null>(null)
-
   // Each dataset's valid (non-null) values
   const validSets = datasets.map((d) => d.values.filter((v): v is number => v !== null))
   const maxLen = Math.max(...validSets.map((v) => v.length))
@@ -61,26 +45,12 @@ function SVGLineChart({
   const toX = (i: number, len: number) => pad.left + (i / (len - 1)) * plotW
   const toY = (v: number) => pad.top + plotH - ((v - minVal) / range) * plotH
 
-  // X-axis ticks: ~5 evenly spaced
   const xTickCount = Math.min(5, maxLen)
   const xTicks = Array.from({ length: xTickCount }, (_, i) =>
     Math.round((i / (xTickCount - 1)) * (maxLen - 1))
   )
 
-  const onMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
-    const svg = svgRef.current
-    if (!svg) return
-    const rect = svg.getBoundingClientRect()
-    const svgX = ((e.clientX - rect.left) / rect.width) * width
-    const frac = (svgX - pad.left) / plotW
-    if (frac < 0 || frac > 1) { setHoverIndex(null); return }
-    setHoverIndex(Math.round(frac * (maxLen - 1)))
-  }, [maxLen, plotW, width])
-
-  const onMouseLeave = useCallback(() => setHoverIndex(null), [])
-
-  // Tooltip position as percentage for CSS positioning
-  const tooltipLeft = hoverIndex !== null ? ((toX(hoverIndex, maxLen) / width) * 100) : 0
+  const { svgRef, hoverIndex, onMouseMove, onMouseLeave } = useSVGHover(width, pad.left, plotW, maxLen)
 
   return (
     <div>
@@ -103,7 +73,7 @@ function SVGLineChart({
           {/* Y-axis labels */}
           {[minVal, (minVal + maxVal) / 2, maxVal].map((tick, i) => (
             <text key={i} x={pad.left - 5} y={toY(tick) + 4} textAnchor="end" className="text-[10px] fill-gray-500">
-              {formatTick(tick)}
+              {formatTickPrecise(tick)}
             </text>
           ))}
           {/* X-axis ticks */}
@@ -147,14 +117,10 @@ function SVGLineChart({
             </g>
           ))}
         </svg>
-        {/* Tooltip */}
         {hoverIndex !== null && (
           <div
             className="absolute top-2 pointer-events-none bg-white border border-gray-200 shadow-sm px-2 py-1.5 text-xs whitespace-nowrap z-10"
-            style={{
-              left: `${tooltipLeft}%`,
-              transform: tooltipLeft > 75 ? 'translateX(-100%)' : tooltipLeft < 25 ? 'none' : 'translateX(-50%)',
-            }}
+            style={getTooltipStyle(toX(hoverIndex, maxLen), width)}
           >
             <div className="font-medium text-gray-700 mb-0.5">
               {timestamps?.[hoverIndex] ? formatTimestampFull(timestamps[hoverIndex]) : `Index: ${hoverIndex}`}
@@ -164,7 +130,7 @@ function SVGLineChart({
               return (
                 <div key={di} className="flex items-center gap-1.5">
                   <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: datasets[di].color }} />
-                  <span className="text-gray-600">{datasets[di].label}: {formatTick(vals[hoverIndex])}</span>
+                  <span className="text-gray-600">{datasets[di].label}: {formatTickPrecise(vals[hoverIndex])}</span>
                 </div>
               )
             })}

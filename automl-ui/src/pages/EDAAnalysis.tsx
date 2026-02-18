@@ -177,6 +177,7 @@ function EDAAnalysis() {
       return
     }
     void profileTimeSeries({
+      mode: 'timeseries',
       file_path: selectedFilePath,
       time_column: tc,
       target_column: tgt,

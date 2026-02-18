@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback } from 'react'
 import type { TimeSeriesProfile } from '../../types/profiling'
+import { getTooltipStyle } from '../../hooks/useSVGHover'
 
 interface ACFPanelProps {
   profile: TimeSeriesProfile
@@ -49,8 +50,7 @@ function ACFBarChart({
 
   const onMouseLeave = useCallback(() => setHoverBar(null), [])
 
-  // Tooltip position as percentage
-  const tooltipLeft = hoverBar !== null ? (((getBarX(hoverBar) + barWidth / 2) / width) * 100) : 0
+  const tooltipX = hoverBar !== null ? getBarX(hoverBar) + barWidth / 2 : 0
 
   return (
     <div>
@@ -141,14 +141,10 @@ function ACFBarChart({
             Lag
           </text>
         </svg>
-        {/* Tooltip */}
         {hoverBar !== null && (
           <div
             className="absolute top-2 pointer-events-none bg-white border border-gray-200 shadow-sm px-2 py-1.5 text-xs whitespace-nowrap z-10"
-            style={{
-              left: `${tooltipLeft}%`,
-              transform: tooltipLeft > 75 ? 'translateX(-100%)' : tooltipLeft < 25 ? 'none' : 'translateX(-50%)',
-            }}
+            style={getTooltipStyle(tooltipX, width)}
           >
             <div className="font-medium text-gray-700">Lag {hoverBar + 1}: {displayValues[hoverBar].toFixed(4)}</div>
             <div className="text-gray-500">

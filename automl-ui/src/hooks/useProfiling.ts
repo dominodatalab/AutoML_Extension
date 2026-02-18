@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import api from '../api'
+import { aggregateAsyncState, orArray, useApiState } from './asyncHelpers'
 import { useAsyncOperation } from './useAsyncOperation'
-import { aggregateAsyncState, orArray, orNull } from './asyncHelpers'
 import type {
   AsyncProfileStartRequest,
   AsyncProfileStartResponse,
@@ -14,16 +14,6 @@ import type {
   PresetsByModelType,
   TimeSeriesProfile,
 } from '../types/profiling'
-
-interface TimeSeriesProfileRequest {
-  file_path: string
-  time_column: string
-  target_column: string
-  id_column?: string
-  sample_size?: number
-  sampling_strategy?: string
-  rolling_window?: number
-}
 
 interface UseProfilingResult {
   profile: DataProfile | null
@@ -43,7 +33,7 @@ interface UseProfilingResult {
   profileColumn: (filePath: string, columnName: string) => Promise<ColumnProfile | null>
   fetchMetrics: () => Promise<MetricsByProblemType | null>
   fetchPresets: () => Promise<PresetsByModelType | null>
-  profileTimeSeries: (request: TimeSeriesProfileRequest) => Promise<TimeSeriesProfile | null>
+  profileTimeSeries: (request: AsyncProfileStartRequest) => Promise<TimeSeriesProfile | null>
   startAsyncProfile: (request: AsyncProfileStartRequest) => Promise<AsyncProfileStartResponse>
   getAsyncProfileStatus: (requestId: string) => Promise<AsyncProfileStatusResponse>
   setProfileData: (value: DataProfile | null) => void
@@ -51,15 +41,9 @@ interface UseProfilingResult {
 }
 
 export function useProfiling(): UseProfilingResult {
-  const [profile, setProfile] = useState<DataProfile | null>(null)
-  const [quickProfile, setQuickProfile] = useState<QuickProfile | null>(null)
   const [suggestions, setSuggestions] = useState<TargetSuggestion[]>([])
-  const [columnProfile, setColumnProfile] = useState<ColumnProfile | null>(null)
-  const [metrics, setMetrics] = useState<MetricsByProblemType | null>(null)
-  const [presets, setPresets] = useState<PresetsByModelType | null>(null)
-  const [tsProfile, setTsProfile] = useState<TimeSeriesProfile | null>(null)
 
-  const profileOp = useAsyncOperation(
+  const profileState = useApiState(
     async (filePath: string, sampleSize = 50000, samplingStrategy = 'random', stratifyColumn?: string) => {
       const payload: Record<string, unknown> = {
         file_path: filePath,
@@ -68,109 +52,72 @@ export function useProfiling(): UseProfilingResult {
       }
       if (stratifyColumn) payload.stratify_column = stratifyColumn
       const { data } = await api.post<DataProfile>('profile', payload)
-      setProfile(data)
       return data
     },
-    { errorMessage: 'Failed to profile file' }
+    'Failed to profile file'
   )
 
-  const quickProfileOp = useAsyncOperation(
+  const quickProfileState = useApiState(
     async (filePath: string) => {
       const { data } = await api.post<QuickProfile>('profilequick', { file_path: filePath })
-      setQuickProfile(data)
       return data
     },
-    { errorMessage: 'Failed to quick profile file' }
+    'Failed to quick profile file'
   )
 
   const suggestTargetOp = useAsyncOperation(
     async (filePath: string) => {
-      const { data } = await api.post<{ suggestions: TargetSuggestion[] }>('suggesttarget', {
-        file_path: filePath
-      })
+      const { data } = await api.post<{ suggestions: TargetSuggestion[] }>('suggesttarget', { file_path: filePath })
       setSuggestions(data.suggestions)
       return data.suggestions
     },
     { errorMessage: 'Failed to suggest target' }
   )
 
-  const profileColumnOp = useAsyncOperation(
+  const columnProfileState = useApiState(
     async (filePath: string, columnName: string) => {
-      const { data } = await api.post<ColumnProfile>('profilecolumn', {
-        file_path: filePath,
-        column_name: columnName
-      })
-      setColumnProfile(data)
+      const { data } = await api.post<ColumnProfile>('profilecolumn', { file_path: filePath, column_name: columnName })
       return data
     },
-    { errorMessage: 'Failed to profile column' }
+    'Failed to profile column'
   )
 
-  const fetchMetricsOp = useAsyncOperation(
+  const metricsState = useApiState(
     async () => {
       const { data } = await api.get<MetricsByProblemType>('metrics')
-      setMetrics(data)
       return data
     },
-    { errorMessage: 'Failed to fetch metrics' }
+    'Failed to fetch metrics'
   )
 
-  const fetchPresetsOp = useAsyncOperation(
+  const presetsState = useApiState(
     async () => {
       const { data } = await api.get<PresetsByModelType>('presets')
-      setPresets(data)
       return data
     },
-    { errorMessage: 'Failed to fetch presets' }
+    'Failed to fetch presets'
   )
 
-  const tsProfileOp = useAsyncOperation(
-    async (request: TimeSeriesProfileRequest) => {
+  const tsProfileState = useApiState(
+    async (request: AsyncProfileStartRequest) => {
       const { data } = await api.post<TimeSeriesProfile>('profiletimeseries', request)
-      setTsProfile(data)
       return data
     },
-    { errorMessage: 'Failed to profile time series' }
+    'Failed to profile time series'
   )
 
   const { loading, error } = aggregateAsyncState([
-    profileOp,
-    quickProfileOp,
+    profileState,
+    quickProfileState,
     suggestTargetOp,
-    profileColumnOp,
-    fetchMetricsOp,
-    fetchPresetsOp,
+    columnProfileState,
+    metricsState,
+    presetsState,
   ])
-
-  // Wrap execute calls to preserve the original return-type contracts
-  // (returning null / [] on failure instead of undefined)
-  const profileFile = useCallback(async (filePath: string, sampleSize?: number, samplingStrategy?: string, stratifyColumn?: string) => {
-    return orNull(profileOp.execute(filePath, sampleSize ?? 50000, samplingStrategy ?? 'random', stratifyColumn))
-  }, [profileOp.execute])
-
-  const quickProfileFile = useCallback(async (filePath: string) => {
-    return orNull(quickProfileOp.execute(filePath))
-  }, [quickProfileOp.execute])
 
   const suggestTarget = useCallback(async (filePath: string) => {
     return orArray(suggestTargetOp.execute(filePath))
   }, [suggestTargetOp.execute])
-
-  const profileColumn = useCallback(async (filePath: string, columnName: string) => {
-    return orNull(profileColumnOp.execute(filePath, columnName))
-  }, [profileColumnOp.execute])
-
-  const fetchMetrics = useCallback(async () => {
-    return orNull(fetchMetricsOp.execute())
-  }, [fetchMetricsOp.execute])
-
-  const fetchPresets = useCallback(async () => {
-    return orNull(fetchPresetsOp.execute())
-  }, [fetchPresetsOp.execute])
-
-  const profileTimeSeries = useCallback(async (request: TimeSeriesProfileRequest) => {
-    return orNull(tsProfileOp.execute(request))
-  }, [tsProfileOp.execute])
 
   const startAsyncProfile = useCallback(async (request: AsyncProfileStartRequest) => {
     const { data } = await api.post<AsyncProfileStartResponse>('profileasyncstart', request)
@@ -178,42 +125,32 @@ export function useProfiling(): UseProfilingResult {
   }, [])
 
   const getAsyncProfileStatus = useCallback(async (requestId: string) => {
-    const { data } = await api.post<AsyncProfileStatusResponse>('profileasyncstatus', {
-      request_id: requestId,
-    })
+    const { data } = await api.post<AsyncProfileStatusResponse>('profileasyncstatus', { request_id: requestId })
     return data
   }, [])
 
-  const setProfileData = useCallback((value: DataProfile | null) => {
-    setProfile(value)
-  }, [])
-
-  const setTsProfileData = useCallback((value: TimeSeriesProfile | null) => {
-    setTsProfile(value)
-  }, [])
-
   return {
-    profile,
-    quickProfile,
+    profile: profileState.data,
+    quickProfile: quickProfileState.data,
     suggestions,
-    columnProfile,
-    metrics,
-    presets,
-    tsProfile,
-    tsLoading: tsProfileOp.loading,
-    tsError: tsProfileOp.error ?? null,
+    columnProfile: columnProfileState.data,
+    metrics: metricsState.data,
+    presets: presetsState.data,
+    tsProfile: tsProfileState.data,
+    tsLoading: tsProfileState.loading,
+    tsError: tsProfileState.error ?? null,
     loading,
     error,
-    profileFile,
-    quickProfileFile,
+    profileFile: profileState.execute,
+    quickProfileFile: quickProfileState.execute,
     suggestTarget,
-    profileColumn,
-    fetchMetrics,
-    fetchPresets,
-    profileTimeSeries,
+    profileColumn: columnProfileState.execute,
+    fetchMetrics: metricsState.execute,
+    fetchPresets: presetsState.execute,
+    profileTimeSeries: tsProfileState.execute,
     startAsyncProfile,
     getAsyncProfileStatus,
-    setProfileData,
-    setTsProfileData,
+    setProfileData: profileState.setData,
+    setTsProfileData: tsProfileState.setData,
   }
 }

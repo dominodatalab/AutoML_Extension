@@ -1,5 +1,6 @@
-import { useRef, useState, useCallback } from 'react'
 import type { TimeSeriesProfile } from '../../types/profiling'
+import { useSVGHover, getTooltipStyle } from '../../hooks/useSVGHover'
+import { formatTimestamp, formatTimestampFull, formatTick } from '../../utils/formatters'
 
 interface TimeSeriesOverviewProps {
   profile: TimeSeriesProfile
@@ -25,20 +26,7 @@ function Badge({ label, positive }: { label: string; positive: boolean }) {
   )
 }
 
-function formatTimestamp(ts: string): string {
-  const d = new Date(ts)
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
-
-function formatTimestampFull(ts: string): string {
-  const d = new Date(ts)
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-}
-
 function TargetLineChart({ profile }: { profile: TimeSeriesProfile }) {
-  const svgRef = useRef<SVGSVGElement>(null)
-  const [hoverIndex, setHoverIndex] = useState<number | null>(null)
-
   const data = profile.rolling_statistics
   if (!data || !data.rolling_mean.length) return null
 
@@ -57,30 +45,16 @@ function TargetLineChart({ profile }: { profile: TimeSeriesProfile }) {
 
   const toX = (i: number) => pad.left + (i / (values.length - 1)) * plotW
   const toY = (v: number) => pad.top + plotH - ((v - minVal) / range) * plotH
-  const fmtTick = (v: number) => (Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(1))
 
   const points = values.map((v, i) => `${toX(i)},${toY(v)}`).join(' ')
   const yTicks = [minVal, minVal + range * 0.5, maxVal]
 
-  // X-axis ticks: ~5 evenly spaced
   const xTickCount = Math.min(5, values.length)
   const xTicks = Array.from({ length: xTickCount }, (_, i) =>
     Math.round((i / (xTickCount - 1)) * (values.length - 1))
   )
 
-  const onMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
-    const svg = svgRef.current
-    if (!svg) return
-    const rect = svg.getBoundingClientRect()
-    const svgX = ((e.clientX - rect.left) / rect.width) * width
-    const frac = (svgX - pad.left) / plotW
-    if (frac < 0 || frac > 1) { setHoverIndex(null); return }
-    setHoverIndex(Math.round(frac * (values.length - 1)))
-  }, [values.length, plotW, width])
-
-  const onMouseLeave = useCallback(() => setHoverIndex(null), [])
-
-  const tooltipLeft = hoverIndex !== null ? ((toX(hoverIndex) / width) * 100) : 0
+  const { svgRef, hoverIndex, onMouseMove, onMouseLeave } = useSVGHover(width, pad.left, plotW, values.length)
 
   return (
     <div>
@@ -93,27 +67,23 @@ function TargetLineChart({ profile }: { profile: TimeSeriesProfile }) {
           onMouseMove={onMouseMove}
           onMouseLeave={onMouseLeave}
         >
-          {/* Grid lines + Y-axis labels */}
           {yTicks.map((tick, i) => {
             const y = toY(tick)
             return (
               <g key={i}>
                 <line x1={pad.left} y1={y} x2={width - pad.right} y2={y} stroke="#e5e7eb" strokeWidth="1" />
                 <text x={pad.left - 5} y={y + 4} textAnchor="end" className="text-[10px] fill-gray-500">
-                  {fmtTick(tick)}
+                  {formatTick(tick)}
                 </text>
               </g>
             )
           })}
-          {/* X-axis ticks */}
           {xTicks.map((idx) => (
             <text key={idx} x={toX(idx)} y={pad.top + plotH + 16} textAnchor="middle" className="text-[10px] fill-gray-500">
               {data.timestamps?.[idx] ? formatTimestamp(data.timestamps[idx]) : idx}
             </text>
           ))}
-          {/* Line */}
           <polyline points={points} fill="none" stroke="#7c3aed" strokeWidth="1.5" />
-          {/* Hover crosshair + dot */}
           {hoverIndex !== null && (
             <>
               <line
@@ -127,25 +97,20 @@ function TargetLineChart({ profile }: { profile: TimeSeriesProfile }) {
               />
             </>
           )}
-          {/* Legend */}
           <line x1={pad.left} y1={height - 8} x2={pad.left + 20} y2={height - 8} stroke="#7c3aed" strokeWidth="2" />
           <text x={pad.left + 25} y={height - 4} className="text-[10px] fill-gray-600">Rolling Mean</text>
         </svg>
-        {/* Tooltip */}
         {hoverIndex !== null && (
           <div
             className="absolute top-2 pointer-events-none bg-white border border-gray-200 shadow-sm px-2 py-1.5 text-xs whitespace-nowrap z-10"
-            style={{
-              left: `${tooltipLeft}%`,
-              transform: tooltipLeft > 75 ? 'translateX(-100%)' : tooltipLeft < 25 ? 'none' : 'translateX(-50%)',
-            }}
+            style={getTooltipStyle(toX(hoverIndex), width)}
           >
             <div className="font-medium text-gray-700 mb-0.5">
               {data.timestamps?.[hoverIndex] ? formatTimestampFull(data.timestamps[hoverIndex]) : `Index: ${hoverIndex}`}
             </div>
             <div className="flex items-center gap-1.5">
               <span className="inline-block w-2 h-2 rounded-full bg-[#7c3aed]" />
-              <span className="text-gray-600">Rolling Mean: {fmtTick(values[hoverIndex])}</span>
+              <span className="text-gray-600">Rolling Mean: {formatTick(values[hoverIndex])}</span>
             </div>
           </div>
         )}

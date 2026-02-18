@@ -57,33 +57,29 @@ def handle_errors(
                 return f"{detail_prefix}: {e}"
             return str(e)
 
+        def _handle_exception(e: Exception) -> None:
+            if isinstance(e, HTTPException):
+                raise
+            if isinstance(e, FileNotFoundError):
+                raise HTTPException(status_code=404, detail=_detail(e))
+            if isinstance(e, ValueError):
+                raise HTTPException(status_code=400, detail=_detail(e))
+            logger.error(f"{log_prefix}: {e}")
+            raise HTTPException(status_code=500, detail=_detail(e))
+
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs):
             try:
                 return await func(*args, **kwargs)
-            except HTTPException:
-                raise
-            except FileNotFoundError as e:
-                raise HTTPException(status_code=404, detail=_detail(e))
-            except ValueError as e:
-                raise HTTPException(status_code=400, detail=_detail(e))
             except Exception as e:
-                logger.error(f"{log_prefix}: {e}")
-                raise HTTPException(status_code=500, detail=_detail(e))
+                _handle_exception(e)
 
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs):
             try:
                 return func(*args, **kwargs)
-            except HTTPException:
-                raise
-            except FileNotFoundError as e:
-                raise HTTPException(status_code=404, detail=_detail(e))
-            except ValueError as e:
-                raise HTTPException(status_code=400, detail=_detail(e))
             except Exception as e:
-                logger.error(f"{log_prefix}: {e}")
-                raise HTTPException(status_code=500, detail=_detail(e))
+                _handle_exception(e)
 
         if asyncio.iscoroutinefunction(func):
             return async_wrapper

@@ -1,5 +1,23 @@
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 
+export function formatTimestamp(ts: string): string {
+  const d = new Date(ts)
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+export function formatTimestampFull(ts: string): string {
+  const d = new Date(ts)
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+export function formatTick(v: number): string {
+  return Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(1)
+}
+
+export function formatTickPrecise(v: number): string {
+  return Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(2)
+}
+
 export function formatDuration(startDate: string | null | undefined, endDate: string | null | undefined): string {
   if (!startDate || !endDate) return '—'
   const start = new Date(startDate).getTime()
