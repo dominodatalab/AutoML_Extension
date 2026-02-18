@@ -39,7 +39,7 @@ The AutoML Extension is a full-stack web application that runs as a Domino App. 
 5. **Deploy / Export** — three paths to production:
    - **Model API** — create Domino Model APIs with versioning, scaling, and lifecycle management (start/stop, logs, credentials)
    - **Model Registry** — push to MLflow/Domino Model Registry with version control, stage transitions (Staging → Production → Archived), and model cards
-   - **Export** — download as a deployment package, ONNX model, or reproducible Jupyter notebook for offline or external use
+   - **Export** — download as a deployment package or reproducible Jupyter notebook for offline or external use
 
 ### Architecture (High-Level)
 
@@ -220,12 +220,10 @@ When neither env var is set, defaults to: `/domino/datasets/local`, `/mnt/data`,
 
 | Variable | Source | Criticality | Default | Purpose | When Missing |
 |----------|--------|-------------|---------|---------|-------------|
-| `DOMINO_JOB_COMMIT_ID` | Extension | Optional | `None` | Explicit commit for child job launches (highest priority) | Falls through 6-level chain ending at `git rev-parse HEAD`, then `None` (Domino uses default branch). |
-| `DOMINO_STARTING_COMMIT_ID` | Domino | Optional | `None` | Commit at workspace/run start (fallback) | Next in chain: `DOMINO_COMMIT_ID`. |
-| `DOMINO_COMMIT_ID` | Extension | Optional | `None` | General commit ID (fallback) | Next in chain: `DOMINO_GIT_COMMIT`. |
-| `DOMINO_GIT_COMMIT` | Extension | Optional | `None` | Git commit hash (lowest priority env fallback) | Falls back to `git rev-parse HEAD`. |
+| `DOMINO_JOB_COMMIT_ID` | Extension | Optional | `None` | Explicit commit for child job launches (highest priority) | Falls through to `DOMINO_STARTING_COMMIT_ID` → `git rev-parse HEAD` → `None`. |
+| `DOMINO_STARTING_COMMIT_ID` | Domino | Optional | `None` | Commit at workspace/run start | Falls back to `git rev-parse HEAD` → `None`. |
 
-**Commit resolution order**: `DOMINO_JOB_COMMIT_ID` → `AUTOML_DOMINO_JOB_COMMIT_ID` → `DOMINO_STARTING_COMMIT_ID` → `DOMINO_COMMIT_ID` → `DOMINO_GIT_COMMIT` → `git rev-parse HEAD`
+**Commit resolution order**: `DOMINO_JOB_COMMIT_ID` → `DOMINO_STARTING_COMMIT_ID` → `git rev-parse HEAD`
 
 ### 4.2 Domino APIs Called
 

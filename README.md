@@ -48,7 +48,7 @@ Dockerfile               Container build for Domino deployment
 - **Exploratory Data Analysis**: Interactive data profiling, column explorer, correlation matrix, data quality checks, time series profiling (ACF/PACF, stationarity, decomposition), notebook export, optional async Domino Job execution
 - **Dataset Management**: Upload CSV/Parquet or connect to Domino Datasets
 - **Model Registry**: MLflow integration for versioning, stage transitions, model cards, and downloads
-- **Model Export**: ONNX, deployment bundle, and notebook formats
+- **Model Export**: deployment bundle and notebook formats
 - **Deployment**: Deploy trained models to Domino Model APIs with full lifecycle management (create, start, stop, delete)
 - **Experiment Tracking**: MLflow logging of per-model hyperparameters, metrics, and artifacts
 - **Real-time Progress**: WebSocket-based training progress updates
@@ -211,7 +211,6 @@ Async endpoints:
 ### Export
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/svc/v1/export/export/onnx` | Export to ONNX |
 | POST | `/svc/v1/export/export/deployment` | Export deployment bundle |
 | POST | `/svc/v1/export/export/notebook` | Export notebook |
 | GET | `/svc/v1/export/export/formats` | List export formats |
@@ -257,7 +256,6 @@ For Domino proxy constraints, the backend also exposes 66 single-segment `/svc*`
 - `POST /svcfeatureimportance` → feature importance
 - `POST /svcleaderboard` → model leaderboard
 - `POST /svcregistermodel` → register model to MLflow
-- `POST /svcexportonnx` → export to ONNX
 - `POST /svcquickdeploy` → quick deploy
 - `GET /svcdatasets` → list datasets
 - `GET /svcdeployments` → list deployments

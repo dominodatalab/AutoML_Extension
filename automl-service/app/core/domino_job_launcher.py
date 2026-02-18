@@ -150,10 +150,7 @@ class DominoJobLauncher:
         """
         for key in (
             "DOMINO_JOB_COMMIT_ID",
-            "AUTOML_DOMINO_JOB_COMMIT_ID",
             "DOMINO_STARTING_COMMIT_ID",
-            "DOMINO_COMMIT_ID",
-            "DOMINO_GIT_COMMIT",
         ):
             value = os.environ.get(key)
             if value:
