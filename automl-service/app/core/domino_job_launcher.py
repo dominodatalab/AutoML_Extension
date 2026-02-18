@@ -103,6 +103,44 @@ class DominoJobLauncher:
         )
 
     @staticmethod
+    def _extract_execution_status(response: Any) -> Optional[str]:
+        """Best-effort status extraction across Domino client response variants."""
+        if not isinstance(response, dict):
+            return None
+
+        statuses = response.get("statuses") if isinstance(response.get("statuses"), dict) else {}
+
+        # Prefer terminal/completion fields when available.
+        for candidate in (
+            statuses.get("completionStatus"),
+            response.get("completionStatus"),
+            statuses.get("executionStatus"),
+            response.get("executionStatus"),
+            statuses.get("status"),
+            response.get("status"),
+            statuses.get("lifecycleStatus"),
+            response.get("lifecycleStatus"),
+            statuses.get("state"),
+            response.get("state"),
+        ):
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate
+
+        # Fall back to status booleans if present.
+        if statuses.get("isFailed"):
+            return "Failed"
+        if statuses.get("isStopped"):
+            return "Stopped"
+        if statuses.get("isCompleted") or statuses.get("isSuccess"):
+            return "Succeeded"
+        if statuses.get("isRunning"):
+            return "Running"
+        if statuses.get("isQueued") or statuses.get("isPending"):
+            return "Pending"
+
+        return None
+
+    @staticmethod
     def _resolve_launch_commit_id() -> tuple[Optional[str], Optional[str]]:
         """Resolve commit used for child Domino jobs.
 
@@ -396,11 +434,7 @@ class DominoJobLauncher:
             }
         try:
             response = self._get_domino_client().job_status(domino_job_id)
-            execution_status = (
-                response.get("statuses", {}).get("executionStatus")
-                if isinstance(response, dict)
-                else None
-            )
+            execution_status = self._extract_execution_status(response)
             return {
                 "success": True,
                 "domino_job_id": domino_job_id,

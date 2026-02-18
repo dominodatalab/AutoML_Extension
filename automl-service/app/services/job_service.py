@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 _TERMINAL_JOB_STATUSES = {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}
 _DOMINO_PENDING_STATUSES = {"submitted", "queued", "pending", "initializing", "provisioning"}
 _DOMINO_RUNNING_STATUSES = {"running", "executing"}
+_DOMINO_COMPLETED_STATUSES = {"succeeded", "success", "successful", "completed", "complete", "done", "finished"}
 _DOMINO_FAILED_STATUSES = {"failed", "error"}
 _DOMINO_CANCELLED_STATUSES = {"stopped", "cancelled", "canceled", "archived"}
 _DOMINO_MISSING_JOB_MESSAGE = "External Domino job is no longer accessible (archived or deleted)."
@@ -437,6 +438,8 @@ def _normalize_domino_status(status: Optional[str]) -> str:
 def _terminal_status_from_domino(status: Optional[str]) -> Optional[JobStatus]:
     """Map Domino terminal statuses to local JobStatus values."""
     normalized = _normalize_domino_status(status)
+    if normalized in _DOMINO_COMPLETED_STATUSES:
+        return JobStatus.COMPLETED
     if normalized in _DOMINO_FAILED_STATUSES:
         return JobStatus.FAILED
     if normalized in _DOMINO_CANCELLED_STATUSES:
@@ -617,7 +620,23 @@ async def _sync_domino_job_state(
 
     terminal_status = _terminal_status_from_domino(latest_domino_status)
     if not terminal_status:
+        if normalized:
+            logger.warning(
+                "Unrecognized Domino terminal status '%s' for job %s (domino id %s)",
+                latest_domino_status,
+                job.id,
+                job.domino_job_id,
+            )
         return job
+
+    if terminal_status == JobStatus.COMPLETED:
+        updated = await crud.update_job_status(
+            db=db,
+            job_id=job.id,
+            status=JobStatus.COMPLETED,
+            completed_at=job.completed_at or datetime.utcnow(),
+        )
+        return updated or job
 
     if terminal_status == JobStatus.FAILED:
         error_message = job.error_message or (
