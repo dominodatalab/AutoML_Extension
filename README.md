@@ -7,49 +7,52 @@ A full-stack AutoML platform built on [AutoGluon](https://auto.gluon.ai/) and [D
 ```
 automl-service/          FastAPI backend (Python 3.11, AutoGluon 1.5, MLflow)
 automl-ui/               React frontend (TypeScript, Vite, Tailwind CSS)
-sample_projects/         Example datasets (customer churn)
+docs/                    Documentation and design references
+style-guide/             Domino design system reference
 app.sh                   Combined startup script for Domino Apps
 Dockerfile               Container build for Domino deployment
 ```
 
 ### Backend (`automl-service/`)
 
-**~11,400 LOC** across 43 Python files. Async FastAPI with SQLAlchemy ORM, AutoGluon ML, and MLflow tracking.
+**~16,600 LOC** across 73 Python files. Async FastAPI with SQLAlchemy ORM, AutoGluon ML, and MLflow tracking.
 
 | Layer | Files | Purpose |
 |-------|-------|---------|
-| `app/api/routes/` | 9 routers | REST endpoints (50+ routes) + WebSocket |
+| `app/api/routes/` | 8 routers | REST endpoints (107 routes) + WebSocket |
+| `app/api/compat/` | pattern-based | 66 single-segment `/svc*` Domino proxy routes |
 | `app/api/schemas/` | 3 files | Pydantic request/response models |
-| `app/core/` | 12 services | Predictions, diagnostics, export, MLflow, Domino integration |
-| `app/core/trainers/` | 3 trainers | Tabular and timeseries training (split from monolithic runner) |
+| `app/core/` | 18 services | Predictions, diagnostics, export, profiling, MLflow, Domino integration |
+| `app/core/trainers/` | 4 trainers | Base, callbacks, tabular, and timeseries training |
 | `app/db/` | 3 files | SQLAlchemy models, async CRUD, migrations |
-| `app/workers/` | 1 file | Background training orchestration |
+| `app/workers/` | 3 files | Background training and EDA orchestration |
 
 ### Frontend (`automl-ui/`)
 
-**~13,500 LOC** across 70 TypeScript files. React 18 with React Query for server state and Zustand for UI state.
+**~15,700 LOC** across 98 TypeScript files. React 18 with Zustand for UI state.
 
 | Layer | Files | Purpose |
 |-------|-------|---------|
 | `src/pages/` | 4 pages | Dashboard, NewJob wizard, JobDetail, EDA Analysis |
-| `src/components/` | 37 components | Common UI, wizard steps, diagnostics, charts, EDA |
-| `src/hooks/` | 10 hooks | Data fetching (jobs, datasets, models, diagnostics, progress) |
-| `src/utils/` | 3 files | Shared formatters, notebook generator, error handling |
-| `src/api/` | 4 files | Fetch-based API client with Domino endpoint mapping |
+| `src/components/` | 58 components | Common UI, wizard steps, diagnostics, charts, EDA |
+| `src/hooks/` | 13 hooks | Data fetching (jobs, datasets, models, diagnostics, profiling, progress) |
+| `src/utils/` | 6 files | Formatters, notebook generator, error handling, path utils |
+| `src/api/` | 3 files | Fetch-based API client with Domino endpoint mapping |
 | `src/types/` | 8 files | TypeScript type definitions |
 
 ## Features
 
 - **Training Wizard**: 4-step workflow (data source, model type, configuration, review) with advanced AutoGluon config (bagging, stacking, HPO, pseudo-labeling, distillation)
 - **Dual Training Execution**: Run training in the in-app queue (`local`) or as an external Domino Job (`domino_job`)
-- **Model Diagnostics**: Feature importance, leaderboard, confusion matrix, ROC/PR curves, SHAP explanations, learning curves
-- **Exploratory Data Analysis**: Interactive data profiling, column explorer, correlation matrix, data quality checks, notebook export, optional async Domino Job execution
+- **Model Diagnostics**: Feature importance, leaderboard, confusion matrix, ROC/PR curves, regression diagnostics, learning curves, model comparison
+- **Exploratory Data Analysis**: Interactive data profiling, column explorer, correlation matrix, data quality checks, time series profiling (ACF/PACF, stationarity, decomposition), notebook export, optional async Domino Job execution
 - **Dataset Management**: Upload CSV/Parquet or connect to Domino Datasets
-- **Model Registry**: MLflow integration for versioning and stage transitions
-- **Model Export**: ONNX, PMML, and pickle formats
-- **Deployment**: Deploy trained models to Domino Model APIs
+- **Model Registry**: MLflow integration for versioning, stage transitions, model cards, and downloads
+- **Model Export**: ONNX, deployment bundle, and notebook formats
+- **Deployment**: Deploy trained models to Domino Model APIs with full lifecycle management (create, start, stop, delete)
 - **Experiment Tracking**: MLflow logging of per-model hyperparameters, metrics, and artifacts
 - **Real-time Progress**: WebSocket-based training progress updates
+- **Job Management**: Queue status, bulk cleanup, orphan detection
 
 ## Quick Start
 
@@ -119,17 +122,31 @@ Async endpoints:
 
 ## API Reference
 
+### Health
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/svc/v1/health` | Basic health check |
+| GET | `/svc/v1/health/ready` | Readiness check with DB validation |
+| GET | `/svc/v1/health/user` | Get current user context |
+
 ### Jobs
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/svc/v1/jobs` | Create training job |
 | GET | `/svc/v1/jobs` | List jobs (filter by status, owner, project) |
+| POST | `/svc/v1/jobs/list` | List jobs (POST variant with filters in body) |
 | GET | `/svc/v1/jobs/{id}` | Get job details |
-| DELETE | `/svc/v1/jobs/{id}` | Delete job |
-| POST | `/svc/v1/jobs/{id}/cancel` | Cancel running job |
+| GET | `/svc/v1/jobs/{id}/status` | Get job status |
+| GET | `/svc/v1/jobs/{id}/metrics` | Get job metrics |
 | GET | `/svc/v1/jobs/{id}/progress` | Get training progress |
 | GET | `/svc/v1/jobs/{id}/logs` | Get job logs |
+| POST | `/svc/v1/jobs/{id}/cancel` | Cancel running job |
+| DELETE | `/svc/v1/jobs/{id}` | Delete job |
 | POST | `/svc/v1/jobs/{id}/register` | Register model to MLflow |
+| GET | `/svc/v1/jobs/queue/status` | Get queue status |
+| GET | `/svc/v1/jobs/cleanup/preview` | Preview cleanup candidates |
+| POST | `/svc/v1/jobs/cleanup` | Bulk cleanup jobs |
+| POST | `/svc/v1/jobs/cleanup/orphans` | Delete orphaned jobs |
 | WS | `/ws/jobs/{id}` | Real-time progress updates |
 
 ### Datasets
@@ -141,7 +158,20 @@ Async endpoints:
 | GET | `/svc/v1/datasets/{id}/preview` | Preview rows |
 | GET | `/svc/v1/datasets/{id}/schema` | Get inferred schema |
 | POST | `/svc/v1/datasets/preview` | Preview by direct file path |
-| GET | `/svcdatasets` | Domino-compatible single-segment dataset list route |
+
+### Profiling
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/svc/v1/profiling/profile` | Full data profiling |
+| POST | `/svc/v1/profiling/profile/quick` | Quick profile (summary stats only) |
+| POST | `/svc/v1/profiling/profile/suggest-target` | Suggest target column |
+| POST | `/svc/v1/profiling/profile/column/{name}` | Profile single column |
+| POST | `/svc/v1/profiling/profile/timeseries` | Time series profiling (ACF/PACF, stationarity, decomposition) |
+| GET | `/svc/v1/profiling/profile/metrics` | List available metrics by problem type |
+| GET | `/svc/v1/profiling/profile/presets` | List available presets by model type |
+| POST | `/svc/v1/profiling/profile/async/start` | Start async profiling as Domino Job |
+| POST | `/svc/v1/profiling/profile/async/status` | Poll async profiling status |
+| GET | `/svc/v1/profiling/profile/async/{id}` | Get async profiling result |
 
 ### Model Diagnostics
 | Method | Endpoint | Description |
@@ -158,39 +188,80 @@ Async endpoints:
 |--------|----------|-------------|
 | POST | `/svc/v1/predictions/predict` | Single prediction |
 | POST | `/svc/v1/predictions/predict/batch` | Batch prediction |
-| GET | `/svc/v1/predictions/model/{model_id}/info` | Get loaded model info |
-| DELETE | `/svc/v1/predictions/model/{model_id}/unload` | Unload model from memory |
+| GET | `/svc/v1/predictions/model/{id}/info` | Get loaded model info |
+| DELETE | `/svc/v1/predictions/model/{id}/unload` | Unload model from memory |
 | GET | `/svc/v1/predictions/models/loaded` | List loaded models |
 
-### Registry & Export
+### Registry
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/svc/v1/registry/register` | Register model to MLflow |
 | GET | `/svc/v1/registry/models` | List registered models |
+| GET | `/svc/v1/registry/models/mlflow` | List MLflow models |
+| GET | `/svc/v1/registry/models/{name}/versions` | Get model versions |
+| GET | `/svc/v1/registry/models/{name}/stages` | Get model by stage |
+| GET | `/svc/v1/registry/models/{name}/versions/{v}/uri` | Get model URI |
+| POST | `/svc/v1/registry/models/{name}/versions/{v}/download` | Download model |
+| POST | `/svc/v1/registry/models/transition-stage` | Transition model stage |
+| POST | `/svc/v1/registry/models/update-description` | Update model description |
+| POST | `/svc/v1/registry/models/card` | Generate model card |
+| DELETE | `/svc/v1/registry/models/{name}` | Delete model |
+| DELETE | `/svc/v1/registry/models/{name}/versions/{v}` | Delete version |
+
+### Export
+| Method | Endpoint | Description |
+|--------|----------|-------------|
 | POST | `/svc/v1/export/export/onnx` | Export to ONNX |
 | POST | `/svc/v1/export/export/deployment` | Export deployment bundle |
 | POST | `/svc/v1/export/export/notebook` | Export notebook |
 | GET | `/svc/v1/export/export/formats` | List export formats |
+| POST | `/svc/v1/export/learning-curves` | Get learning curves |
+| POST | `/svc/v1/export/compare-models` | Compare models |
 
 ### Deployments
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/svc/v1/deployments/model-apis` | List model APIs |
 | POST | `/svc/v1/deployments/model-apis` | Create model API |
+| GET | `/svc/v1/deployments/model-apis/{id}` | Get model API |
+| DELETE | `/svc/v1/deployments/model-apis/{id}` | Delete model API |
+| GET | `/svc/v1/deployments/model-apis/{id}/versions` | List API versions |
+| POST | `/svc/v1/deployments/model-apis/{id}/versions` | Create API version |
+| GET | `/svc/v1/deployments/model-apis/{id}/versions/{vid}` | Get API version |
+| GET | `/svc/v1/deployments/model-apis/{id}/versions/{vid}/logs` | Get build logs |
 | GET | `/svc/v1/deployments/deployments` | List deployments |
 | POST | `/svc/v1/deployments/deployments` | Create deployment |
+| GET | `/svc/v1/deployments/deployments/{id}` | Get deployment |
+| PATCH | `/svc/v1/deployments/deployments/{id}` | Update deployment |
+| DELETE | `/svc/v1/deployments/deployments/{id}` | Delete deployment |
+| POST | `/svc/v1/deployments/deployments/{id}/start` | Start deployment |
+| POST | `/svc/v1/deployments/deployments/{id}/stop` | Stop deployment |
+| GET | `/svc/v1/deployments/deployments/{id}/status` | Get deployment status |
+| GET | `/svc/v1/deployments/deployments/{id}/logs/{type}` | Get deployment logs |
+| GET | `/svc/v1/deployments/deployments/{id}/versions` | Get deployment versions |
+| GET | `/svc/v1/deployments/deployments/{id}/credentials` | Get credentials |
 | POST | `/svc/v1/deployments/quick-deploy` | Create API + version + deployment in one call |
 | POST | `/svc/v1/deployments/deploy-from-job/{job_id}` | Deploy from completed AutoML job |
 
 ### Domino Compatibility Routes
 
-For Domino proxy constraints, the backend also exposes single-segment `/svc*` routes (examples):
+For Domino proxy constraints, the backend also exposes 66 single-segment `/svc*` routes that mirror the RESTful API. Examples:
 
-- `POST /svcjobcreate`
-- `POST /svcjobprogress`
-- `POST /svcprofileasyncstart`
-- `POST /svcprofileasyncstatus`
-- `GET /svcdeployments`
+- `POST /svcjobcreate` → create job
+- `POST /svcjobget` → get job details
+- `POST /svcjobprogress` → get training progress
+- `POST /svcprofile` → profile dataset
+- `POST /svcprofiletimeseries` → time series profiling
+- `POST /svcprofileasyncstart` → start async profiling
+- `POST /svcprofileasyncstatus` → poll async status
+- `POST /svcfeatureimportance` → feature importance
+- `POST /svcleaderboard` → model leaderboard
+- `POST /svcregistermodel` → register model to MLflow
+- `POST /svcexportonnx` → export to ONNX
+- `POST /svcquickdeploy` → quick deploy
+- `GET /svcdatasets` → list datasets
+- `GET /svcdeployments` → list deployments
+- `GET /svcmodelapis` → list model APIs
 
 ## Environment Variables
 
@@ -243,11 +314,10 @@ Derived defaults:
 ### Frontend
 - **React 18** with TypeScript
 - **Vite 5** (build tool)
-- **Tailwind CSS 3.4** (utility-first styling)
-- **TanStack React Query 5** (server state)
+- **Tailwind CSS 3.4** (utility-first styling with custom Domino design tokens)
 - **Zustand 4** (UI state)
-- **Recharts 2** (charting)
-- **Headless UI** + **Heroicons** (accessible components)
+- **Recharts 2** (diagnostics charts)
+- **Heroicons** (icons)
 
 ## License
 
