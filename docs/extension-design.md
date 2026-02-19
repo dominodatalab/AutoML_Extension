@@ -191,10 +191,8 @@ When neither env var is set, defaults to: `/domino/datasets/local`, `/mnt/data`,
 
 | Variable | Source | Criticality | Default | Purpose | When Missing |
 |----------|--------|-------------|---------|---------|-------------|
-| `MLFLOW_TRACKING_URI` | Domino | Recommended | `None` | MLflow tracking server URI | Experiment tracking is offline-only (local MLflow backend). Model Registry page is non-functional. Job overview cannot generate experiment links. |
-| `MLFLOW_TRACKING_TOKEN` | Extension | Optional | `None` | MLflow auth token (auto-set from `DOMINO_API_KEY` at runtime) | Auto-derived from `DOMINO_API_KEY` at runtime; must set explicitly if no API key. |
-| `MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD` | Extension | Optional | `false` | Enable multipart upload for MLflow artifacts | Standard single-part upload used. |
-| `MLFLOW_MULTIPART_UPLOAD_CHUNK_SIZE` | Extension | Optional | `200000000` | Chunk size in bytes for multipart upload | Default 200 MB chunk size used. |
+| `MLFLOW_TRACKING_URI`  `MLFLOW_TRACKING_TOKEN` `MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD` `MLFLOW_MULTIPART_UPLOAD_CHUNK_SIZE`| Domino | Recommended | `None` | MLflow tracking server URI | Experiment tracking is offline-only (local MLflow backend). Model Registry page is non-functional. Job overview cannot generate experiment links. |
+
 
 #### Git / Commit
 
