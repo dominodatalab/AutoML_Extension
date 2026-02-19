@@ -154,7 +154,7 @@ This section details everything the extension requires from the Domino platform.
 
 \*At least one of `DOMINO_API_KEY`, `DOMINO_USER_API_KEY`, `DOMINO_TOKEN_FILE`, or `DOMINO_API_PROXY` must be set for any Domino integration to work.
 
-**Auth resolution order**: `API_KEY_OVERRIDE` (bypasses everything) → `DOMINO_API_KEY` → `DOMINO_USER_API_KEY` → contents of `DOMINO_TOKEN_FILE` → ephemeral token from `localhost:8899` (may not be available outside Domino Apps)
+**Auth resolution order** (Model API client): `API_KEY_OVERRIDE` → ephemeral token from `localhost:8899` → `DOMINO_API_KEY` → `DOMINO_USER_API_KEY` → contents of `DOMINO_TOKEN_FILE`
 
 #### Compute Configuration
 
@@ -261,26 +261,24 @@ The extension supports multiple auth mechanisms to work across Domino contexts (
 
 ```
 ┌────────────────────────────────────────────────────┐
-│            Auth Resolution Chain                   │
+│       Model API Auth Resolution Chain              │
+│       (domino_model_api.py _get_auth_headers)      │
 │                                                    │
 │  0. API_KEY_OVERRIDE env var                       │
-│     └─► Bypasses entire chain; used directly       │
+│     └─► X-Domino-Api-Key header (bypasses chain)   │
 │                                                    │
-│  1. DOMINO_API_KEY env var                         │
-│     └─► Used as X-Domino-Api-Key header            │
+│  1. Ephemeral token (localhost:8899)               │
+│     └─► Authorization: Bearer header               │
 │                                                    │
-│  2. DOMINO_USER_API_KEY env var (legacy)           │
-│     └─► Same usage, backward compat                │
+│  2. DOMINO_API_KEY env var                         │
+│     └─► X-Domino-Api-Key header                    │
 │                                                    │
-│  3. DOMINO_TOKEN_FILE (read file contents)         │
-│     └─► Used as X-Domino-Api-Key header            │
+│  3. DOMINO_USER_API_KEY env var (legacy)           │
+│     └─► X-Domino-Api-Key header                    │
 │                                                    │
-│  4. Ephemeral token (localhost:8899)               │
-│     └─► Used as Authorization: Bearer header       │
-│     └─► May not be available outside Domino Apps   │
-│                                                    │
-│  5. DOMINO_API_PROXY (transparent proxy auth)      │
-│     └─► No explicit key needed; proxy handles it   │
+│  4. DOMINO_TOKEN_FILE (read file contents)         │
+│     └─► X-Domino-Api-Key header (via              │
+│         effective_api_key)                          │
 └────────────────────────────────────────────────────┘
 ```
 
