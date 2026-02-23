@@ -379,6 +379,7 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                 leaderboard=result["leaderboard"],
                 model_path=result["model_path"],
                 experiment_run_id=run_id,
+                experiment_name=experiment_name,
             )
 
             # Final progress update: complete

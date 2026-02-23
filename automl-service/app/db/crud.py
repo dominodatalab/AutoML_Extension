@@ -205,6 +205,7 @@ async def update_job_results(
     leaderboard: dict,
     model_path: str,
     experiment_run_id: Optional[str] = None,
+    experiment_name: Optional[str] = None,
 ) -> Optional[Job]:
     """Update job with training results."""
     update_data = {
@@ -219,6 +220,9 @@ async def update_job_results(
 
     if experiment_run_id:
         update_data["experiment_run_id"] = experiment_run_id
+
+    if experiment_name:
+        update_data["experiment_name"] = experiment_name
 
     await db.execute(
         update(Job).where(Job.id == job_id).values(**update_data)

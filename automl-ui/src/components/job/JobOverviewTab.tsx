@@ -110,10 +110,18 @@ export function JobOverviewTab({ job, isLoading, currentStatus, currentDominoSta
                     className="text-domino-accent-purple hover:underline break-all"
                     title="Open Experiment Run"
                   >
-                    {job.experiment_id || job.experiment_run_id}
+                    {job.experiment_name || job.experiment_id || job.experiment_run_id}
+                    {job.experiment_name && (job.experiment_id || job.experiment_run_id) && (
+                      <span className="text-domino-text-muted ml-1">(#{job.experiment_id || job.experiment_run_id})</span>
+                    )}
                   </a>
                 ) : (
-                  job.experiment_id || job.experiment_run_id
+                  <>
+                    {job.experiment_name || job.experiment_id || job.experiment_run_id}
+                    {job.experiment_name && (job.experiment_id || job.experiment_run_id) && (
+                      <span className="text-domino-text-muted ml-1">(#{job.experiment_id || job.experiment_run_id})</span>
+                    )}
+                  </>
                 )}
               </MetadataRow>
             )}

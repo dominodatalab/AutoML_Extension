@@ -132,12 +132,15 @@ export function DominoIntegrationsTab({ job }: DominoIntegrationsTabProps) {
               )}
               {(job.experiment_id || job.experiment_run_id) && (
                 <>
-                  <dt className="text-domino-text-secondary">Run ID</dt>
+                  <dt className="text-domino-text-secondary">Run</dt>
                   <dd>
-                    <a href={experimentUrl} target="_blank" rel="noreferrer" className="text-sm font-mono text-[#3B3BD3] hover:underline break-all">
-                      {job.experiment_run_id || job.experiment_id}
+                    <a href={experimentUrl} target="_blank" rel="noreferrer" className="text-sm text-[#3B3BD3] hover:underline">
+                      {job.name}
                       <ExternalLinkIcon className="inline ml-1 -mt-0.5" />
                     </a>
+                    <div className="text-xs font-mono text-domino-text-muted mt-0.5 break-all">
+                      {job.experiment_run_id || job.experiment_id}
+                    </div>
                   </dd>
                 </>
               )}
