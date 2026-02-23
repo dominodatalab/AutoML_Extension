@@ -63,14 +63,7 @@ export function DominoIntegrationsTab({ job }: DominoIntegrationsTabProps) {
             <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
               <dt className="text-domino-text-secondary">Model name</dt>
               <dd className="text-domino-text-primary font-medium">
-                {experimentUrl ? (
-                  <a href={experimentUrl} target="_blank" rel="noreferrer" className="text-[#3B3BD3] hover:underline">
-                    {job.registered_model_name}
-                    <ExternalLinkIcon className="inline ml-1 -mt-0.5" />
-                  </a>
-                ) : (
-                  job.registered_model_name
-                )}
+                {job.registered_model_name}
               </dd>
               <dt className="text-domino-text-secondary">Version</dt>
               <dd className="text-domino-text-primary">{job.registered_model_version || '\u2014'}</dd>
