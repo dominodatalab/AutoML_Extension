@@ -175,7 +175,7 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                 await crud.add_job_log(db, job_id, f"[DEBUG] FILE DOES NOT EXIST: {data_path}", "ERROR")
 
             # Set up experiment tracking (Domino uses MLflow)
-            experiment_name = job.experiment_name or f"{job.name}__{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            experiment_name = job.experiment_name or f"{job.name}__{utc_now().strftime('%Y%m%d_%H%M%S')}"
             tracker.create_experiment(experiment_name)
             await crud.add_job_log(db, job_id, f"MLflow experiment: {experiment_name}")
 
