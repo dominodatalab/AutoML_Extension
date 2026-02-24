@@ -49,21 +49,24 @@ class TestDeployments:
         # The endpoint may fail if deployment infra isn't available
         if resp.status_code == 200:
             body = resp.json()
-            if body.get("success") and body.get("data", {}).get("model_api_id"):
-                cleanup_registry["model_apis"].append(body["data"]["model_api_id"])
-            if body.get("deployment_id"):
-                cleanup_registry["deployments"].append(body["deployment_id"])
-                shared_state["deployment_id"] = body["deployment_id"]
+            if body.get("success"):
+                # deploy_from_job returns model_api_id at top level
+                model_api_id = body.get("model_api_id")
+                if model_api_id:
+                    shared_state["model_api_id"] = model_api_id
+                    cleanup_registry["model_apis"].append(model_api_id)
         else:
             pytest.skip(f"Deploy-from-job not available: {resp.status_code} {resp.text}")
 
     @pytest.mark.slow
-    def test_get_deployment_details(self, client, shared_state):
-        dep_id = shared_state.get("deployment_id")
-        if not dep_id:
-            pytest.skip("No deployment created")
+    def test_get_model_api_details(self, client, shared_state):
+        model_api_id = shared_state.get("model_api_id")
+        if not model_api_id:
+            pytest.skip("No model API created from deploy-from-job")
 
-        resp = client.get(f"/svc/v1/deployments/deployments/{dep_id}")
-        assert resp.status_code == 200, f"Get deployment failed ({resp.status_code}): {resp.text}"
+        resp = client.get(f"/svc/v1/deployments/model-apis/{model_api_id}")
+        assert resp.status_code == 200, (
+            f"Get model API failed ({resp.status_code}): {resp.text}"
+        )
         body = resp.json()
-        assert body.get("success") is True, f"Get deployment not successful: {body}"
+        assert body.get("success") is True, f"Get model API not successful: {body}"
