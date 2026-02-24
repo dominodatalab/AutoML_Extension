@@ -51,6 +51,7 @@ results/
 
 # Generated reports
 reports/
+/test-reports/
 
 # OS
 .DS_Store
