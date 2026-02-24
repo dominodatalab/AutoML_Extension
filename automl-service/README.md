@@ -59,7 +59,18 @@ automl-service/
 │       ├── training_worker.py   # Async training execution loop
 │       ├── domino_training_runner.py
 │       └── domino_eda_runner.py
-├── tests/                       # 654 tests (see Testing section)
+├── tests/                       # 654 unit + 44 integration tests (see Testing section)
+│   ├── integration/             # End-to-end tests against live service
+│   │   ├── conftest.py          # Service startup, HTTP client, test data, cleanup
+│   │   ├── helpers.py           # Polling utilities (wait for job, deployment)
+│   │   ├── test_00_health.py    # Health, readiness, user context
+│   │   ├── test_01_profiling.py # Tabular + time series profiling
+│   │   ├── test_02_training.py  # Local + Domino Job training lifecycle
+│   │   ├── test_03_registry.py  # Model registration, versions, stages
+│   │   ├── test_04_deployment.py # Model API and deployment lifecycle
+│   │   └── test_05_errors.py    # Error paths and edge cases
+│   ├── test_*.py                # Unit tests (mocked DB, no live services)
+│   └── conftest.py              # Unit test fixtures
 ├── scripts/
 │   └── generate_synthetic_test_datasets.py
 ├── Dockerfile
@@ -174,7 +185,7 @@ This creates 10 datasets under `local_data/datasets/synthetic_generated_suite/` 
 
 ## Testing
 
-The test suite covers the entire backend with **654 tests** across 18 test files.
+The test suite covers the entire backend with **654 unit tests** and **44 integration tests** across 24 test files.
 
 ### Test dependencies
 
@@ -191,32 +202,32 @@ pip install pytest pytest-asyncio pytest-html aiosqlite httpx
 Tests are configured in `pytest.ini`. The default `addopts` writes an HTML report to `/mnt/results/test_report.html` (a Domino-specific path), so override it when running locally:
 
 ```bash
-# Run all tests (skips tests requiring the domino package)
-python -m pytest tests/ --override-ini="addopts=-v --tb=short"
+# Run unit tests only (skips integration tests and tests requiring the domino package)
+python -m pytest tests/ --ignore=tests/integration/
 
 # Run with HTML report to a local path
-python -m pytest tests/ --override-ini="addopts=-v --tb=short --html=test_report.html --self-contained-html"
+python -m pytest tests/ --ignore=tests/integration/ --html=test_report.html --self-contained-html
 
 # Run a specific test file
-python -m pytest tests/test_crud.py --override-ini="addopts=-v --tb=short"
+python -m pytest tests/test_crud.py
 
 # Run tests matching a keyword
-python -m pytest tests/ -k "profiler" --override-ini="addopts=-v --tb=short"
+python -m pytest tests/ --ignore=tests/integration/ -k "profiler"
 ```
 
 ### Running tests in Domino
 
-When running as a Domino Job, all environment variables and the `domino` package are available, so all 654 tests will execute. The HTML report is written to `/mnt/results/test_report.html` and visible in the Domino Job results tab.
+When running as a Domino Job, all environment variables and the `domino` package are available, so all 654 unit tests will execute. The HTML report is written to `/mnt/artifacts/results/test_report_xxx.html` and visible in the Domino Job results tab.
 
 ```bash
-# Run as a Domino Job command (uses pytest.ini defaults)
-python -m pytest tests/
+# Run unit tests as a Domino Job command (uses pytest.ini defaults)
+python -m pytest tests/ --ignore=tests/integration/
 ```
 
 To skip slow tests (AutoGluon training):
 
 ```bash
-python -m pytest tests/ -m "not slow"
+python -m pytest tests/ --ignore=tests/integration/ -m "not slow"
 ```
 
 ### Test markers
@@ -226,10 +237,11 @@ python -m pytest tests/ -m "not slow"
 | `@pytest.mark.slow` | Tests involving AutoGluon training (may take minutes) |
 | `@pytest.mark.domino` | Tests requiring the `domino` package and Domino environment |
 | `@pytest.mark.mlflow` | Tests requiring an MLflow tracking server |
+| `@pytest.mark.integration` | End-to-end integration tests against a live service |
 
 Tests marked `@pytest.mark.domino` are automatically skipped when the `domino` package is not installed.
 
-### Test file inventory
+### Unit test file inventory
 
 | File | Tests | What it covers |
 |---|---|---|
@@ -262,10 +274,59 @@ The HTML report (`/mnt/artifacts/results/test_report_xxx.html` in Domino) is cus
 
 When all tests pass, the report is a single screen: summary table + "0 Failed" banner.
 
-### Test infrastructure
+### Unit test infrastructure
 
 - **Database:** Each test gets a fresh async in-memory SQLite instance via the `async_engine` and `db_session` fixtures.
 - **Synthetic data:** `conftest.py` provides fixtures for tabular (200 rows, mixed types, injected NaN), multiclass (300 rows), regression (250 rows), time series (multi-series and single-series), and Parquet files.
 - **API client:** The `app_client` fixture provides an `httpx.AsyncClient` with `ASGITransport` against the FastAPI app, with DB dependency overrides for isolated testing.
 - **Job factory:** The `make_job` fixture creates `Job` ORM instances with sensible defaults.
 - **Auto-skip:** Tests marked `@pytest.mark.domino` are automatically skipped when the `domino` package is unavailable.
+
+---
+
+### Integration tests
+
+The integration test suite (**44 tests**) runs against a live FastAPI service to validate the full lifecycle: profiling, training, metrics, model registration, and deployment. Tests run as a Domino Job; fixtures start the service as a subprocess and hit it over HTTP.
+
+#### Running integration tests
+
+```bash
+# Full integration suite (runs as a Domino Job)
+python -m pytest tests/integration/ -v --tb=long -x
+
+# Locally (error path tests work without full Domino)
+python -m pytest tests/integration/test_05_errors.py -v
+```
+
+#### Integration test file inventory
+
+| File | Tests | What it covers |
+|---|---|---|
+| `test_00_health.py` | 4 | Health, readiness, user context, root endpoint |
+| `test_01_profiling.py` | 8 | Tabular + TS profiling, suggest-target, presets, metrics, error paths |
+| `test_02_training.py` | 10 | Local tabular + TS training, Domino Job training, metrics, leaderboard |
+| `test_03_registry.py` | 6 | Register from job, list models, versions, stage transitions, direct register |
+| `test_04_deployment.py` | 4 | List Model APIs, list deployments, deploy-from-job, deployment details |
+| `test_05_errors.py` | 12 | Bad files, missing fields, 404s, cancel completed, invalid formats, duplicates |
+
+Numeric prefixes enforce collection order — later tests depend on earlier ones via a session-scoped `shared_state` dict.
+
+#### Integration test design
+
+- **Service startup:** Session-scoped fixture starts `uvicorn app.main:app` as a subprocess, polls `GET /svc/v1/health` until ready (120s timeout). Teardown sends SIGTERM.
+- **HTTP client:** Synchronous `httpx.Client` pointing at `localhost:8000` with a `domino-username` header from `DOMINO_STARTING_USERNAME`.
+- **Test data:** Session-scoped fixtures generate small synthetic CSVs (500-row tabular, 2-series x 180-day time series) written to `/mnt/data/{project}/datasets/integration_test/` (Domino) or `local_data/datasets/integration_test/` (local).
+- **Shared state:** Session-scoped mutable dict passes resource IDs between ordered test files (e.g., `tabular_job_id` from test_02 feeds test_03). Downstream tests skip if required keys are missing.
+- **Unique names:** All resources use `inttest_{YYYYMMDD_HHMMSS}_{label}` to avoid collisions between runs.
+- **Cleanup:** Session teardown deletes resources in reverse dependency order (deployments, Model APIs, registered models, jobs, data files). All cleanup is best-effort.
+- **Conditional skips:** Domino-only tests skip when `DOMINO_API_KEY` is not set. Registry/deployment tests skip when upstream training didn't complete.
+
+#### Polling timeouts
+
+| Operation | Timeout | Interval |
+|---|---|---|
+| Service startup | 120s | 5s |
+| Local tabular training (500 rows) | 600s | 10s |
+| Local TS training (360 rows) | 600s | 10s |
+| Domino Job training | 900s | 15s |
+| Deployment startup | 600s | 15s |
