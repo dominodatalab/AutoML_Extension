@@ -22,14 +22,17 @@ class TestDeployments:
         resp = client.get("/svc/v1/deployments/model-apis")
         assert resp.status_code == 200, f"List model APIs failed ({resp.status_code}): {resp.text}"
         body = resp.json()
-        # Should be a list (possibly empty)
-        assert isinstance(body, list)
+        # Endpoint returns {"success": bool, "data": [...]}
+        assert body.get("success") is True, f"List model APIs not successful: {body}"
+        assert isinstance(body.get("data"), list)
 
     def test_list_deployments(self, client):
         resp = client.get("/svc/v1/deployments/deployments")
         assert resp.status_code == 200, f"List deployments failed ({resp.status_code}): {resp.text}"
         body = resp.json()
-        assert isinstance(body, list)
+        # Endpoint returns {"success": bool, "data": [...]}
+        assert body.get("success") is True, f"List deployments not successful: {body}"
+        assert isinstance(body.get("data"), list)
 
     @pytest.mark.slow
     def test_deploy_from_job(self, client, shared_state, cleanup_registry):
@@ -63,4 +66,4 @@ class TestDeployments:
         resp = client.get(f"/svc/v1/deployments/deployments/{dep_id}")
         assert resp.status_code == 200, f"Get deployment failed ({resp.status_code}): {resp.text}"
         body = resp.json()
-        assert body.get("success") is True or "status" in body
+        assert body.get("success") is True, f"Get deployment not successful: {body}"
