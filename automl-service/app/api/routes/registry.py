@@ -211,6 +211,15 @@ async def list_registered_models(db: AsyncSession = Depends(get_db)):
     for m in models:
         # Get job info to add model_path and model_type
         job = await crud.get_job(db, m.job_id) if m.job_id else None
+        # Filter metrics to numeric values only — job.metrics may contain
+        # strings like best_model, problem_type, eval_metric.
+        numeric_metrics = None
+        if job and job.metrics:
+            numeric_metrics = {
+                k: float(v) for k, v in job.metrics.items()
+                if isinstance(v, (int, float)) and not isinstance(v, bool)
+            }
+
         result.append(LocalModelInfo(
             id=m.id,
             name=m.name,
@@ -223,7 +232,7 @@ async def list_registered_models(db: AsyncSession = Depends(get_db)):
             created_at=m.created_at,
             model_path=job.model_path if job else None,
             model_type=job.model_type.value if job else None,
-            metrics=job.metrics if job else None,
+            metrics=numeric_metrics,
         ))
     return result
 
