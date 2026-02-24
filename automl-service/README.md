@@ -298,6 +298,12 @@ python -m pytest tests/integration/ -v --tb=long -x
 python -m pytest tests/integration/test_05_errors.py -v
 ```
 
+| Flag | What it does |
+|---|---|
+| `-v` | Verbose output — prints each test name and result instead of just dots |
+| `--tb=long` | On failure, shows the full Python traceback (default is `short`) |
+| `-x` | Stop on first failure — useful for ordered integration tests where later tests depend on earlier ones |
+
 #### Integration test file inventory
 
 | File | Tests | What it covers |
