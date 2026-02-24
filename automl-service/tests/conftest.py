@@ -11,6 +11,7 @@ Provides:
 import asyncio
 import os
 import shutil
+import subprocess
 import tempfile
 import uuid
 from collections import defaultdict
@@ -39,6 +40,43 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.db.database import Base
 from app.db.models import Job, JobLog, JobStatus, ModelType, ProblemType, RegisteredModel
 from app.core.utils import utc_now
+
+# ---------------------------------------------------------------------------
+# Dynamic HTML report path — saved to /mnt/artifacts so Domino persists it
+# ---------------------------------------------------------------------------
+
+def _git_short_sha() -> str:
+    """Return the short git SHA, or 'unknown' if not in a repo."""
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except Exception:
+        return "unknown"
+
+
+def pytest_configure(config):
+    """Set --html to a timestamped path under /mnt/artifacts (Domino) or local fallback."""
+    # Only set if not already provided via CLI
+    if config.getoption("htmlpath", default=None):
+        return
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    sha = _git_short_sha()
+    filename = f"test_report_{ts}_{sha}.html"
+
+    artifacts_dir = Path("/mnt/artifacts/results")
+    if artifacts_dir.exists():
+        report_dir = artifacts_dir
+    else:
+        # Local dev fallback — save next to the tests
+        report_dir = Path(__file__).resolve().parent.parent / "test-reports"
+        report_dir.mkdir(exist_ok=True)
+
+    config.option.htmlpath = str(report_dir / filename)
+
 
 # ---------------------------------------------------------------------------
 # Auto-skip markers when optional packages are absent
