@@ -56,7 +56,7 @@ def _mock_job_queue():
 @pytest.mark.asyncio
 async def test_create_tabular_job(app_client):
     """POST /svc/v1/jobs with valid tabular payload creates a job and returns 200."""
-    with patch("app.services.job_service.get_job_queue", return_value=_mock_job_queue()):
+    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
         response = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB)
 
     assert response.status_code == 200
@@ -113,7 +113,7 @@ async def test_create_timeseries_job_missing_time_column(app_client):
         "prediction_length": 10,
         # time_column is missing
     }
-    with patch("app.services.job_service.get_job_queue", return_value=_mock_job_queue()):
+    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
         response = await app_client.post("/svc/v1/jobs", json=payload)
 
     assert response.status_code == 400
@@ -127,7 +127,7 @@ async def test_create_timeseries_job_missing_time_column(app_client):
 @pytest.mark.asyncio
 async def test_list_jobs_empty(app_client):
     """POST /svc/v1/jobs/list on a fresh DB returns zero jobs."""
-    with patch("app.services.job_service.get_job_queue", return_value=_mock_job_queue()):
+    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
         response = await app_client.post(
             "/svc/v1/jobs/list",
             json={"owner": "", "project_name": ""},
@@ -142,7 +142,7 @@ async def test_list_jobs_empty(app_client):
 @pytest.mark.asyncio
 async def test_list_jobs_after_creation(app_client):
     """POST /svc/v1/jobs/list returns the job created earlier in the same session."""
-    with patch("app.services.job_service.get_job_queue", return_value=_mock_job_queue()):
+    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
         # Create a job first
         create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB)
         assert create_resp.status_code == 200
@@ -168,7 +168,7 @@ async def test_list_jobs_after_creation(app_client):
 @pytest.mark.asyncio
 async def test_get_job_by_id(app_client):
     """GET /svc/v1/jobs/{id} returns the created job."""
-    with patch("app.services.job_service.get_job_queue", return_value=_mock_job_queue()):
+    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
         create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB)
         job_id = create_resp.json()["id"]
 
@@ -199,7 +199,7 @@ async def test_get_job_not_found(app_client):
 @pytest.mark.asyncio
 async def test_get_job_status(app_client):
     """GET /svc/v1/jobs/{id}/status returns status response shape."""
-    with patch("app.services.job_service.get_job_queue", return_value=_mock_job_queue()):
+    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
         create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB)
         job_id = create_resp.json()["id"]
 
@@ -230,7 +230,7 @@ async def test_get_job_status_not_found(app_client):
 @pytest.mark.asyncio
 async def test_get_job_metrics(app_client):
     """GET /svc/v1/jobs/{id}/metrics returns metrics response shape."""
-    with patch("app.services.job_service.get_job_queue", return_value=_mock_job_queue()):
+    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
         create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB)
         job_id = create_resp.json()["id"]
 
@@ -260,7 +260,7 @@ async def test_get_job_metrics_not_found(app_client):
 @pytest.mark.asyncio
 async def test_cancel_pending_job(app_client):
     """POST /svc/v1/jobs/{id}/cancel cancels a pending job."""
-    with patch("app.services.job_service.get_job_queue", return_value=_mock_job_queue()):
+    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
         create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB)
         job_id = create_resp.json()["id"]
 
@@ -275,7 +275,7 @@ async def test_cancel_pending_job(app_client):
 @pytest.mark.asyncio
 async def test_cancel_already_cancelled_job(app_client):
     """POST /svc/v1/jobs/{id}/cancel on an already-cancelled job returns 400."""
-    with patch("app.services.job_service.get_job_queue", return_value=_mock_job_queue()):
+    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
         create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB)
         job_id = create_resp.json()["id"]
 
@@ -306,7 +306,7 @@ async def test_cancel_nonexistent_job(app_client):
 @pytest.mark.asyncio
 async def test_delete_job(app_client):
     """DELETE /svc/v1/jobs/{id} deletes a job and returns confirmation."""
-    with patch("app.services.job_service.get_job_queue", return_value=_mock_job_queue()):
+    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
         create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB)
         job_id = create_resp.json()["id"]
 
@@ -338,7 +338,7 @@ async def test_delete_nonexistent_job(app_client):
 @pytest.mark.asyncio
 async def test_bulk_delete_jobs(app_client):
     """POST /svc/v1/jobs/bulk-delete deletes multiple jobs at once."""
-    with patch("app.services.job_service.get_job_queue", return_value=_mock_job_queue()):
+    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
         # Create two jobs with different names
         job1_payload = {**VALID_TABULAR_JOB, "name": "bulk-job-1"}
         job2_payload = {**VALID_TABULAR_JOB, "name": "bulk-job-2"}
@@ -396,7 +396,7 @@ async def test_bulk_delete_empty_list_returns_422(app_client):
 @pytest.mark.asyncio
 async def test_create_duplicate_job_name_returns_409(app_client):
     """POST /svc/v1/jobs with a duplicate name in the same scope returns 409."""
-    with patch("app.services.job_service.get_job_queue", return_value=_mock_job_queue()):
+    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
         resp1 = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB)
         assert resp1.status_code == 200
 
