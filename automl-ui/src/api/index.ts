@@ -1,5 +1,18 @@
 import { getBasePath } from '../utils/basePath'
 
+/**
+ * Read projectId from URL query parameter (?projectId=...).
+ * Returns the value when present, undefined otherwise.
+ */
+function getProjectIdFromUrl(): string | undefined {
+  try {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('projectId') ?? undefined
+  } catch {
+    return undefined
+  }
+}
+
 // Extend window type for runtime config
 declare global {
   interface Window {
@@ -29,6 +42,11 @@ class ApiClient {
   constructor() {
     this.defaultHeaders = {
       'Content-Type': 'application/json',
+    }
+
+    const projectId = getProjectIdFromUrl()
+    if (projectId) {
+      this.defaultHeaders['X-Project-Id'] = projectId
     }
   }
 

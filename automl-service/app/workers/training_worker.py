@@ -190,8 +190,10 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                     "framework": "autogluon",
                     "created_by": "automl-service",
                     "domino_run": os.environ.get("DOMINO_RUN_ID", ""),
-                    "domino_project": os.environ.get("DOMINO_PROJECT_NAME", ""),
+                    "domino_project": job.project_name or os.environ.get("DOMINO_PROJECT_NAME", ""),
                 },
+                project_id=job.project_id,
+                project_name=job.project_name,
             )
 
             # Create progress reporter
@@ -516,7 +518,7 @@ async def register_trained_model(
             tags={
                 "job_id": job_id,
                 "job_name": job.name,
-                "domino_project": os.environ.get("DOMINO_PROJECT_NAME", ""),
+                "domino_project": job.project_name or os.environ.get("DOMINO_PROJECT_NAME", ""),
             },
             metrics=job.metrics if hasattr(job, 'metrics') and job.metrics else {},
             params=job_info,

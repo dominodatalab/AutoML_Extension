@@ -61,6 +61,7 @@ async def run_migrations():
         ("jobs", "execution_target", "VARCHAR(20) DEFAULT 'local'"),
         ("jobs", "domino_job_id", "VARCHAR(255)"),
         ("jobs", "domino_job_status", "VARCHAR(100)"),
+        ("jobs", "project_owner", "VARCHAR(255)"),
     ]
 
     async with engine.begin() as conn:

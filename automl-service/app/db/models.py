@@ -46,6 +46,7 @@ class Job(Base):
     owner: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     project_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     project_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    project_owner: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # Status
     status: Mapped[JobStatus] = mapped_column(SQLEnum(JobStatus), default=JobStatus.PENDING)

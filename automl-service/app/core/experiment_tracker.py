@@ -46,14 +46,16 @@ class ExperimentTracker:
         self,
         run_name: Optional[str] = None,
         tags: Optional[dict[str, str]] = None,
+        project_id: Optional[str] = None,
+        project_name: Optional[str] = None,
     ) -> str:
         """Start a new MLflow run."""
         import mlflow
 
-        # Add Domino-specific tags
+        # Add Domino-specific tags, preferring caller-provided context over env
         run_tags = {
-            "domino.project_id": self.settings.domino_project_id or "",
-            "domino.project_name": self.settings.domino_project_name or "",
+            "domino.project_id": project_id or self.settings.domino_project_id or "",
+            "domino.project_name": project_name or self.settings.domino_project_name or "",
             "domino.user": self.settings.domino_starting_username or "",
             "domino.run_id": self.settings.domino_run_id or "",
             "source": "automl-service",

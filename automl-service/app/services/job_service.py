@@ -78,12 +78,41 @@ def get_request_owner(request: Optional[Request]) -> str:
     return request.headers.get("domino-username", "anonymous")
 
 
-def get_project_context() -> tuple[Optional[str], Optional[str]]:
-    """Resolve Domino project id/name from settings or environment."""
+async def get_project_context(
+    request: Optional[Request] = None,
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Resolve Domino project id/name/owner from header, API, or environment.
+
+    Returns (project_id, project_name, project_owner).
+    """
     settings = get_settings()
+
+    # Check for sidebar-injected project id header
+    header_project_id = request.headers.get("X-Project-Id") if request else None
+
+    if header_project_id:
+        from app.services.project_resolver import resolve_project
+
+        info = await resolve_project(header_project_id)
+        if info:
+            return info.id, info.name, info.owner_username
+
+        # Resolution failed — use header id with env fallbacks
+        logger.warning(
+            "Could not resolve project %s via API; falling back to env vars",
+            header_project_id,
+        )
+        return (
+            header_project_id,
+            settings.domino_project_name or os.environ.get("DOMINO_PROJECT_NAME"),
+            settings.domino_project_owner or os.environ.get("DOMINO_PROJECT_OWNER"),
+        )
+
+    # No header — existing env var behavior
     return (
         settings.domino_project_id or os.environ.get("DOMINO_PROJECT_ID"),
         settings.domino_project_name or os.environ.get("DOMINO_PROJECT_NAME"),
+        settings.domino_project_owner or os.environ.get("DOMINO_PROJECT_OWNER"),
     )
 
 
@@ -162,6 +191,7 @@ def build_job_model(
     owner: str,
     project_id: Optional[str],
     project_name: Optional[str],
+    project_owner: Optional[str] = None,
 ) -> Job:
     """Build a Job ORM model from request and resolved context."""
     execution_target = resolve_execution_target(job_request)
@@ -172,6 +202,7 @@ def build_job_model(
         owner=owner,
         project_id=project_id,
         project_name=project_name,
+        project_owner=project_owner,
         model_type=ModelType(job_request.model_type),
         problem_type=ProblemType(job_request.problem_type) if job_request.problem_type else None,
         data_source=job_request.data_source,
@@ -213,13 +244,14 @@ async def create_job_with_context(
 ) -> Job:
     """Validate, create, and enqueue a job using request-derived context."""
     owner = get_request_owner(request)
-    project_id, project_name = get_project_context()
+    project_id, project_name, project_owner = await get_project_context(request)
 
     logger.info(
-        "[JOB CREATE] user=%s project_id=%s project_name=%s data_source=%s",
+        "[JOB CREATE] user=%s project_id=%s project_name=%s project_owner=%s data_source=%s",
         owner,
         project_id,
         project_name,
+        project_owner,
         job_request.data_source,
     )
 
@@ -265,6 +297,7 @@ async def create_job_with_context(
         owner=owner,
         project_id=project_id,
         project_name=project_name,
+        project_owner=project_owner,
     )
     try:
         job = await crud.create_job(db, job)
@@ -448,7 +481,10 @@ def resolve_job_list_filters(
     if list_request.project_id is not None:
         project_id_filter = list_request.project_id if list_request.project_id else None
     else:
-        project_id_filter = None
+        # Default to sidebar project when no explicit filter is set
+        project_id_filter = (
+            request.headers.get("X-Project-Id") if request else None
+        )
 
     return (
         status_filter,

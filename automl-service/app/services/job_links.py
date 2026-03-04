@@ -53,8 +53,16 @@ def _resolve_domino_ui_host() -> Optional[str]:
     return None
 
 
-def _resolve_project_owner() -> Optional[str]:
-    """Resolve Domino project owner for project-scoped UI links."""
+def _resolve_project_owner(job: Optional[Job] = None) -> Optional[str]:
+    """Resolve Domino project owner for project-scoped UI links.
+
+    Prefers the job record's project_owner (set via sidebar resolution),
+    then falls back to environment/settings.
+    """
+    job_owner = getattr(job, "project_owner", None) if job else None
+    if isinstance(job_owner, str) and job_owner.strip():
+        return job_owner.strip()
+
     settings = get_settings()
     owner = settings.domino_project_owner or os.environ.get("DOMINO_PROJECT_OWNER")
     if not owner:
@@ -81,7 +89,7 @@ def _build_domino_job_url(job: Job) -> Optional[str]:
     if not job.domino_job_id:
         return None
 
-    owner = _resolve_project_owner()
+    owner = _resolve_project_owner(job)
     project_name = _resolve_project_name(job)
     if not owner or not project_name:
         return None
@@ -143,7 +151,7 @@ def _build_experiment_run_url(job: Job, experiment_id: Optional[str]) -> Optiona
     if not experiment_id:
         return None
 
-    owner = _resolve_project_owner()
+    owner = _resolve_project_owner(job)
     project_name = _resolve_project_name(job)
     if not owner or not project_name:
         return None
@@ -161,7 +169,7 @@ def _build_model_registry_url(job: Job) -> Optional[str]:
     if not job.registered_model_name:
         return None
 
-    owner = _resolve_project_owner()
+    owner = _resolve_project_owner(job)
     project_name = _resolve_project_name(job)
     if not owner or not project_name:
         return None
