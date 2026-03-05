@@ -138,7 +138,7 @@ class DominoModelRegistry:
         try:
             # Use the same experiment as training, or create new one if not provided
             if not experiment_name:
-                experiment_name = f"{model_name}__{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                experiment_name = f"{model_name}__{utc_now().strftime('%Y%m%d_%H%M%S')}"
             mlflow.set_experiment(experiment_name)
             logger.info(f"Using MLflow experiment: {experiment_name}")
 
