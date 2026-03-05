@@ -96,6 +96,37 @@ interface NotebookExportResponse {
   notebook: Record<string, unknown>
 }
 
+// Hook for downloading deployment package as zip (binary response)
+export function useDownloadDeploymentPackage() {
+  return useMutation({
+    mutationFn: async (outputDir: string) => {
+      // Build URL the same way the api client does (Domino compat)
+      const { getBasePath } = await import('../utils/basePath')
+      const basePath = getBasePath()
+      const url = `${basePath}/svcexportdeploymentdownload`
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ output_dir: outputDir }),
+      })
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => response.statusText)
+        throw new Error(errText || 'Download failed')
+      }
+
+      const blob = await response.blob()
+      const disposition = response.headers.get('Content-Disposition') || ''
+      const match = disposition.match(/filename="?([^"]+)"?/)
+      const filename = match?.[1] || 'deployment_package.zip'
+
+      return { blob, filename }
+    },
+  })
+}
+
 export function useExportNotebook() {
   return useMutation({
     mutationFn: async (jobId: string) => {

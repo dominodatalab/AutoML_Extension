@@ -3,7 +3,7 @@ import { ArrowDownTrayIcon, CheckCircleIcon, XCircleIcon, DocumentTextIcon, Cube
 import { Card, CardContent } from '../common/Card'
 import Button from '../common/Button'
 import Input from '../common/Input'
-import { useExportNotebook, useExportDeployment } from '../../hooks/useExport'
+import { useExportNotebook, useExportDeployment, useDownloadDeploymentPackage } from '../../hooks/useExport'
 import { getDefaultExportPath } from '../../utils/pathDefaults'
 
 function normalizeModelType(rawModelType: string | null | undefined): 'tabular' | 'timeseries' | null {
@@ -72,6 +72,7 @@ export function ModelExportPanel({
 
   // Docker export state
   const exportDeploymentMutation = useExportDeployment()
+  const downloadDeploymentMutation = useDownloadDeploymentPackage()
   const safeJobName = useMemo(() => sanitizePathSegment(jobName), [jobName])
   const safeProjectName = useMemo(
     () => sanitizePathSegment(projectName || 'automl'),
@@ -159,6 +160,23 @@ export function ModelExportPanel({
     }
   }
 
+  const handleDownloadDocker = async () => {
+    if (!dockerSuccess) return
+    try {
+      const { blob, filename } = await downloadDeploymentMutation.mutateAsync(dockerSuccess.outputDir)
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch {
+      setDockerError('Failed to download deployment package')
+    }
+  }
+
   const dockerBuildCommand = dockerSuccess
     ? `cd "${dockerSuccess.outputDir}" && docker build -t ${imageName}:latest .`
     : ''
@@ -228,6 +246,17 @@ export function ModelExportPanel({
                 {dockerBuildCommand}
               </pre>
             </div>
+
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleDownloadDocker}
+              isLoading={downloadDeploymentMutation.isPending}
+              disabled={downloadDeploymentMutation.isPending}
+            >
+              <ArrowDownTrayIcon className="h-4 w-4 mr-1" />
+              Download Package (.zip)
+            </Button>
           </div>
         ) : (
           <div className="space-y-3">

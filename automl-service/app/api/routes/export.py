@@ -1,11 +1,14 @@
 """Model export and deployment endpoints."""
 
+import io
 import logging
 import json
+import os
+import zipfile
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Depends
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -129,6 +132,37 @@ async def export_deployment_package(
     )
 
     return DeploymentPackageResponse(**result)
+
+
+class DeploymentDownloadRequest(BaseModel):
+    """Request for downloading a deployment package as a zip."""
+    output_dir: str = Field(..., description="Path to the deployment package directory")
+
+
+@router.post("/export/deployment/download")
+async def download_deployment_package(request: DeploymentDownloadRequest):
+    """Download a previously exported deployment package as a zip file."""
+    target_dir = request.output_dir
+    if not os.path.isdir(target_dir):
+        raise HTTPException(status_code=404, detail=f"Deployment package not found at: {target_dir}")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, _dirs, files in os.walk(target_dir):
+            for file_name in files:
+                file_path = os.path.join(root, file_name)
+                arcname = os.path.relpath(file_path, target_dir)
+                zf.write(file_path, arcname)
+    buf.seek(0)
+
+    basename = os.path.basename(target_dir.rstrip("/"))
+    zip_filename = f"{basename}.zip" if basename else "deployment_package.zip"
+
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{zip_filename}"'},
+    )
 
 
 @router.post("/learning-curves", response_model=LearningCurvesResponse)
