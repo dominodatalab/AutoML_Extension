@@ -20,7 +20,7 @@ function Step3Configuration() {
   const isTimeSeries = modelType?.modelType === 'timeseries'
 
   const [localConfig, setLocalConfig] = useState({
-    executionTarget: training?.executionTarget || 'local',
+    executionTarget: training?.executionTarget || (dominoJobs ? 'domino_job' : 'local'),
     targetColumn: training?.targetColumn || '',
     timeColumn: training?.timeColumn || '',
     idColumn: training?.idColumn || '',
