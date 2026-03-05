@@ -29,6 +29,8 @@ from app.workers.training_worker import register_trained_model
 
 logger = logging.getLogger(__name__)
 
+LOCAL_PROJECT_ID = "local"
+
 _TERMINAL_JOB_STATUSES = {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}
 _DOMINO_PENDING_STATUSES = {"submitted", "queued", "pending", "initializing", "provisioning"}
 _DOMINO_RUNNING_STATUSES = {"running", "executing"}
@@ -78,6 +80,15 @@ def get_request_owner(request: Optional[Request]) -> str:
     return request.headers.get("domino-username", "anonymous")
 
 
+def get_request_project_id(request: Optional[Request]) -> Optional[str]:
+    """Extract project_id from X-Project-Id header with env var fallback."""
+    if request:
+        header_val = request.headers.get("X-Project-Id")
+        if header_val:
+            return header_val
+    return os.environ.get("DOMINO_PROJECT_ID") or LOCAL_PROJECT_ID
+
+
 async def get_project_context(
     request: Optional[Request] = None,
 ) -> tuple[Optional[str], Optional[str], Optional[str]]:
@@ -109,8 +120,9 @@ async def get_project_context(
         )
 
     # No header — existing env var behavior
+    project_id = settings.domino_project_id or os.environ.get("DOMINO_PROJECT_ID") or LOCAL_PROJECT_ID
     return (
-        settings.domino_project_id or os.environ.get("DOMINO_PROJECT_ID"),
+        project_id,
         settings.domino_project_name or os.environ.get("DOMINO_PROJECT_NAME"),
         settings.domino_project_owner or os.environ.get("DOMINO_PROJECT_OWNER"),
     )
@@ -504,13 +516,14 @@ async def preview_cleanup(
     db: AsyncSession,
     statuses: str = "failed,cancelled",
     older_than_days: Optional[int] = None,
+    project_id: Optional[str] = None,
 ) -> dict:
     """Preview what would be removed by bulk cleanup."""
     from app.core.cleanup_service import get_cleanup_service
 
     cleanup = get_cleanup_service()
     status_list = _parse_statuses_csv(statuses)
-    preview = await cleanup.preview_cleanup(db, status_list, older_than_days)
+    preview = await cleanup.preview_cleanup(db, status_list, older_than_days, project_id=project_id)
     orphans = await cleanup.find_orphans_checked(db)
     return {**preview, "orphans": orphans}
 
@@ -520,13 +533,14 @@ async def bulk_cleanup(
     statuses: list[str],
     older_than_days: Optional[int] = None,
     include_orphans: bool = False,
+    project_id: Optional[str] = None,
 ) -> dict:
     """Delete artifacts and DB rows for jobs matching given criteria."""
     from app.core.cleanup_service import get_cleanup_service
 
     cleanup = get_cleanup_service()
     status_list = [JobStatus(s) for s in statuses]
-    result = await cleanup.bulk_cleanup(db, status_list, older_than_days)
+    result = await cleanup.bulk_cleanup(db, status_list, older_than_days, project_id=project_id)
 
     if include_orphans:
         orphan_result = await cleanup.delete_orphans(db)

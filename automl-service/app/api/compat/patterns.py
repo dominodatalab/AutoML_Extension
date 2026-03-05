@@ -1,23 +1,32 @@
 """Pattern-based compatibility route registration."""
 
-from fastapi import Body, FastAPI
+from fastapi import Body, FastAPI, Request
 
 from app.dependencies import get_db_session
 
 from app.api.compat.common import lazy_import
 
 
-def _make_endpoint(mod, fn, cls=None, keys=None, use_db=False, db_first=False, method="post"):
+def _make_endpoint(mod, fn, cls=None, keys=None, use_db=False, db_first=False, method="post", project_scoped=False):
     """Create a compat endpoint closure for any of the 5 patterns."""
     def _handler(m=mod, f=fn, c=cls, k=keys):
         if c:
             # Pattern 2/4: RequestClass-based
-            async def endpoint(body: dict = Body(default={})):
-                func, req_cls = lazy_import(m, f, c)
-                if use_db:
-                    async with get_db_session() as db:
-                        return await func(req_cls(**body), db)
-                return await func(req_cls(**body))
+            if project_scoped:
+                async def endpoint(request: Request, body: dict = Body(default={})):
+                    func, req_cls = lazy_import(m, f, c)
+                    project_id = request.headers.get("X-Project-Id")
+                    if use_db:
+                        async with get_db_session() as db:
+                            return await func(req_cls(**body), db, project_id=project_id)
+                    return await func(req_cls(**body), project_id=project_id)
+            else:
+                async def endpoint(body: dict = Body(default={})):
+                    func, req_cls = lazy_import(m, f, c)
+                    if use_db:
+                        async with get_db_session() as db:
+                            return await func(req_cls(**body), db)
+                    return await func(req_cls(**body))
         elif k is not None:
             # Pattern 3/5: key-extraction
             async def endpoint(body: dict = Body(default={})):
@@ -31,10 +40,17 @@ def _make_endpoint(mod, fn, cls=None, keys=None, use_db=False, db_first=False, m
                 return await func(*args)
         elif use_db:
             # Pattern 1b: Simple GET + DB
-            async def endpoint():
-                func = lazy_import(m, f)
-                async with get_db_session() as db:
-                    return await func(db)
+            if project_scoped:
+                async def endpoint(request: Request):
+                    func = lazy_import(m, f)
+                    project_id = request.headers.get("X-Project-Id")
+                    async with get_db_session() as db:
+                        return await func(db, project_id=project_id)
+            else:
+                async def endpoint():
+                    func = lazy_import(m, f)
+                    async with get_db_session() as db:
+                        return await func(db)
         else:
             # Pattern 1: Simple GET
             async def endpoint():
@@ -61,12 +77,12 @@ def register_pattern_routes(app: FastAPI) -> None:
         app.get(path)(_make_endpoint(mod, fn, method="get"))
 
     # Pattern 1b: Simple GET + DB -> async function(db)
-    simple_gets_db = {
-        "/svcregisteredmodels": ("app.api.routes.registry", "list_registered_models"),
-    }
+    simple_gets_db = [
+        ("/svcregisteredmodels", "app.api.routes.registry", "list_registered_models", True),
+    ]
 
-    for path, (mod, fn) in simple_gets_db.items():
-        app.get(path)(_make_endpoint(mod, fn, use_db=True, method="get"))
+    for path, mod, fn, scoped in simple_gets_db:
+        app.get(path)(_make_endpoint(mod, fn, use_db=True, method="get", project_scoped=scoped))
 
     # Pattern 2: POST body -> RequestClass -> func(request)
     post_request = [
@@ -112,21 +128,21 @@ def register_pattern_routes(app: FastAPI) -> None:
 
     # Pattern 4: POST body -> RequestClass + DB -> func(req, db)
     post_request_db = [
-        ("/svcfeatureimportance", "app.api.routes.predictions", "get_feature_importance", "FeatureImportanceRequest"),
-        ("/svcleaderboard", "app.api.routes.predictions", "get_leaderboard", "LeaderboardRequest"),
-        ("/svcconfusionmatrix", "app.api.routes.predictions", "get_confusion_matrix", "DiagnosticsRequest"),
-        ("/svcroccurve", "app.api.routes.predictions", "get_roc_curve", "DiagnosticsRequest"),
-        ("/svcprecisionrecall", "app.api.routes.predictions", "get_precision_recall_curve", "DiagnosticsRequest"),
-        ("/svcregressiondiagnostics", "app.api.routes.predictions", "get_regression_diagnostics", "DiagnosticsRequest"),
-        ("/svcexportdeployment", "app.api.routes.export", "export_deployment_package", "DeploymentPackageRequest"),
-        ("/svclearningcurves", "app.api.routes.export", "get_learning_curves", "LearningCurvesRequest"),
-        ("/svcexportnotebook", "app.api.routes.export", "export_notebook", "ExportNotebookRequest"),
-        ("/svcjobcleanup", "app.api.compat.adapters.jobs", "bulk_cleanup", "CleanupRequest"),
-        ("/svcregistermodel", "app.api.routes.registry", "register_model", "RegisterModelRequest"),
+        ("/svcfeatureimportance", "app.api.routes.predictions", "get_feature_importance", "FeatureImportanceRequest", False),
+        ("/svcleaderboard", "app.api.routes.predictions", "get_leaderboard", "LeaderboardRequest", False),
+        ("/svcconfusionmatrix", "app.api.routes.predictions", "get_confusion_matrix", "DiagnosticsRequest", False),
+        ("/svcroccurve", "app.api.routes.predictions", "get_roc_curve", "DiagnosticsRequest", False),
+        ("/svcprecisionrecall", "app.api.routes.predictions", "get_precision_recall_curve", "DiagnosticsRequest", False),
+        ("/svcregressiondiagnostics", "app.api.routes.predictions", "get_regression_diagnostics", "DiagnosticsRequest", False),
+        ("/svcexportdeployment", "app.api.routes.export", "export_deployment_package", "DeploymentPackageRequest", False),
+        ("/svclearningcurves", "app.api.routes.export", "get_learning_curves", "LearningCurvesRequest", False),
+        ("/svcexportnotebook", "app.api.routes.export", "export_notebook", "ExportNotebookRequest", False),
+        ("/svcjobcleanup", "app.api.compat.adapters.jobs", "bulk_cleanup", "CleanupRequest", True),
+        ("/svcregistermodel", "app.api.routes.registry", "register_model", "RegisterModelRequest", False),
     ]
 
-    for path, mod, fn, cls in post_request_db:
-        app.post(path)(_make_endpoint(mod, fn, cls=cls, use_db=True))
+    for path, mod, fn, cls, scoped in post_request_db:
+        app.post(path)(_make_endpoint(mod, fn, cls=cls, use_db=True, project_scoped=scoped))
 
     # Pattern 5: POST body.get(keys) + DB -> func(db, *args) [service direct]
     post_keys_db_first = [

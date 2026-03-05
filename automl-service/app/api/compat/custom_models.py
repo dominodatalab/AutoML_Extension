@@ -1,6 +1,6 @@
 """Custom compatibility model and deployment routes."""
 
-from fastapi import Body, FastAPI
+from fastapi import Body, FastAPI, Request
 
 from app.dependencies import get_db_session
 from app.services.deployment_service import (
@@ -15,9 +15,10 @@ def register_custom_model_routes(app: FastAPI) -> None:
     """Register custom /svc* model and deployment routes."""
 
     @app.get("/svcmodels")
-    async def svc_list_models():
+    async def svc_list_models(request: Request):
+        project_id = request.headers.get("X-Project-Id")
         async with get_db_session() as db:
-            return await list_registered_models_response(db)
+            return await list_registered_models_response(db, project_id=project_id)
 
     @app.get("/svcdeployments")
     async def svc_list_deployments():

@@ -298,11 +298,16 @@ async def get_registered_model(
 
 async def get_registered_models(
     db: AsyncSession,
+    project_id: Optional[str] = None,
 ) -> Sequence[RegisteredModel]:
-    """Get all registered models."""
-    result = await db.execute(
-        select(RegisteredModel).order_by(desc(RegisteredModel.created_at))
-    )
+    """Get all registered models, optionally filtered by project via job FK."""
+    query = select(RegisteredModel)
+    if project_id:
+        query = query.join(Job, RegisteredModel.job_id == Job.id).where(
+            Job.project_id == project_id
+        )
+    query = query.order_by(desc(RegisteredModel.created_at))
+    result = await db.execute(query)
     return result.scalars().all()
 
 
@@ -334,12 +339,15 @@ async def get_jobs_for_cleanup(
     db: AsyncSession,
     statuses: list[JobStatus],
     older_than_days: Optional[int] = None,
+    project_id: Optional[str] = None,
 ) -> Sequence[Job]:
     """Get jobs matching statuses and optional age filter, ordered by created_at."""
     query = select(Job).where(Job.status.in_(statuses))
     if older_than_days is not None:
         cutoff = utc_now() - timedelta(days=older_than_days)
         query = query.where(Job.created_at < cutoff)
+    if project_id:
+        query = query.where(Job.project_id == project_id)
     return (await db.execute(query.order_by(Job.created_at))).scalars().all()
 
 

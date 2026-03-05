@@ -73,12 +73,15 @@ def register_custom_job_routes(app: FastAPI) -> None:
             )
 
     @app.post("/svcjobcleanuppreview")
-    async def svc_job_cleanup_preview(body: dict = Body(default={})):
+    async def svc_job_cleanup_preview(request: Request, body: dict = Body(default={})):
+        from app.services.job_service import get_request_project_id
+        project_id = get_request_project_id(request)
         async with get_db_session() as db:
             return await preview_cleanup_service(
                 db=db,
                 statuses=body.get("statuses", "failed,cancelled"),
                 older_than_days=body.get("older_than_days"),
+                project_id=project_id,
             )
 
     @app.post("/svcjoborphans")

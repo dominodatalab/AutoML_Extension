@@ -6,6 +6,8 @@ get_job_metrics, get_job_progress) are routed directly to service functions
 via db_first=True in patterns.py.
 """
 
+from typing import Optional
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas.job import CleanupRequest, JobLogResponse
@@ -21,13 +23,14 @@ async def get_queue_status():
     return get_queue_status_service()
 
 
-async def bulk_cleanup(request: CleanupRequest, db: AsyncSession):
+async def bulk_cleanup(request: CleanupRequest, db: AsyncSession, *, project_id: Optional[str] = None):
     """Bulk cleanup adapter for compat pattern routes."""
     return await bulk_cleanup_service(
         db=db,
         statuses=request.statuses,
         older_than_days=request.older_than_days,
         include_orphans=request.include_orphans,
+        project_id=project_id,
     )
 
 

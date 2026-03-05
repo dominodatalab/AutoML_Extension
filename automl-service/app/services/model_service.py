@@ -1,12 +1,17 @@
 """Service helpers for model registry routes."""
 
+from typing import Optional
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas.model import RegisteredModelResponse
 from app.db import crud
 
 
-async def list_registered_models_response(db: AsyncSession) -> list[RegisteredModelResponse]:
-    """Return all registered models in API response shape."""
-    models = await crud.get_registered_models(db)
+async def list_registered_models_response(
+    db: AsyncSession,
+    project_id: Optional[str] = None,
+) -> list[RegisteredModelResponse]:
+    """Return all registered models in API response shape, optionally scoped by project."""
+    models = await crud.get_registered_models(db, project_id=project_id)
     return [RegisteredModelResponse.model_validate(m) for m in models]

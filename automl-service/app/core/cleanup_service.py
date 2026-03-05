@@ -117,9 +117,10 @@ class CleanupService:
         db: AsyncSession,
         statuses: list[JobStatus],
         older_than_days: Optional[int] = None,
+        project_id: Optional[str] = None,
     ) -> dict:
         """Dry-run: summarize what would be deleted without actually deleting."""
-        jobs = await crud.get_jobs_for_cleanup(db, statuses, older_than_days)
+        jobs = await crud.get_jobs_for_cleanup(db, statuses, older_than_days, project_id=project_id)
 
         total_model_size = 0
         total_upload_size = 0
@@ -175,9 +176,10 @@ class CleanupService:
         db: AsyncSession,
         statuses: list[JobStatus],
         older_than_days: Optional[int] = None,
+        project_id: Optional[str] = None,
     ) -> dict:
         """Delete artifacts and DB rows for all matching jobs."""
-        jobs = await crud.get_jobs_for_cleanup(db, statuses, older_than_days)
+        jobs = await crud.get_jobs_for_cleanup(db, statuses, older_than_days, project_id=project_id)
 
         total_model_size = 0
         total_upload_files = 0
