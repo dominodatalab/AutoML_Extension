@@ -165,34 +165,37 @@ export function ModelExportPanel({
 
   return (
     <div className="space-y-6">
-      {notebookSupported ? (
-        <div className="border border-domino-border rounded-lg p-4 max-w-xl">
-          <div className="flex items-center gap-2 mb-3">
-            <DocumentTextIcon className="h-5 w-5 text-domino-accent-green" />
-            <h3 className="font-medium">Training Notebook</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {notebookSupported ? (
+          <div className="border border-domino-border rounded-lg p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <DocumentTextIcon className="h-5 w-5 text-domino-accent-green" />
+              <h3 className="font-medium">Training Notebook</h3>
+            </div>
+            <p className="text-sm text-domino-text-secondary mb-4">
+              Download a Jupyter notebook with the training configuration and evaluation workflow.
+            </p>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleExportNotebook}
+              isLoading={exportNotebookMutation.isPending}
+              disabled={exportNotebookMutation.isPending}
+            >
+              <ArrowDownTrayIcon className="h-4 w-4 mr-1" />
+              Download Notebook
+            </Button>
           </div>
-          <p className="text-sm text-domino-text-secondary mb-4">
-            Download a Jupyter notebook with the training configuration and evaluation workflow.
-          </p>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleExportNotebook}
-            isLoading={exportNotebookMutation.isPending}
-            disabled={exportNotebookMutation.isPending}
-          >
-            <ArrowDownTrayIcon className="h-4 w-4 mr-1" />
-            Download Notebook
-          </Button>
-        </div>
-      ) : (
-        <p className="text-sm text-domino-text-secondary">
-          Notebook export is available for tabular and time series models.
-        </p>
-      )}
+        ) : (
+          <div className="border border-domino-border rounded-lg p-4">
+            <p className="text-sm text-domino-text-secondary">
+              Notebook export is available for tabular and time series models.
+            </p>
+          </div>
+        )}
 
-      {/* Docker Container Export */}
-      <div className="border border-domino-border rounded-lg p-4 max-w-xl">
+        {/* Docker Container Export */}
+        <div className="border border-domino-border rounded-lg p-4">
         <div className="flex items-center gap-2 mb-3">
           <CubeIcon className="h-5 w-5 text-domino-accent-purple" />
           <h3 className="font-medium">Docker Container</h3>
@@ -254,6 +257,7 @@ export function ModelExportPanel({
             </Button>
           </div>
         )}
+        </div>
       </div>
 
       {/* Notebook Export Result */}
