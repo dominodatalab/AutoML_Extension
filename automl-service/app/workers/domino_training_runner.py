@@ -20,20 +20,12 @@ def parse_args() -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(description="Run AutoML training job from Domino")
     parser.add_argument("--job-id", required=True, help="AutoML job id")
-    parser.add_argument("--project-id", default=None, help="Override DOMINO_PROJECT_ID for cross-project scoping")
     return parser.parse_args()
 
 
 def main() -> None:
     """CLI entrypoint."""
     args = parse_args()
-
-    # Override DOMINO_PROJECT_ID BEFORE any app imports so the MLflow proxy
-    # (which reads the env var at process start) scopes experiments to the
-    # correct project instead of the AutoML Extension host project.
-    if args.project_id:
-        os.environ["DOMINO_PROJECT_ID"] = args.project_id
-
     _ensure_project_root_on_path()
 
     from app.workers.training_worker import run_training_job

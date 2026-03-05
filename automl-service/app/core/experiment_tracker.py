@@ -11,46 +11,6 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 
-def _register_domino_project_header_provider():
-    """Register a custom MLflow request header provider that injects
-    ``X-Domino-Project-Id`` from the current ``DOMINO_PROJECT_ID`` env var.
-
-    Domino's MLflow proxy uses this header — not the env var itself — to
-    determine which project an experiment belongs to.  By reading the env
-    var at *request time* (not at registration time) the header tracks
-    whatever value ``training_worker`` has set for the current job.
-    """
-    try:
-        from mlflow.tracking.request_header.abstract_request_header_provider import (
-            RequestHeaderProvider,
-        )
-        from mlflow.tracking.request_header.registry import (
-            _request_header_provider_registry,
-        )
-
-        class _DominoProjectHeaderProvider(RequestHeaderProvider):
-            """Injects X-Domino-Project-Id into every MLflow HTTP request."""
-
-            def in_context(self):
-                return bool(os.environ.get("DOMINO_PROJECT_ID"))
-
-            def request_headers(self):
-                project_id = os.environ.get("DOMINO_PROJECT_ID", "")
-                if project_id:
-                    return {"X-Domino-Project-Id": project_id}
-                return {}
-
-        _request_header_provider_registry.register(_DominoProjectHeaderProvider)
-        logger.info("Registered Domino project header provider for MLflow")
-    except Exception as exc:
-        logger.debug("Could not register Domino project header provider: %s", exc)
-
-
-# One-time registration at import time so the provider is active before any
-# ExperimentTracker instance is created.
-_register_domino_project_header_provider()
-
-
 class ExperimentTracker:
     """Tracks experiments using MLflow with Domino integration."""
 

@@ -130,10 +130,6 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
     settings = get_settings()
     tracker = None
 
-    # Store original Domino project env vars for restoration after MLflow work
-    _original_project_id = os.environ.get("DOMINO_PROJECT_ID")
-    _original_project_name = os.environ.get("DOMINO_PROJECT_NAME")
-
     async with async_session_maker() as db:
         try:
             # Get job from database
@@ -141,13 +137,6 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
             if not job:
                 logger.error(f"Job not found: {job_id}")
                 return
-
-            # Override Domino project env vars so MLflow proxy associates
-            # experiments with the sidebar project instead of AutoML Extension
-            if job.project_id:
-                os.environ["DOMINO_PROJECT_ID"] = job.project_id
-            if job.project_name:
-                os.environ["DOMINO_PROJECT_NAME"] = job.project_name
 
             await _check_cancelled(job_id, db)
 
@@ -180,6 +169,7 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
             await _check_cancelled(job_id, db)
 
             # Check if file exists
+            import os
             if not os.path.exists(data_path):
                 logger.error(f"[TRAINING DEBUG] FILE NOT FOUND: {data_path}")
                 await crud.add_job_log(db, job_id, f"[DEBUG] FILE DOES NOT EXIST: {data_path}", "ERROR")
@@ -480,18 +470,6 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                 except Exception:
                     pass
 
-        finally:
-            # Restore original Domino project env vars
-            if _original_project_id is not None:
-                os.environ["DOMINO_PROJECT_ID"] = _original_project_id
-            elif "DOMINO_PROJECT_ID" in os.environ and job.project_id:
-                del os.environ["DOMINO_PROJECT_ID"]
-
-            if _original_project_name is not None:
-                os.environ["DOMINO_PROJECT_NAME"] = _original_project_name
-            elif "DOMINO_PROJECT_NAME" in os.environ and job.project_name:
-                del os.environ["DOMINO_PROJECT_NAME"]
-
 
 async def register_trained_model(
     job_id: str,
@@ -504,10 +482,6 @@ async def register_trained_model(
 
     This creates an entry in the Domino/MLflow model registry.
     """
-    # Store original Domino project env vars for restoration
-    _original_project_id = os.environ.get("DOMINO_PROJECT_ID")
-    _original_project_name = os.environ.get("DOMINO_PROJECT_NAME")
-
     async with async_session_maker() as db:
         job = await crud.get_job(db, job_id)
         if not job:
@@ -519,100 +493,80 @@ async def register_trained_model(
         if not job.model_path:
             raise ValueError(f"Job has no model path: {job_id}")
 
-        # Override Domino project env vars so MLflow proxy associates
-        # registry entries with the sidebar project
-        if job.project_id:
-            os.environ["DOMINO_PROJECT_ID"] = job.project_id
-        if job.project_name:
-            os.environ["DOMINO_PROJECT_NAME"] = job.project_name
+        # Use Domino registry
+        registry = get_domino_registry()
 
-        try:
-            # Use Domino registry
-            registry = get_domino_registry()
+        # Prepare job info for model card
+        job_info = {
+            "job_id": job_id,
+            "model_type": job.model_type.value if job.model_type else "tabular",
+            "problem_type": job.problem_type.value if job.problem_type else "unknown",
+            "target_column": job.target_column,
+            "preset": job.preset,
+            "time_limit": job.time_limit,
+            "dataset_id": job.dataset_id,
+        }
 
-            # Prepare job info for model card
-            job_info = {
+        # Get experiment name from job (set during training)
+        exp_name = job.experiment_name if hasattr(job, 'experiment_name') and job.experiment_name else None
+
+        result = registry.register_model(
+            model_path=job.model_path,
+            model_name=model_name,
+            model_type=job.model_type.value if job.model_type else "tabular",
+            description=description or f"AutoML model from job {job.name}",
+            tags={
                 "job_id": job_id,
-                "model_type": job.model_type.value if job.model_type else "tabular",
-                "problem_type": job.problem_type.value if job.problem_type else "unknown",
-                "target_column": job.target_column,
-                "preset": job.preset,
-                "time_limit": job.time_limit,
-                "dataset_id": job.dataset_id,
-            }
+                "job_name": job.name,
+                "domino_project": job.project_name or os.environ.get("DOMINO_PROJECT_NAME", ""),
+            },
+            metrics=job.metrics if hasattr(job, 'metrics') and job.metrics else {},
+            params=job_info,
+            experiment_name=exp_name,  # Use same experiment as training
+        )
 
-            # Get experiment name from job (set during training)
-            exp_name = job.experiment_name if hasattr(job, 'experiment_name') and job.experiment_name else None
+        if not result.get("success"):
+            raise ValueError(f"Registration failed: {result.get('error')}")
 
-            result = registry.register_model(
-                model_path=job.model_path,
+        version = result.get("model_version")
+        logger.info(f"Registered model {model_name} version {version}")
+
+        # Transition to requested stage if specified
+        if stage and stage in ["Staging", "Production"]:
+            registry.transition_model_stage(
                 model_name=model_name,
-                model_type=job.model_type.value if job.model_type else "tabular",
-                description=description or f"AutoML model from job {job.name}",
-                tags={
-                    "job_id": job_id,
-                    "job_name": job.name,
-                    "domino_project": job.project_name or os.environ.get("DOMINO_PROJECT_NAME", ""),
-                },
-                metrics=job.metrics if hasattr(job, 'metrics') and job.metrics else {},
-                params=job_info,
-                experiment_name=exp_name,  # Use same experiment as training
+                version=version,
+                stage=stage
             )
+            logger.info(f"Transitioned {model_name} v{version} to {stage}")
 
-            if not result.get("success"):
-                raise ValueError(f"Registration failed: {result.get('error')}")
-
-            version = result.get("model_version")
-            logger.info(f"Registered model {model_name} version {version}")
-
-            # Transition to requested stage if specified
-            if stage and stage in ["Staging", "Production"]:
-                registry.transition_model_stage(
-                    model_name=model_name,
-                    version=version,
-                    stage=stage
-                )
-                logger.info(f"Transitioned {model_name} v{version} to {stage}")
-
-            # Generate and store model card
-            try:
-                model_card = registry.create_model_card(
-                    model_name=model_name,
-                    version=version,
-                    job_info=job_info,
-                    metrics=job.metrics if hasattr(job, 'metrics') and job.metrics else {},
-                )
-                # Log model card as artifact
-                tracker = ExperimentTracker()
-                if job.experiment_run_id:
-                    tracker.log_text(model_card, "model_card.md")
-            except Exception as e:
-                logger.warning(f"Could not generate model card: {e}")
-            finally:
-                # Ensure no MLflow run is left active — log_text / log_artifact
-                # may auto-start a run that isn't closed by a context manager.
-                import mlflow as _mlflow
-                _mlflow.end_run()
-
-            return {
-                "model_name": model_name,
-                "version": version,
-                "run_id": result.get("run_id"),
-                "artifact_uri": result.get("artifact_uri"),
-                "stage": stage,
-            }
-
+        # Generate and store model card
+        try:
+            model_card = registry.create_model_card(
+                model_name=model_name,
+                version=version,
+                job_info=job_info,
+                metrics=job.metrics if hasattr(job, 'metrics') and job.metrics else {},
+            )
+            # Log model card as artifact
+            tracker = ExperimentTracker()
+            if job.experiment_run_id:
+                tracker.log_text(model_card, "model_card.md")
+        except Exception as e:
+            logger.warning(f"Could not generate model card: {e}")
         finally:
-            # Restore original Domino project env vars
-            if _original_project_id is not None:
-                os.environ["DOMINO_PROJECT_ID"] = _original_project_id
-            elif "DOMINO_PROJECT_ID" in os.environ and job.project_id:
-                del os.environ["DOMINO_PROJECT_ID"]
+            # Ensure no MLflow run is left active — log_text / log_artifact
+            # may auto-start a run that isn't closed by a context manager.
+            import mlflow as _mlflow
+            _mlflow.end_run()
 
-            if _original_project_name is not None:
-                os.environ["DOMINO_PROJECT_NAME"] = _original_project_name
-            elif "DOMINO_PROJECT_NAME" in os.environ and job.project_name:
-                del os.environ["DOMINO_PROJECT_NAME"]
+        return {
+            "model_name": model_name,
+            "version": version,
+            "run_id": result.get("run_id"),
+            "artifact_uri": result.get("artifact_uri"),
+            "stage": stage,
+        }
 
 
 async def deploy_model_to_production(

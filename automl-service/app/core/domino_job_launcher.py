@@ -319,7 +319,6 @@ class DominoJobLauncher:
         title: Optional[str] = None,
         hardware_tier_name: Optional[str] = None,
         environment_id: Optional[str] = None,
-        project_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Launch a training job in Domino."""
         if not self.settings.is_domino_environment:
@@ -330,12 +329,9 @@ class DominoJobLauncher:
 
         try:
             domino = self._get_domino_client()
-            args: dict[str, Any] = {"job_id": job_id}
-            if project_id:
-                args["project_id"] = project_id
             command = self._build_command(
                 "app.workers.domino_training_runner",
-                args,
+                {"job_id": job_id},
             )
             response = self._job_start(
                 domino,
