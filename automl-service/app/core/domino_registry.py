@@ -1,10 +1,13 @@
 """Domino Model Registry integration using MLflow."""
 
+import json as _json
 import os
 import logging
 import tempfile
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 import mlflow
 from mlflow import MlflowClient
@@ -106,6 +109,90 @@ class DominoModelRegistry:
         if self._client is None:
             self._client = MlflowClient()
         return self._client
+
+    def _domino_register_model(
+        self, model_name: str, experiment_run_id: str, discoverable: bool = True
+    ) -> Optional[Dict[str, Any]]:
+        """Register a model via Domino's native REST API.
+
+        Domino's ``POST /api/registeredmodels/v1`` resolves the project from
+        the experiment run, so models created this way inherit the correct
+        project association (matching the experiment's project set by the
+        ``X-Domino-Project-Id`` header provider).
+
+        Returns the parsed JSON response on success, or *None* on failure so
+        the caller can fall back to ``mlflow.register_model()``.
+        """
+        settings = get_settings()
+        host = (
+            os.environ.get("DOMINO_USER_HOST")
+            or os.environ.get("DOMINO_API_HOST")
+            or settings.domino_api_host
+        )
+        if not host:
+            logger.debug("No Domino host available for native model registration")
+            return None
+
+        host = host.rstrip("/")
+        url = f"{host}/api/registeredmodels/v1"
+
+        # Authenticate with the token file first, then fall back to API key.
+        token: Optional[str] = None
+        token_file = os.environ.get("DOMINO_TOKEN_FILE")
+        if token_file:
+            try:
+                with open(token_file, "r", encoding="utf-8") as fh:
+                    token = fh.read().strip()
+            except OSError:
+                pass
+        if not token:
+            token = settings.effective_api_key
+
+        if not token:
+            logger.debug("No Domino auth token for native model registration")
+            return None
+
+        payload = {
+            "modelName": model_name,
+            "experimentRunId": experiment_run_id,
+            "discoverable": discoverable,
+        }
+
+        req = Request(
+            url,
+            data=_json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "X-Domino-Api-Key": token,
+            },
+            method="POST",
+        )
+
+        try:
+            with urlopen(req, timeout=60) as resp:
+                body = _json.loads(resp.read())
+            logger.info(
+                "Registered model %s via Domino native API (run %s)",
+                model_name,
+                experiment_run_id,
+            )
+            return body
+        except HTTPError as exc:
+            body = ""
+            try:
+                body = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                pass
+            logger.warning(
+                "Domino native model registration failed (%s %s): %s",
+                exc.code,
+                exc.reason,
+                body[:500],
+            )
+            return None
+        except (URLError, OSError) as exc:
+            logger.warning("Domino native model registration error: %s", exc)
+            return None
 
     def register_model(
         self,
@@ -214,14 +301,28 @@ class DominoModelRegistry:
                     )
                     mlflow.log_artifacts(local_model_dir, artifact_path="model")
                 result["artifact_uri"] = f"runs:/{run_id}/model"
-                created_version = mlflow.register_model(
-                    model_uri=result["artifact_uri"],
-                    name=model_name,
-                    await_registration_for=300,
-                )
-                if created_version:
-                    result["model_version"] = str(created_version.version)
-                logger.info(f"Registered model from run artifact URI: {result['artifact_uri']}")
+
+                # Try Domino's native API first — it resolves project scope
+                # from the experiment run, ensuring the model lands in the
+                # correct project when running cross-project from the sidebar.
+                domino_result = self._domino_register_model(model_name, run_id)
+                if domino_result:
+                    # Extract version from Domino response
+                    ver = domino_result.get("latestVersion")
+                    if ver is not None:
+                        result["model_version"] = str(ver)
+                    logger.info(f"Registered model via Domino native API: {model_name}")
+                else:
+                    # Fall back to MLflow register_model (won't scope to
+                    # sidebar project, but still functional).
+                    created_version = mlflow.register_model(
+                        model_uri=result["artifact_uri"],
+                        name=model_name,
+                        await_registration_for=300,
+                    )
+                    if created_version:
+                        result["model_version"] = str(created_version.version)
+                    logger.info(f"Registered model via MLflow: {result['artifact_uri']}")
 
             # Resolve version and update metadata/tags
             try:
