@@ -228,6 +228,7 @@ def build_job_model(
         time_limit=job_request.time_limit,
         eval_metric=job_request.eval_metric,
         experiment_name=job_request.experiment_name,
+        enable_mlflow=job_request.enable_mlflow,
         status=JobStatus.PENDING,
         execution_target=execution_target,
         autogluon_config=build_autogluon_config(job_request),

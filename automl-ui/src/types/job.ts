@@ -197,6 +197,7 @@ export interface JobCreateRequest {
   timeseries_config?: TimeSeriesAdvancedConfig
   auto_register?: boolean
   register_name?: string
+  enable_mlflow?: boolean
 }
 
 export interface JobProgress {

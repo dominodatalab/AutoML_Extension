@@ -62,6 +62,7 @@ async def run_migrations():
         ("jobs", "domino_job_id", "VARCHAR(255)"),
         ("jobs", "domino_job_status", "VARCHAR(100)"),
         ("jobs", "project_owner", "VARCHAR(255)"),
+        ("jobs", "enable_mlflow", "BOOLEAN DEFAULT 0"),
     ]
 
     async with engine.begin() as conn:

@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useStore } from '../store'
 import { useCreateJob } from './useJobs'
+import { useCapabilities } from './useCapabilities'
 import { JobCreateRequest } from '../types/job'
 
 export function useWizard() {
@@ -13,6 +14,7 @@ export function useWizard() {
   const resetWizard = useStore((state) => state.resetWizard)
 
   const createJobMutation = useCreateJob()
+  const { mlflowTracking } = useCapabilities()
 
   const canProceed = useMemo(() => {
     switch (wizard.currentStep) {
@@ -78,6 +80,7 @@ export function useWizard() {
       experiment_name: wizard.training.experimentName,
       advanced_config: wizard.training.advancedConfig,
       timeseries_config: wizard.training.timeseriesConfig,
+      enable_mlflow: mlflowTracking,
     }
 
     const job = await createJobMutation.mutateAsync(request)

@@ -377,6 +377,10 @@ class JobCreateRequest(BaseModel):
         None,
         description="Optional Domino environment ID for external training jobs",
     )
+    enable_mlflow: bool = Field(
+        False,
+        description="Enable MLflow experiment tracking for this job",
+    )
 
 
 class JobResponse(BaseModel):
@@ -415,6 +419,7 @@ class JobResponse(BaseModel):
     experiment_id: Optional[str] = None
     experiment_run_id: Optional[str] = None
     experiment_run_url: Optional[str] = None
+    enable_mlflow: bool = False
     error_message: Optional[str] = None
     advanced_config: Optional[Dict[str, Any]] = None
     timeseries_config: Optional[Dict[str, Any]] = None

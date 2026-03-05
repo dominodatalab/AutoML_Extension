@@ -148,10 +148,11 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
 
             # Initialize components
             runner = AutoGluonRunner()
-            if not settings.standalone_mode:
+            if job.enable_mlflow and not settings.standalone_mode:
                 tracker = ExperimentTracker()
             else:
-                await crud.add_job_log(db, job_id, "Standalone mode: experiment tracking disabled", "INFO")
+                reason = "not requested" if not job.enable_mlflow else "standalone mode"
+                await crud.add_job_log(db, job_id, f"Experiment tracking disabled ({reason})", "INFO")
             dataset_manager = DominoDatasetManager()
 
             # Get data file path
@@ -409,7 +410,7 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
 
             # Auto-register to Domino Model Registry if configured
             auto_register = os.environ.get("AUTO_REGISTER_MODELS", "false").lower() == "true"
-            if auto_register and model_path and not settings.standalone_mode:
+            if auto_register and model_path and job.enable_mlflow and not settings.standalone_mode:
                 try:
                     registry = get_domino_registry()
                     reg_result = registry.register_model(

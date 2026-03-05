@@ -90,6 +90,9 @@ class Job(Base):
     experiment_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     experiment_run_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
+    # MLflow gating
+    enable_mlflow: Mapped[bool] = mapped_column(default=False)
+
     # Registration status
     is_registered: Mapped[bool] = mapped_column(default=False)
     registered_model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
