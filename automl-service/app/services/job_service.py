@@ -327,7 +327,7 @@ async def create_job_with_context(
 
         settings = get_settings()
         launcher = get_domino_job_launcher()
-        launch_result = launcher.start_training_job(
+        launch_result = await launcher.start_training_job(
             job_id=job.id,
             title=job.name,
             hardware_tier_name=job_request.domino_hardware_tier_name or settings.domino_training_hardware_tier_name,
@@ -705,7 +705,7 @@ async def _sync_domino_job_state(
         from app.core.domino_job_launcher import get_domino_job_launcher
 
         status_result = await asyncio.wait_for(
-            asyncio.to_thread(get_domino_job_launcher().get_job_status, job.domino_job_id),
+            get_domino_job_launcher().get_job_status(job.domino_job_id),
             timeout=8.0,
         )
     except asyncio.TimeoutError:
@@ -985,7 +985,7 @@ async def cancel_job(db: AsyncSession, job_id: str) -> dict:
         if job.domino_job_id:
             from app.core.domino_job_launcher import get_domino_job_launcher
 
-            stop_result = get_domino_job_launcher().stop_job(job.domino_job_id)
+            stop_result = await get_domino_job_launcher().stop_job(job.domino_job_id)
             stop_success = bool(stop_result.get("success"))
             stop_error = stop_result.get("error")
             await crud.update_job_domino_fields(

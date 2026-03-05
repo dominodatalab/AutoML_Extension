@@ -82,20 +82,9 @@ def pytest_configure(config):
 # Auto-skip markers when optional packages are absent
 # ---------------------------------------------------------------------------
 
-_HAS_DOMINO = False
-try:
-    import domino  # noqa: F401
-    _HAS_DOMINO = True
-except ImportError:
-    pass
-
-
 def pytest_collection_modifyitems(config, items):
     """Auto-skip tests that require unavailable optional packages."""
-    skip_domino = pytest.mark.skip(reason="requires 'domino' package (run in Domino environment)")
-    for item in items:
-        if "domino" in item.keywords and not _HAS_DOMINO:
-            item.add_marker(skip_domino)
+    pass
 
 
 # ---------------------------------------------------------------------------
