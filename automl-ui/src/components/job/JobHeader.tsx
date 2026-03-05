@@ -5,6 +5,7 @@ import type { Job } from '../../types/job'
 interface JobHeaderProps {
   job: Job | undefined
   currentStatus: string
+  standaloneMode?: boolean
   cancelIsPending: boolean
   showDeployDropdown: boolean
   showActionsDropdown: boolean
@@ -22,6 +23,7 @@ interface JobHeaderProps {
 export function JobHeader({
   job,
   currentStatus,
+  standaloneMode,
   cancelIsPending,
   showDeployDropdown,
   showActionsDropdown,
@@ -70,7 +72,7 @@ export function JobHeader({
             Cancel
           </button>
         )}
-        {currentStatus === 'completed' && job?.model_path && (
+        {currentStatus === 'completed' && job?.model_path && !standaloneMode && (
           <div className="relative" ref={deployDropdownRef}>
             <button
               onClick={onToggleDeployDropdown}

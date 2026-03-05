@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useWizard } from '../../hooks/useWizard'
+import { useCapabilities } from '../../hooks/useCapabilities'
 import Input from '../common/Input'
 import Select from '../common/Select'
 import { Preset, AdvancedAutoGluonConfig, TimeSeriesAdvancedConfig } from '../../types/job'
@@ -15,6 +16,7 @@ const presetOptions = [
 
 function Step3Configuration() {
   const { modelType, dataSource, training, setTraining, setJobInfo, jobName, jobDescription } = useWizard()
+  const { dominoJobs } = useCapabilities()
   const isTimeSeries = modelType?.modelType === 'timeseries'
 
   const [localConfig, setLocalConfig] = useState({
@@ -40,6 +42,13 @@ function Step3Configuration() {
   const [timeseriesConfig, setTimeseriesConfig] = useState<TimeSeriesAdvancedConfig>(
     training?.timeseriesConfig || {}
   )
+
+  // Force local if Domino Jobs capability is unavailable
+  useEffect(() => {
+    if (!dominoJobs && localConfig.executionTarget === 'domino_job') {
+      setLocalConfig((prev) => ({ ...prev, executionTarget: 'local' }))
+    }
+  }, [dominoJobs])
 
   // Get columns from data source
   const columns = dataSource?.columns || []
@@ -102,7 +111,7 @@ function Step3Configuration() {
             label="Execution Target"
             options={[
               { value: 'local', label: 'Local (In-App Queue)' },
-              { value: 'domino_job', label: 'Domino Job' },
+              ...(dominoJobs ? [{ value: 'domino_job', label: 'Domino Job' }] : []),
             ]}
             value={localConfig.executionTarget}
             onChange={(e) =>

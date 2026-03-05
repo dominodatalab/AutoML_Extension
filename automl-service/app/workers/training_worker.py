@@ -148,7 +148,10 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
 
             # Initialize components
             runner = AutoGluonRunner()
-            tracker = ExperimentTracker()
+            if not settings.standalone_mode:
+                tracker = ExperimentTracker()
+            else:
+                await crud.add_job_log(db, job_id, "Standalone mode: experiment tracking disabled", "INFO")
             dataset_manager = DominoDatasetManager()
 
             # Get data file path
@@ -176,25 +179,27 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
 
             # Set up experiment tracking (Domino uses MLflow)
             experiment_name = job.experiment_name or f"{job.name}__{utc_now().strftime('%Y%m%d_%H%M%S')}"
-            tracker.create_experiment(experiment_name)
-            await crud.add_job_log(db, job_id, f"MLflow experiment: {experiment_name}")
+            run_id = None
+            if tracker:
+                tracker.create_experiment(experiment_name)
+                await crud.add_job_log(db, job_id, f"MLflow experiment: {experiment_name}")
 
-            # Start MLflow run with comprehensive tags
-            run_id = tracker.start_run(
-                run_name=job.name,
-                tags={
-                    "job_id": job_id,
-                    "model_type": job.model_type.value,
-                    "target_column": job.target_column or "",
-                    "preset": job.preset or "medium_quality",
-                    "framework": "autogluon",
-                    "created_by": "automl-service",
-                    "domino_run": os.environ.get("DOMINO_RUN_ID", ""),
-                    "domino_project": job.project_name or os.environ.get("DOMINO_PROJECT_NAME", ""),
-                },
-                project_id=job.project_id,
-                project_name=job.project_name,
-            )
+                # Start MLflow run with comprehensive tags
+                run_id = tracker.start_run(
+                    run_name=job.name,
+                    tags={
+                        "job_id": job_id,
+                        "model_type": job.model_type.value,
+                        "target_column": job.target_column or "",
+                        "preset": job.preset or "medium_quality",
+                        "framework": "autogluon",
+                        "created_by": "automl-service",
+                        "domino_run": os.environ.get("DOMINO_RUN_ID", ""),
+                        "domino_project": job.project_name or os.environ.get("DOMINO_PROJECT_NAME", ""),
+                    },
+                    project_id=job.project_id,
+                    project_name=job.project_name,
+                )
 
             # Create progress reporter
             progress_reporter = TrainingProgressReporter(job_id, db, tracker)
@@ -244,7 +249,8 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                     "refit_full": adv_config.refit_full,
                 })
 
-            tracker.log_params(training_params)
+            if tracker:
+                tracker.log_params(training_params)
 
             await progress_reporter.on_progress_update(10, "Loading data")
 
@@ -289,7 +295,8 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
             await crud.add_job_log(db, job_id, f"Trained {num_models} models, best: {best_model}")
 
             # End the initial training run before logging individual models
-            tracker.end_run(status="FINISHED")
+            if tracker:
+                tracker.end_run(status="FINISHED")
 
             # Generate feature importance
             feature_importance = None
@@ -349,18 +356,19 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
             except Exception as e:
                 logger.warning(f"Could not load test data for per-model metrics: {e}")
 
-            await crud.add_job_log(db, job_id, f"Logging {num_models} individual model runs to Domino Experiments")
+            if tracker:
+                await crud.add_job_log(db, job_id, f"Logging {num_models} individual model runs to Domino Experiments")
 
-            run_id = tracker.log_training_results(
-                job_config=job_config,
-                metrics=metrics_with_fi,
-                leaderboard=result.get("leaderboard", {}),
-                model_path=model_path,
-                predictor=predictor,
-                test_data=test_data,
-            )
+                run_id = tracker.log_training_results(
+                    job_config=job_config,
+                    metrics=metrics_with_fi,
+                    leaderboard=result.get("leaderboard", {}),
+                    model_path=model_path,
+                    predictor=predictor,
+                    test_data=test_data,
+                )
 
-            await crud.add_job_log(db, job_id, f"Model runs logged to MLflow experiment")
+                await crud.add_job_log(db, job_id, f"Model runs logged to MLflow experiment")
             await _check_cancelled(job_id, db)
 
             # Update progress: finalizing
@@ -401,7 +409,7 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
 
             # Auto-register to Domino Model Registry if configured
             auto_register = os.environ.get("AUTO_REGISTER_MODELS", "false").lower() == "true"
-            if auto_register and model_path:
+            if auto_register and model_path and not settings.standalone_mode:
                 try:
                     registry = get_domino_registry()
                     reg_result = registry.register_model(

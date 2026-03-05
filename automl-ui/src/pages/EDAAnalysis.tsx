@@ -8,11 +8,13 @@ import { Dataset, DatasetFile } from '../types/dataset'
 import type { TransformConfig } from '../types/eda'
 import { generateEDANotebook } from '../utils/notebookGenerator'
 import { getFileName } from '../utils/path'
+import { useCapabilities } from '../hooks/useCapabilities'
 import { DataSourceSelector } from '../components/eda/DataSourceSelector'
 import { ProfiledDataView } from '../components/eda/ProfiledDataView'
 import { TimeSeriesConfigPanel } from '../components/eda/TimeSeriesConfigPanel'
 
 function EDAAnalysis() {
+  const { dominoJobs } = useCapabilities()
   const [searchParams] = useSearchParams()
   const { data: datasetsData, isLoading: loadingDatasets, error: datasetsError } = useDatasets()
   const uploadMutation = useUploadFile()
@@ -36,6 +38,13 @@ function EDAAnalysis() {
   const [stratifyColumn, setStratifyColumn] = useState('')
   const [edaExecutionTarget, setEdaExecutionTarget] = useState<'local' | 'domino_job'>('local')
   const [edaMode, setEdaMode] = useState<'tabular' | 'timeseries'>('tabular')
+
+  // Force local if Domino Jobs capability is unavailable
+  useEffect(() => {
+    if (!dominoJobs && edaExecutionTarget === 'domino_job') {
+      setEdaExecutionTarget('local')
+    }
+  }, [dominoJobs])
   const [timeColumn, setTimeColumn] = useState('')
   const [targetColumn, setTargetColumn] = useState('')
   const [idColumn, setIdColumn] = useState('')
@@ -339,7 +348,7 @@ function EDAAnalysis() {
           className="h-[32px] px-3 text-sm border border-domino-border rounded-[2px] bg-white"
         >
           <option value="local">Local (In App)</option>
-          <option value="domino_job">Domino Job</option>
+          {dominoJobs && <option value="domino_job">Domino Job</option>}
         </select>
       </div>
 

@@ -148,6 +148,18 @@ class Settings(BaseSettings):
         has_key_auth = self.effective_api_key is not None
         return self.domino_api_host is not None and (has_proxy_auth or has_key_auth)
 
+    @property
+    def standalone_mode(self) -> bool:
+        """True when Domino platform services are unavailable.
+
+        Honors explicit AUTOML_STANDALONE_MODE env var if set.
+        Otherwise, standalone when Domino environment is not detected.
+        """
+        explicit = os.environ.get("AUTOML_STANDALONE_MODE")
+        if explicit is not None:
+            return explicit.strip().lower() in {"1", "true", "yes"}
+        return not self.is_domino_environment
+
 
 _settings_instance: Optional[Settings] = None
 

@@ -17,6 +17,7 @@ import { JobHeader } from '../components/job/JobHeader'
 import { JobTabNavigation } from '../components/job/JobTabNavigation'
 import { JobOverviewTab } from '../components/job/JobOverviewTab'
 import { DominoIntegrationsTab } from '../components/job/DominoIntegrationsTab'
+import { useCapabilities } from '../hooks/useCapabilities'
 import type { DetailTab } from '../components/job/JobTabNavigation'
 
 function JobDetail() {
@@ -26,6 +27,7 @@ function JobDetail() {
   const { data: logs } = useJobLogs(jobId!, 100)
   const cancelMutation = useCancelJob()
 
+  const { dominoEnabled } = useCapabilities()
   const isTraining = !!job && ['pending', 'running'].includes(job.status)
   const { polledProgress, progressJobId, simulatedProgress } = useJobProgress(jobId, job, isTraining, refetch)
 
@@ -109,6 +111,7 @@ function JobDetail() {
       <JobHeader
         job={job}
         currentStatus={currentStatus}
+        standaloneMode={!dominoEnabled}
         cancelIsPending={cancelMutation.isPending}
         showDeployDropdown={showDeployDropdown}
         showActionsDropdown={showActionsDropdown}
@@ -140,6 +143,7 @@ function JobDetail() {
         onTabChange={setActiveTab}
         currentStatus={currentStatus}
         modelType={job?.model_type}
+        dominoEnabled={dominoEnabled}
       />
 
       {/* Progress bar for running jobs */}

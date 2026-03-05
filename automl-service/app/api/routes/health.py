@@ -53,6 +53,20 @@ async def get_current_user(request: Request):
     }
 
 
+@router.get("/capabilities")
+async def get_capabilities():
+    """Return platform capabilities for frontend feature gating."""
+    settings = get_settings()
+    standalone = settings.standalone_mode
+    return {
+        "standalone_mode": standalone,
+        "domino_jobs": not standalone,
+        "mlflow_tracking": not standalone,
+        "model_registry": not standalone,
+        "model_deployment": not standalone,
+    }
+
+
 @router.get("")
 async def health_check():
     """Basic health check endpoint."""

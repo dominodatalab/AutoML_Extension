@@ -12,6 +12,7 @@ interface JobTabNavigationProps {
   onTabChange: (tab: DetailTab) => void
   currentStatus: string
   modelType?: string
+  dominoEnabled?: boolean
 }
 
 const allTabs: TabConfig[] = [
@@ -25,10 +26,11 @@ const allTabs: TabConfig[] = [
   { key: 'logs', label: 'Logs' },
 ]
 
-export function JobTabNavigation({ activeTab, onTabChange, currentStatus, modelType }: JobTabNavigationProps) {
+export function JobTabNavigation({ activeTab, onTabChange, currentStatus, modelType, dominoEnabled }: JobTabNavigationProps) {
   const tabs = allTabs.filter((tab) => {
     if (tab.showWhenDone && currentStatus !== 'completed') return false
     if (tab.showForTimeseries && modelType !== 'timeseries') return false
+    if (tab.key === 'domino' && !dominoEnabled) return false
     return true
   })
 
