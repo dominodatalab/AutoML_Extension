@@ -243,9 +243,10 @@ class DominoJobLauncher:
         title: str,
         hardware_tier_name: Optional[str],
         environment_id: Optional[str],
+        project_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Launch a Domino job while pinning to the current commit when possible."""
-        project_id = resolve_domino_project_id()
+        project_id = project_id or resolve_domino_project_id()
 
         # Resolve hardware tier name → ID (the SDK did this internally).
         hardware_tier_id = None
@@ -318,6 +319,7 @@ class DominoJobLauncher:
         title: Optional[str] = None,
         hardware_tier_name: Optional[str] = None,
         environment_id: Optional[str] = None,
+        project_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Launch a training job in Domino."""
         if not self.settings.is_domino_environment:
@@ -336,6 +338,7 @@ class DominoJobLauncher:
                 title=title or f"AutoML Training {job_id[:8]}",
                 hardware_tier_name=hardware_tier_name,
                 environment_id=environment_id,
+                project_id=project_id,
             )
             if not isinstance(response, dict):
                 return {"success": False, "error": f"Unexpected response type: {type(response)}"}
@@ -369,6 +372,7 @@ class DominoJobLauncher:
         rolling_window: Optional[int] = None,
         hardware_tier_name: Optional[str] = None,
         environment_id: Optional[str] = None,
+        project_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Launch an async EDA job in Domino."""
         if not self.settings.is_domino_environment:
@@ -398,6 +402,7 @@ class DominoJobLauncher:
                 title=f"AutoML EDA {request_id[:8]}",
                 hardware_tier_name=hardware_tier_name,
                 environment_id=environment_id,
+                project_id=project_id,
             )
             if not isinstance(response, dict):
                 return {"success": False, "error": f"Unexpected response type: {type(response)}"}
@@ -438,12 +443,12 @@ class DominoJobLauncher:
             logger.exception("Failed to fetch Domino job status")
             return {"success": False, "error": str(e), "domino_job_id": domino_job_id}
 
-    async def stop_job(self, domino_job_id: str, commit_results: bool = False) -> dict[str, Any]:
+    async def stop_job(self, domino_job_id: str, commit_results: bool = False, project_id: Optional[str] = None) -> dict[str, Any]:
         """Stop an external Domino job."""
         if not self.settings.is_domino_environment:
             return {"success": False, "error": "Domino environment not configured"}
         try:
-            project_id = resolve_domino_project_id()
+            project_id = project_id or resolve_domino_project_id()
             resp = await domino_request(
                 "POST",
                 "/v4/jobs/stop",
