@@ -93,6 +93,10 @@ class Job(Base):
     # MLflow gating
     enable_mlflow: Mapped[bool] = mapped_column(default=False)
 
+    # Auto-register to Domino Model Registry after training
+    auto_register: Mapped[bool] = mapped_column(default=False)
+    register_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
     # Registration status
     is_registered: Mapped[bool] = mapped_column(default=False)
     registered_model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

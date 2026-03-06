@@ -9,6 +9,7 @@ from typing import Optional
 from fastapi import HTTPException
 
 from app.core.domino_model_api import get_domino_model_api
+from app.core.utils import remap_shared_path
 from app.db import crud
 from app.db.models import JobStatus
 from app.dependencies import get_db_session
@@ -67,6 +68,7 @@ async def deploy_from_job(
     function_name: str = "predict",
     min_replicas: int = 1,
     max_replicas: int = 1,
+    project_id: Optional[str] = None,
 ) -> dict:
     """Deploy a trained model from a completed AutoML job."""
     async with get_db_session() as db:
@@ -81,7 +83,7 @@ async def deploy_from_job(
         )
 
     deploy_name = model_name or job.name or f"automl-model-{job_id[:8]}"
-    model_path = job.model_path
+    model_path = remap_shared_path(job.model_path)
     if not model_path:
         raise HTTPException(status_code=400, detail="Model path not found for this job")
     if not os.path.isdir(model_path):
@@ -106,6 +108,7 @@ async def deploy_from_job(
         min_replicas=min_replicas,
         max_replicas=max_replicas,
         auto_start=True,
+        project_id=project_id,
     )
 
     if not result["success"]:

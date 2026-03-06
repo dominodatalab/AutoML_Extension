@@ -20,7 +20,7 @@ export interface Capabilities {
 
 function readEnableDominoParam(): boolean {
   const params = new URLSearchParams(window.location.search)
-  return params.get('enableDomino') === 'true'
+  return params.get('enableDomino') !== 'false'
 }
 
 const STANDALONE: Capabilities = {

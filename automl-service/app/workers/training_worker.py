@@ -17,7 +17,7 @@ from app.core.dataset_manager import DominoDatasetManager
 from app.core.domino_registry import get_domino_registry
 from app.core.model_diagnostics import get_model_diagnostics
 from app.core.model_loader import load_predictor, load_dataframe
-from app.core.utils import utc_now
+from app.core.utils import remap_shared_path, utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -164,8 +164,8 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                 data_path = await dataset_manager.get_dataset_file_path(job.dataset_id)
                 await crud.add_job_log(db, job_id, f"Using Domino dataset: {job.dataset_id}")
             else:
-                data_path = job.file_path
-                await crud.add_job_log(db, job_id, f"Using uploaded file: {job.file_path}")
+                data_path = remap_shared_path(job.file_path)
+                await crud.add_job_log(db, job_id, f"Using uploaded file: {data_path}")
 
             logger.info(f"[TRAINING DEBUG] Resolved data_path: {data_path}")
             await crud.add_job_log(db, job_id, f"[DEBUG] Data path resolved to: {data_path}", "INFO")
@@ -409,27 +409,45 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
             )
 
             # Auto-register to Domino Model Registry if configured
-            auto_register = os.environ.get("AUTO_REGISTER_MODELS", "false").lower() == "true"
-            if auto_register and model_path and job.enable_mlflow and not settings.standalone_mode:
+            if job.auto_register and model_path and not settings.standalone_mode:
+                reg_model_name = job.register_name or f"{job.name}-{job_id[:8]}"
+                await crud.add_job_log(
+                    db, job_id,
+                    f"Auto-registering model as '{reg_model_name}' in project {job.project_name or job.project_id}",
+                    "INFO",
+                )
                 try:
                     registry = get_domino_registry()
                     reg_result = registry.register_model(
                         model_path=model_path,
-                        model_name=f"{job.name}-{job_id[:8]}",
+                        model_name=reg_model_name,
                         model_type=job.model_type.value,
                         description=f"AutoML model from job {job.name}",
                         metrics=result.get("metrics", {}),
                         params=training_params,
                         experiment_name=experiment_name,  # Use same experiment as training
+                        project_id=job.project_id,
+                        project_name=job.project_name,
                     )
                     if reg_result.get("success"):
                         await crud.add_job_log(
                             db, job_id,
                             f"Model registered: {reg_result.get('model_name')} v{reg_result.get('model_version')}",
-                            "INFO"
+                            "INFO",
+                        )
+                    else:
+                        await crud.add_job_log(
+                            db, job_id,
+                            f"Model registration returned failure: {reg_result.get('error', 'unknown')}",
+                            "WARNING",
                         )
                 except Exception as e:
                     logger.warning(f"Auto-registration failed: {e}")
+                    await crud.add_job_log(
+                        db, job_id,
+                        f"Auto-registration failed: {e}",
+                        "ERROR",
+                    )
 
             await crud.add_job_log(
                 db, job_id,

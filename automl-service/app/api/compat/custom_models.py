@@ -29,11 +29,13 @@ def register_custom_model_routes(app: FastAPI) -> None:
         return await list_model_apis_safe()
 
     @app.post("/svcdeployfromjob")
-    async def svc_deploy_from_job(body: dict = Body(default={})):
+    async def svc_deploy_from_job(request: Request, body: dict = Body(default={})):
+        project_id = request.headers.get("X-Project-Id") or body.get("project_id")
         return await deploy_from_job_service(
             job_id=body.get("job_id"),
             model_name=body.get("model_name"),
             function_name=body.get("function_name", "predict"),
             min_replicas=body.get("min_replicas", 1),
             max_replicas=body.get("max_replicas", 1),
+            project_id=project_id,
         )

@@ -39,6 +39,9 @@ def main() -> None:
     from app.core.data_profiler import get_data_profiler
     from app.core.eda_job_store import get_eda_job_store
     from app.core.ts_profiler import get_ts_profiler
+    from app.core.utils import remap_shared_path
+
+    file_path = remap_shared_path(args.file_path)
 
     store = get_eda_job_store()
     store.update_request(args.request_id, status="running")
@@ -46,7 +49,7 @@ def main() -> None:
     try:
         if args.mode == "tabular":
             result = get_data_profiler().profile_file(
-                file_path=args.file_path,
+                file_path=file_path,
                 sample_size=args.sample_size,
                 sampling_strategy=args.sampling_strategy,
                 stratify_column=args.stratify_column,
@@ -55,7 +58,7 @@ def main() -> None:
             if not args.time_column or not args.target_column:
                 raise ValueError("time_column and target_column are required for timeseries profiling")
             result = get_ts_profiler().profile_timeseries_file(
-                file_path=args.file_path,
+                file_path=file_path,
                 time_column=args.time_column,
                 target_column=args.target_column,
                 id_column=args.id_column,

@@ -117,6 +117,8 @@ class DominoModelRegistry:
         metrics: Optional[Dict[str, float]] = None,
         params: Optional[Dict[str, Any]] = None,
         experiment_name: Optional[str] = None,
+        project_id: Optional[str] = None,
+        project_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Register a trained model to the Domino Model Registry.
 
@@ -138,7 +140,7 @@ class DominoModelRegistry:
         try:
             # Use the same experiment as training, or create new one if not provided
             if not experiment_name:
-                experiment_name = f"{model_name}__{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                experiment_name = f"{model_name}__{utc_now().strftime('%Y%m%d_%H%M%S')}"
             mlflow.set_experiment(experiment_name)
             logger.info(f"Using MLflow experiment: {experiment_name}")
 
@@ -188,11 +190,20 @@ class DominoModelRegistry:
                         except Exception as e:
                             logger.warning(f"Could not log metric {key}: {e}")
 
-                # Set tags
+                # Set tags — include Domino project context so the proxy
+                # associates this run (and registered model) with the correct project.
                 mlflow.set_tag("model_type", model_type)
                 mlflow.set_tag("framework", "autogluon")
                 mlflow.set_tag("registered_by", "automl-service")
                 mlflow.set_tag("registration_time", utc_now().isoformat())
+                mlflow.set_tag(
+                    "domino.project_id",
+                    project_id or os.environ.get("DOMINO_PROJECT_ID", ""),
+                )
+                mlflow.set_tag(
+                    "domino.project_name",
+                    project_name or os.environ.get("DOMINO_PROJECT_NAME", ""),
+                )
 
                 if tags:
                     for key, value in tags.items():

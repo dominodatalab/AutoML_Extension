@@ -448,7 +448,7 @@ async def start_profile_async(request: AsyncProfileStartRequest):
     )
 
     launcher = get_domino_job_launcher()
-    launch_result = launcher.start_eda_job(
+    launch_result = await launcher.start_eda_job(
         request_id=request_id,
         mode=request.mode,
         file_path=request.file_path,
@@ -485,7 +485,7 @@ async def start_profile_async(request: AsyncProfileStartRequest):
     )
 
 
-def _build_async_status_response(request_id: str) -> AsyncProfileStatusResponse:
+async def _build_async_status_response(request_id: str) -> AsyncProfileStatusResponse:
     """Load async EDA status from file-backed metadata/results."""
     store = get_eda_job_store()
     launcher = get_domino_job_launcher()
@@ -513,7 +513,7 @@ def _build_async_status_response(request_id: str) -> AsyncProfileStatusResponse:
     domino_job_status = metadata.get("domino_job_status")
 
     if status in {"running", "pending"} and domino_job_id:
-        domino_status_result = launcher.get_job_status(domino_job_id)
+        domino_status_result = await launcher.get_job_status(domino_job_id)
         if domino_status_result.get("success"):
             latest_domino_status = domino_status_result.get("domino_job_status")
             if latest_domino_status and latest_domino_status != domino_job_status:
@@ -561,11 +561,11 @@ def _build_async_status_response(request_id: str) -> AsyncProfileStatusResponse:
 @handle_errors("Async profiling status error")
 async def get_profile_async_status(request: AsyncProfileStatusRequest):
     """Poll async EDA job status/result."""
-    return _build_async_status_response(request.request_id)
+    return await _build_async_status_response(request.request_id)
 
 
 @router.get("/profile/async/{request_id}", response_model=AsyncProfileStatusResponse)
 @handle_errors("Async profiling status error")
 async def get_profile_async_status_get(request_id: str):
     """GET variant for async EDA status polling."""
-    return _build_async_status_response(request_id)
+    return await _build_async_status_response(request_id)

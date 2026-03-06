@@ -9,7 +9,7 @@ Provides API endpoints to:
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from app.core.domino_model_api import get_domino_model_api
@@ -404,6 +404,7 @@ async def quick_deploy(request: QuickDeployRequest):
 
 @router.post("/deploy-from-job/{job_id}")
 async def deploy_from_job(
+    request: Request,
     job_id: str,
     model_name: Optional[str] = None,
     function_name: str = "predict",
@@ -416,10 +417,12 @@ async def deploy_from_job(
     """
     from app.services.deployment_service import deploy_from_job as deploy_from_job_service
 
+    project_id = request.headers.get("X-Project-Id")
     return await deploy_from_job_service(
         job_id=job_id,
         model_name=model_name,
         function_name=function_name,
         min_replicas=min_replicas,
         max_replicas=max_replicas,
+        project_id=project_id,
     )

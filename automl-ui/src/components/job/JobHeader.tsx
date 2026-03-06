@@ -1,5 +1,5 @@
 import { useRef, useEffect } from 'react'
-import { StopIcon, CloudArrowUpIcon, RocketLaunchIcon, CubeIcon } from '@heroicons/react/24/outline'
+import { StopIcon, RocketLaunchIcon, CubeIcon } from '@heroicons/react/24/outline'
 import type { Job } from '../../types/job'
 
 interface JobHeaderProps {
@@ -12,7 +12,6 @@ interface JobHeaderProps {
   onCancel: () => void
   onToggleDeployDropdown: () => void
   onCloseDeployDropdown: () => void
-  onOpenRegisterDialog: () => void
   onOpenDeployApiDialog: () => void
   onOpenDockerExportDialog: () => void
   onToggleActionsDropdown: () => void
@@ -30,7 +29,6 @@ export function JobHeader({
   onCancel,
   onToggleDeployDropdown,
   onCloseDeployDropdown,
-  onOpenRegisterDialog,
   onOpenDeployApiDialog,
   onOpenDockerExportDialog,
   onToggleActionsDropdown,
@@ -85,13 +83,6 @@ export function JobHeader({
             </button>
             {showDeployDropdown && (
               <div className="absolute right-0 mt-1 w-72 bg-white shadow-lg border border-domino-border py-1 z-50">
-                <button
-                  onClick={onOpenRegisterDialog}
-                  className="w-full px-4 py-2 text-left text-sm text-domino-text-primary hover:bg-domino-bg-tertiary flex items-center gap-2 transition-colors"
-                >
-                  <CloudArrowUpIcon className="w-4 h-4" />
-                  Register in Domino Model Registry
-                </button>
                 <button
                   onClick={onOpenDeployApiDialog}
                   className="w-full px-4 py-2 text-left text-sm text-domino-text-primary hover:bg-domino-bg-tertiary flex items-center gap-2 transition-colors"

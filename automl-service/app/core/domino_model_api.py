@@ -1172,6 +1172,7 @@ class DominoModelAPI:
         min_replicas: int = 1,
         max_replicas: int = 1,
         auto_start: bool = True,
+        project_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """High-level method to deploy a model end-to-end.
 
@@ -1199,6 +1200,7 @@ class DominoModelAPI:
             api_result = await self.create_model_api(
                 name=model_name,
                 description=description,
+                project_id=project_id,
                 environment_id=environment_id,
                 source_file=model_file,
                 source_function=function_name,

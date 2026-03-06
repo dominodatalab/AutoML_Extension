@@ -16,11 +16,11 @@ const presetOptions = [
 
 function Step3Configuration() {
   const { modelType, dataSource, training, setTraining, setJobInfo, jobName, jobDescription } = useWizard()
-  const { dominoJobs } = useCapabilities()
+  const { dominoJobs, modelRegistry } = useCapabilities()
   const isTimeSeries = modelType?.modelType === 'timeseries'
 
   const [localConfig, setLocalConfig] = useState({
-    executionTarget: training?.executionTarget || 'local',
+    executionTarget: training?.executionTarget || (dominoJobs ? 'domino_job' : 'local'),
     targetColumn: training?.targetColumn || '',
     timeColumn: training?.timeColumn || '',
     idColumn: training?.idColumn || '',
@@ -29,6 +29,8 @@ function Step3Configuration() {
     timeLimit: training?.timeLimit?.toString() || '3600',
     evalMetric: training?.evalMetric || '',
     experimentName: training?.experimentName || '',
+    autoRegister: training?.autoRegister || false,
+    registerName: training?.registerName || '',
   })
 
   const [localJobInfo, setLocalJobInfo] = useState({
@@ -70,6 +72,8 @@ function Step3Configuration() {
       experimentName: localConfig.experimentName || undefined,
       advancedConfig: Object.keys(advancedConfig).length > 0 ? advancedConfig : undefined,
       timeseriesConfig: isTimeSeries && Object.keys(timeseriesConfig).length > 0 ? timeseriesConfig : undefined,
+      autoRegister: localConfig.autoRegister || undefined,
+      registerName: localConfig.autoRegister && localConfig.registerName ? localConfig.registerName : undefined,
     })
   }, [localConfig, advancedConfig, timeseriesConfig, isTimeSeries, setTraining])
 
@@ -254,6 +258,42 @@ function Step3Configuration() {
             />
           </div>
         </div>
+
+        {/* Model Registry */}
+        {modelRegistry && (
+          <div className="border-t border-domino-border pt-6">
+            <h3 className="text-md font-semibold text-domino-text-primary mb-4">
+              Model Registry
+            </h3>
+            <div className="space-y-4">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={localConfig.autoRegister}
+                  onChange={(e) =>
+                    setLocalConfig((prev) => ({ ...prev, autoRegister: e.target.checked }))
+                  }
+                  className="h-4 w-4 rounded border-domino-border text-domino-accent-purple focus:ring-domino-accent-purple"
+                />
+                <span className="text-sm text-domino-text-primary">
+                  Register model in Domino Model Registry after training
+                </span>
+              </label>
+              {localConfig.autoRegister && (
+                <div className="ml-7">
+                  <Input
+                    label="Registered Model Name (optional)"
+                    placeholder="Auto-generated from job name"
+                    value={localConfig.registerName}
+                    onChange={(e) =>
+                      setLocalConfig((prev) => ({ ...prev, registerName: e.target.value }))
+                    }
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Advanced Configuration */}
         <div className="border-t border-domino-border pt-6">

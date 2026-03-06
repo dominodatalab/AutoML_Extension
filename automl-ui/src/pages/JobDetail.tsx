@@ -5,7 +5,6 @@ import { useJob, useJobStatus, useJobLogs, useCancelJob, useDeleteJob } from '..
 import { SimpleProgressBar } from '../components/training/SimpleProgressBar'
 import { ModelDiagnosticsPanel } from '../components/diagnostics/ModelDiagnosticsPanel'
 import { LearningCurvesPanel } from '../components/diagnostics/LearningCurvesPanel'
-import { RegisterModelDialog } from '../components/registry/ModelRegistryPanel'
 import { DeployModelApiDialog } from '../components/deployment/DeployModelApiDialog'
 import { ExportDockerDialog } from '../components/export/ExportDockerDialog'
 import { ModelExportPanel } from '../components/export/ModelExportPanel'
@@ -32,7 +31,6 @@ function JobDetail() {
   const { polledProgress, progressJobId, simulatedProgress } = useJobProgress(jobId, job, isTraining, refetch)
 
   const [activeTab, setActiveTab] = useState<DetailTab>('overview')
-  const [showRegisterDialog, setShowRegisterDialog] = useState(false)
   const [showDeployApiDialog, setShowDeployApiDialog] = useState(false)
   const [showDockerExportDialog, setShowDockerExportDialog] = useState(false)
   const [showDeployDropdown, setShowDeployDropdown] = useState(false)
@@ -118,10 +116,6 @@ function JobDetail() {
         onCancel={handleCancel}
         onToggleDeployDropdown={() => setShowDeployDropdown(!showDeployDropdown)}
         onCloseDeployDropdown={() => setShowDeployDropdown(false)}
-        onOpenRegisterDialog={() => {
-          setShowDeployDropdown(false)
-          setShowRegisterDialog(true)
-        }}
         onOpenDeployApiDialog={() => {
           setShowDeployDropdown(false)
           setShowDeployApiDialog(true)
@@ -222,16 +216,6 @@ function JobDetail() {
             )}
           </div>
         </div>
-      )}
-
-      {/* Register Model Dialog */}
-      {showRegisterDialog && job?.model_path && (
-        <RegisterModelDialog
-          jobId={job.id}
-          modelPath={job.model_path}
-          onClose={() => setShowRegisterDialog(false)}
-          onSuccess={() => setShowRegisterDialog(false)}
-        />
       )}
 
       {/* Deploy Model API Dialog */}
