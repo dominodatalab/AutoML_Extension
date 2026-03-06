@@ -409,12 +409,18 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
             )
 
             # Auto-register to Domino Model Registry if configured
-            if job.auto_register and model_path and job.enable_mlflow and not settings.standalone_mode:
+            if job.auto_register and model_path and not settings.standalone_mode:
+                reg_model_name = job.register_name or f"{job.name}-{job_id[:8]}"
+                await crud.add_job_log(
+                    db, job_id,
+                    f"Auto-registering model as '{reg_model_name}' in project {job.project_name or job.project_id}",
+                    "INFO",
+                )
                 try:
                     registry = get_domino_registry()
                     reg_result = registry.register_model(
                         model_path=model_path,
-                        model_name=job.register_name or f"{job.name}-{job_id[:8]}",
+                        model_name=reg_model_name,
                         model_type=job.model_type.value,
                         description=f"AutoML model from job {job.name}",
                         metrics=result.get("metrics", {}),
@@ -427,10 +433,21 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                         await crud.add_job_log(
                             db, job_id,
                             f"Model registered: {reg_result.get('model_name')} v{reg_result.get('model_version')}",
-                            "INFO"
+                            "INFO",
+                        )
+                    else:
+                        await crud.add_job_log(
+                            db, job_id,
+                            f"Model registration returned failure: {reg_result.get('error', 'unknown')}",
+                            "WARNING",
                         )
                 except Exception as e:
                     logger.warning(f"Auto-registration failed: {e}")
+                    await crud.add_job_log(
+                        db, job_id,
+                        f"Auto-registration failed: {e}",
+                        "ERROR",
+                    )
 
             await crud.add_job_log(
                 db, job_id,
