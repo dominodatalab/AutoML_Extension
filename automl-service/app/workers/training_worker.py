@@ -420,6 +420,8 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                         metrics=result.get("metrics", {}),
                         params=training_params,
                         experiment_name=experiment_name,  # Use same experiment as training
+                        project_id=job.project_id,
+                        project_name=job.project_name,
                     )
                     if reg_result.get("success"):
                         await crud.add_job_log(
