@@ -13,6 +13,28 @@ function getProjectIdFromUrl(): string | undefined {
   }
 }
 
+// Capture projectId eagerly at module load time so it survives React Router
+// navigation that may strip query params from window.location.search.
+let _cachedProjectId: string | undefined = getProjectIdFromUrl()
+
+/**
+ * Resolve the current project ID.
+ * Priority: explicit override > cached value from initial URL > live URL.
+ */
+export function getProjectId(): string | undefined {
+  return _cachedProjectId || getProjectIdFromUrl()
+}
+
+/**
+ * Allow external code (e.g. React components with useSearchParams) to
+ * persist the project ID so it survives across navigations.
+ */
+export function setProjectId(id: string | undefined) {
+  if (id) {
+    _cachedProjectId = id
+  }
+}
+
 // Extend window type for runtime config
 declare global {
   interface Window {
@@ -42,11 +64,6 @@ class ApiClient {
   constructor() {
     this.defaultHeaders = {
       'Content-Type': 'application/json',
-    }
-
-    const projectId = getProjectIdFromUrl()
-    if (projectId) {
-      this.defaultHeaders['X-Project-Id'] = projectId
     }
   }
 
@@ -83,6 +100,15 @@ class ApiClient {
     }
 
     const headers: Record<string, string> = { ...this.defaultHeaders }
+
+    // Dynamically resolve project ID on every request so it works even
+    // when the module loaded before query params were available, or after
+    // React Router navigation strips them from the URL.
+    const projectId = getProjectId()
+    if (projectId) {
+      headers['X-Project-Id'] = projectId
+    }
+
     const fetchConfig: RequestInit = {
       method,
       headers,

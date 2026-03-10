@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useSearchParams } from 'react-router-dom'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import Layout from './components/layout/Layout'
 import Dashboard from './pages/Dashboard'
@@ -7,6 +7,21 @@ import NewJob from './pages/NewJob'
 import JobDetail from './pages/JobDetail'
 import EDAAnalysis from './pages/EDAAnalysis'
 import { getBasePath } from './utils/basePath'
+import { setProjectId } from './api'
+
+/**
+ * Sync ?projectId= from the URL into the API client so the X-Project-Id
+ * header is sent on every request. Runs inside BrowserRouter so it has
+ * access to React Router's search params.
+ */
+function ProjectIdSync() {
+  const [searchParams] = useSearchParams()
+  useEffect(() => {
+    const id = searchParams.get('projectId')
+    if (id) setProjectId(id)
+  }, [searchParams])
+  return null
+}
 
 // Fallback for unmatched routes
 function NoRouteMatch() {
@@ -40,6 +55,7 @@ function App() {
   return (
     <ErrorBoundary>
       <BrowserRouter basename={basename}>
+        <ProjectIdSync />
         <Routes>
           <Route path="/" element={<Layout />}>
             <Route index element={<Navigate to="/dashboard" replace />} />
