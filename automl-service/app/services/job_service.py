@@ -100,6 +100,11 @@ async def get_project_context(
 
     # Check for sidebar-injected project id header
     header_project_id = request.headers.get("X-Project-Id") if request else None
+    logger.info(
+        "[PROJECT CONTEXT] X-Project-Id header=%s, request present=%s",
+        header_project_id,
+        request is not None,
+    )
 
     if header_project_id:
         from app.services.project_resolver import resolve_project

@@ -15,6 +15,7 @@ from app.api.schemas.dataset import (
     DatasetSchemaResponse,
 )
 from app.core.dataset_mounts import resolve_dataset_mount_paths
+from app.core.domino_http import domino_request
 
 logger = logging.getLogger(__name__)
 SUPPORTED_DATA_EXTENSIONS = (".csv", ".parquet", ".pq")
@@ -138,8 +139,34 @@ class DominoDatasetManager:
 
         return response.json() if response.text else {}
 
-    async def list_datasets(self) -> list[DatasetResponse]:
-        """List mounted datasets discovered from all active mount roots."""
+    async def list_datasets(self, project_id: Optional[str] = None) -> list[DatasetResponse]:
+        """List datasets, preferring the Domino API when a project ID is available.
+
+        When *project_id* is supplied and the Domino environment is configured,
+        the v2 Dataset API is used to retrieve project-scoped datasets. The
+        results are then cross-referenced with local mount paths so that file
+        listings include real filesystem paths for preview/training.
+
+        Falls back to the legacy filesystem-scan approach when the API is
+        unavailable or the environment is not configured.
+        """
+        if project_id and self.settings.is_domino_environment:
+            try:
+                datasets = await self._list_datasets_via_api(project_id)
+                if datasets is not None:
+                    logger.info(
+                        "Listed %s datasets for project %s via Domino API",
+                        len(datasets),
+                        project_id,
+                    )
+                    return datasets
+            except Exception:
+                logger.exception(
+                    "Domino Dataset API call failed for project %s, falling back to filesystem scan",
+                    project_id,
+                )
+
+        # Fallback: discover datasets from mounted filesystem paths.
         datasets = await self._list_local_datasets()
         mount_paths = self._resolve_dataset_mount_paths()
         logger.info(
@@ -148,6 +175,103 @@ class DominoDatasetManager:
             ", ".join(mount_paths) if mount_paths else "(none)",
         )
         return datasets
+
+    async def _list_datasets_via_api(self, project_id: str) -> Optional[list[DatasetResponse]]:
+        """List datasets for a project using the Domino Dataset RW v2 API.
+
+        Returns None when the API is unreachable so the caller can fall back.
+        """
+        datasets: list[DatasetResponse] = []
+        offset = 0
+        limit = 50
+
+        while True:
+            try:
+                resp = await domino_request(
+                    "GET",
+                    "/api/datasetrw/v2/datasets",
+                    params={
+                        "projectIdsToInclude": project_id,
+                        "offset": offset,
+                        "limit": limit,
+                    },
+                )
+            except httpx.HTTPStatusError as exc:
+                logger.error(
+                    "Domino Dataset API returned %s: %s",
+                    exc.response.status_code,
+                    exc.response.text[:200],
+                )
+                return None
+
+            body = resp.json()
+            items = body if isinstance(body, list) else body.get("items", body.get("datasets", []))
+            if not items:
+                break
+
+            for item in items:
+                ds = self._api_item_to_dataset_response(item)
+                if ds is not None:
+                    datasets.append(ds)
+
+            # Stop if we received fewer items than the page size (last page).
+            if len(items) < limit:
+                break
+            offset += limit
+
+        return datasets
+
+    def _api_item_to_dataset_response(self, item: dict) -> Optional[DatasetResponse]:
+        """Convert a Domino API dataset object into a DatasetResponse.
+
+        Cross-references mounted filesystem paths to resolve real file entries.
+        """
+        dataset_id = item.get("datasetId") or item.get("id", "")
+        dataset_name = item.get("datasetName") or item.get("name", "")
+        if not dataset_name:
+            return None
+
+        # Find the mount path for this dataset.
+        dataset_path: Optional[str] = None
+        for mount_root in self._resolve_dataset_mount_paths():
+            candidate = os.path.join(mount_root, dataset_name)
+            if os.path.exists(candidate):
+                dataset_path = candidate
+                break
+
+        # Enumerate files from the mounted directory when available.
+        files: list[DatasetFileResponse] = []
+        total_size = 0
+        if dataset_path and os.path.isdir(dataset_path):
+            for root, _, filenames in os.walk(dataset_path):
+                for filename in filenames:
+                    if not self._is_supported_file(filename):
+                        continue
+                    file_path = os.path.join(root, filename)
+                    rel_path = os.path.relpath(file_path, dataset_path)
+                    try:
+                        file_stat = os.stat(file_path)
+                        file_size = file_stat.st_size
+                    except OSError:
+                        file_size = 0
+                    files.append(
+                        DatasetFileResponse(name=rel_path, path=file_path, size=file_size)
+                    )
+                    total_size += file_size
+
+        # If the dataset isn't mounted locally, still return it so the UI can
+        # show its name (files will be empty until it's mounted).
+        return DatasetResponse(
+            id=dataset_id,
+            name=dataset_name,
+            path=dataset_path,
+            description=item.get("description", ""),
+            size_bytes=total_size or item.get("sizeInBytes", item.get("storageSizeBytes", 0)),
+            created_at=item.get("createdAt"),
+            updated_at=item.get("lastUpdatedAt", item.get("updatedAt")),
+            file_count=len(files) if files else item.get("fileCount", 0),
+            files=files,
+        )
 
     def _is_reserved_mount_entry(self, item_name: str, item_path: str) -> bool:
         """Skip known non-dataset mount entries."""

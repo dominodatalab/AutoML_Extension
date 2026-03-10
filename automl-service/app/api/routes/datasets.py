@@ -1,8 +1,9 @@
 """Dataset management endpoints."""
 
+import os
 from typing import Optional
 
-from fastapi import APIRouter, Depends, UploadFile, File, Query
+from fastapi import APIRouter, Depends, Request, UploadFile, File, Query
 
 from app.api.error_handler import handle_errors
 
@@ -27,13 +28,24 @@ from app.services.dataset_service import (
 router = APIRouter()
 
 
+def _resolve_project_id(request: Request) -> Optional[str]:
+    """Extract project ID from request header with env var fallback."""
+    return (
+        request.headers.get("X-Project-Id")
+        or os.environ.get("DOMINO_PROJECT_ID")
+        or None
+    )
+
+
 @router.get("", response_model=DatasetListResponse)
 @handle_errors("Failed to list datasets", detail_prefix="Failed to list datasets")
 async def list_datasets(
+    request: Request,
     dataset_manager=Depends(get_dataset_manager),
 ):
-    """List available datasets from the active runtime dataset mount path."""
-    return await list_datasets_response(dataset_manager)
+    """List available datasets scoped to the current project."""
+    project_id = _resolve_project_id(request)
+    return await list_datasets_response(dataset_manager, project_id=project_id)
 
 
 @router.get("/{dataset_id}", response_model=DatasetResponse)

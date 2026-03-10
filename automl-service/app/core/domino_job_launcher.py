@@ -246,7 +246,15 @@ class DominoJobLauncher:
         project_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Launch a Domino job while pinning to the current commit when possible."""
-        project_id = project_id or resolve_domino_project_id()
+        env_project_id = resolve_domino_project_id()
+        resolved_project_id = project_id or env_project_id
+        logger.info(
+            "[JOB LAUNCH] project_id arg=%s, env=%s, resolved=%s",
+            project_id,
+            env_project_id,
+            resolved_project_id,
+        )
+        project_id = resolved_project_id
 
         # Resolve hardware tier name → ID (the SDK did this internally).
         hardware_tier_id = None
@@ -284,9 +292,12 @@ class DominoJobLauncher:
         if title:
             payload["title"] = title
 
+        logger.info("[JOB LAUNCH] POST /v4/jobs/start payload: %s", json.dumps(payload, default=str))
         try:
             resp = await domino_request("POST", "/v4/jobs/start", json=payload)
-            return resp.json()
+            result = resp.json()
+            logger.info("[JOB LAUNCH] Response: %s", json.dumps(result, default=str)[:500])
+            return result
         except (httpx.HTTPStatusError, Exception) as e:
             pinned_commit = payload.get("commitId")
             # If the pinned commit cannot be resolved by Domino's repo mirror,
