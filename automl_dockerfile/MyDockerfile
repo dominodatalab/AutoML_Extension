@@ -1,0 +1,174 @@
+FROM python:3.10-slim-bullseye
+
+ARG DUSER=ubuntu
+ARG DGROUP=ubuntu
+ARG DEBIAN_FRONTEND=noninteractive
+
+ENV DOMINO_USER=$DUSER
+ENV DOMINO_GROUP=$DGROUP
+ENV MLFLOW_VERSION=3.2.0
+
+#
+# Add Domino requirements
+#
+RUN apt-get update && \
+    # Security updates
+    grep security /etc/apt/sources.list > /etc/apt/security.sources.list && \
+    apt-get upgrade -y -o Dir::Etc::SourceList=/etc/apt/security.sources.list && \
+    apt-get install -y \
+        apt-utils \
+    # Requirements for Domino executions
+        curl \
+    # Requirements for node installation
+        ca-certificates \
+    # Requirement for dominodatalab installation
+        git
+
+#
+# Add Domino user
+#
+RUN if ! id 12574 >/dev/null 2>&1; then \
+        groupadd -g 12574 ${DOMINO_GROUP}; \
+        useradd -u 12574 -g 12574 -m -N -s /bin/bash ${DOMINO_USER}; \
+    fi
+
+RUN chown -R ${DOMINO_USER}:${DOMINO_GROUP} "/home/${DOMINO_USER}"
+
+#
+# Install backend/job dependencies
+#
+
+# install uv to improve depependency resolution
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+RUN alias pip="uv pip"
+RUN pip install --upgrade pip setuptools wheel Cython
+
+#
+# Mlflow, must install before dominodatalab
+#
+RUN pip install mlflow==$MLFLOW_VERSION
+
+# ============================================
+# Torch
+# ============================================
+RUN pip install torch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0 --index-url https://download.pytorch.org/whl/cpu
+
+# ============================================
+# AutoGluon Core Dependencies
+# ============================================
+RUN pip install \
+        #"numpy>=1.24.0,<2.0.0" \ # TODO conflicts with dominodatalab
+        "pandas>=2.0.0" \
+        "scipy>=1.10.0" \
+        "scikit-learn>=1.3.0"
+
+# ============================================
+# AutoGluon Tabular Dependencies
+# ============================================
+RUN pip install \
+        "lightgbm>=4.0.0" \
+        "xgboost>=2.0.0" \
+        "catboost>=1.2" \
+        "featuretools>=1.27.0" \
+        "ray[tune]>=2.6.0" \
+        "hyperopt>=0.2.7" \
+        "optuna>=3.3.0" \
+        "ConfigSpace>=0.7.1" \
+        "boto3>=1.28.0" \
+        "psutil>=5.9.0" \
+        "networkx>=3.1"
+
+# ============================================
+# AutoGluon TimeSeries Dependencies
+# ============================================
+RUN pip install \
+        "statsmodels>=0.14.0" \
+        "pmdarima>=2.0.3" \
+        "tbats>=1.1.3" \
+        "prophet>=1.1.4" \
+        "gluonts>=0.14.0" \
+        "pytorch-lightning>=2.0.0" \
+        "holidays>=0.33" \
+        "convertdate>=2.4.0" \
+        "lunarcalendar>=0.0.9" \
+        "tqdm>=4.65.0"
+
+# ============================================
+# AutoGluon Installation (All Modules)
+# ============================================
+RUN pip install \
+        "autogluon>=1.1.0" \
+        "autogluon.core>=1.1.0" \
+        "autogluon.features>=1.1.0" \
+        "autogluon.tabular>=1.1.0" \
+        "autogluon.timeseries>=1.1.0"
+
+# ============================================
+# Visualization Libraries
+# ============================================
+RUN pip install \
+    "matplotlib>=3.7.0" \
+    "seaborn>=0.12.0" \
+    "plotly>=5.15.0" \
+    "kaleido>=0.2.1" \
+    "bokeh>=3.2.0" \
+    "altair>=5.1.0"
+
+
+## ============================================
+## Model Serving (FastAPI) TODO it bothers me that we replicate this from compute-environment-builder
+## ============================================
+#RUN pip install \
+#    "fastapi>=0.104.0" \
+#    "uvicorn[standard]>=0.24.0" \
+#    "python-multipart>=0.0.6" \
+#    "httpx>=0.25.0" \
+#    "starlette>=0.27.0" \
+#    "pydantic>=2.4.0" \
+#    "pydantic-settings>=2.0.0" \
+#    "uwsgi"
+
+# ============================================
+# Additional Data Science Utilities TODO probably don't need?
+# ============================================
+RUN pip install \
+    "pyarrow>=14.0.0" \
+    "fastparquet>=2023.10.0" \
+    "openpyxl>=3.1.0" \
+    "xlrd>=2.0.0" \
+    "h5py>=3.10.0" \
+    "sqlalchemy>=2.0.0" \
+    "s3fs>=2023.10.0" \
+    "pyyaml>=6.0" \
+    "python-dotenv>=1.0.0" \
+    "requests>=2.31.0" \
+    "aiohttp>=3.8.0" \
+    "tenacity>=8.2.0" \
+    "joblib>=1.3.0" \
+    "cloudpickle>=3.0.0" \
+    "dill>=0.3.7" \
+    "typing-extensions>=4.8.0"
+
+# ============================================
+# SHAP and Model Interpretability TODO what?
+# ============================================
+RUN pip install \
+    "shap>=0.43.0" \
+    "lime>=0.2.0.1" \
+    "eli5>=0.13.0"
+
+# install dominodatalab last
+RUN pip install "dominodatalab[agents] @ git+https://github.com/dominodatalab/python-domino.git@release-2.0.0"
+
+#
+# Install frontend dependencies
+#
+
+# Install nodejs >= 20 (latest)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+ && apt-get install -y nodejs
+
+# Cleanup after apt package installs
+RUN rm -rf /var/lib/apt/lists/*
+
+USER ${DOMINO_USER}

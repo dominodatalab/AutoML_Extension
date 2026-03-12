@@ -114,6 +114,7 @@ ensure_dirs() {
 }
 
 ensure_node() {
+	# TODO don't' install node here
     if command -v npm &> /dev/null; then
         return
     fi
