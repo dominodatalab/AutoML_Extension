@@ -167,6 +167,8 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                 data_path = remap_shared_path(job.file_path)
                 await crud.add_job_log(db, job_id, f"Using uploaded file: {data_path}")
 
+            # TODO data_path is wrong, needs to be a mounted dataset
+            # TODO also this log message is INFO but it claims it's DEBUG?
             logger.info(f"[TRAINING DEBUG] Resolved data_path: {data_path}")
             await crud.add_job_log(db, job_id, f"[DEBUG] Data path resolved to: {data_path}", "INFO")
 

@@ -15,6 +15,7 @@ def utc_now() -> datetime:
 # Known Domino shared-dataset mount prefixes (order: most common first).
 _MOUNT_ROOTS = [
     "/mnt/data/",
+    "/mnt/imported/data/",
     "/domino/datasets/",
     "/domino/datasets/local/",
 ]
@@ -43,6 +44,8 @@ def remap_shared_path(path: str) -> str:
             if candidate_root == src_root:
                 continue
             candidate = candidate_root + relative
+
+            logger.info(f"CANDIDATE PATH IS {candidate}")
             if os.path.exists(candidate):
                 logger.info(
                     "Remapped path %s -> %s (cross-project mount)",
