@@ -380,12 +380,42 @@ async def list_jobs_basic(
     return list(jobs)
 
 
+async def _fail_zombie_local_jobs(db: AsyncSession) -> None:
+    """Detect local jobs marked RUNNING whose asyncio task no longer exists.
+
+    This handles the case where the training coroutine was killed (e.g. OOM)
+    but the API server process survived — the job stays RUNNING in the DB
+    with nothing actually executing it.
+    """
+    try:
+        from app.core.job_queue import get_job_queue
+        queue = get_job_queue()
+
+        running_local = await crud.get_jobs_by_statuses(
+            db,
+            [JobStatus.RUNNING],
+            execution_target="local",
+        )
+        for job in running_local:
+            # If the queue has no task for this job, it's a zombie
+            if job.id not in queue._tasks or queue._tasks[job.id].done():
+                await crud.update_job_status(
+                    db, job.id, JobStatus.FAILED,
+                    error_message="Training process died unexpectedly (likely out of memory)",
+                    completed_at=utc_now(),
+                )
+                logger.warning("Marked zombie local job as FAILED: %s (%s)", job.id, job.name)
+    except Exception:
+        logger.exception("Error checking for zombie local jobs")
+
+
 async def list_jobs_filtered(
     db: AsyncSession,
     list_request: JobListRequest,
     request: Optional[Request] = None,
 ) -> list[Job]:
     """List jobs using advanced POST filters."""
+    await _fail_zombie_local_jobs(db)
     await _sync_active_domino_jobs_for_overview(db)
     (
         status_filter,
@@ -414,19 +444,33 @@ async def list_jobs_filtered(
 
 
 async def _sync_active_domino_jobs_for_overview(db: AsyncSession) -> None:
-    """Refresh active Domino-backed jobs so list views show current status."""
-    active_jobs = await crud.get_jobs_by_statuses(
-        db,
-        [JobStatus.PENDING, JobStatus.RUNNING],
-        execution_target="domino_job",
-    )
-    if active_jobs:
-        for job in active_jobs:
-            if not job.domino_job_id:
-                continue
-            await _sync_domino_job_state(db, job)
+    """Refresh active Domino-backed jobs so list views show current status.
 
-    await _sync_recent_terminal_domino_metadata_for_overview(db)
+    Errors from individual job syncs are logged but never propagated —
+    a flaky Domino API call must not break the job-list endpoint.
+    """
+    try:
+        active_jobs = await crud.get_jobs_by_statuses(
+            db,
+            [JobStatus.PENDING, JobStatus.RUNNING],
+            execution_target="domino_job",
+        )
+        if active_jobs:
+            for job in active_jobs:
+                if not job.domino_job_id:
+                    continue
+                try:
+                    await _sync_domino_job_state(db, job)
+                except Exception:
+                    logger.exception(
+                        "Failed to sync Domino job %s; skipping", job.id
+                    )
+
+        await _sync_recent_terminal_domino_metadata_for_overview(db)
+    except Exception:
+        logger.exception(
+            "Error during Domino job sync for overview; job list will show stale status"
+        )
 
 
 async def _sync_recent_terminal_domino_metadata_for_overview(db: AsyncSession) -> None:
