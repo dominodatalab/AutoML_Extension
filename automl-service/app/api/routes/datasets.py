@@ -1,8 +1,11 @@
 """Dataset management endpoints."""
 
+import logging
 import mimetypes
 import os
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Query
 from fastapi.responses import FileResponse
@@ -140,7 +143,21 @@ async def upload_file(
     if project_id and not _get_settings().standalone_mode:
         from app.services.storage_resolver import get_storage_resolver
 
-        paths = await get_storage_resolver().resolve_project_paths(project_id)
-        upload_dir = paths.uploads_path
-        os.makedirs(upload_dir, exist_ok=True)
+        resolver = get_storage_resolver()
+
+        # Pre-create the dataset so future Jobs/restarts will have the mount.
+        # Best-effort — upload proceeds regardless.
+        await resolver.ensure_dataset_exists(project_id)
+
+        # Use the mount if available; fall back to app-local uploads_path.
+        mounted, mount_path = await resolver.check_project_storage(project_id)
+        if mounted and mount_path:
+            upload_dir = os.path.join(mount_path, "uploads")
+        else:
+            logger.info(
+                "Dataset mount not available for project %s; using local uploads_path",
+                project_id,
+            )
+        if upload_dir:
+            os.makedirs(upload_dir, exist_ok=True)
     return await save_uploaded_file(file, upload_dir=upload_dir)
