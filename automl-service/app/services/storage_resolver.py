@@ -12,6 +12,9 @@ Usage::
     # mount_path == "/domino/datasets/local/automl-extension" (or similar)
 """
 
+import asyncio
+import hashlib
+import io
 import logging
 import os
 from dataclasses import dataclass, field
@@ -24,6 +27,10 @@ logger = logging.getLogger(__name__)
 
 DATASET_NAME = "automl-extension"
 DATASET_DESCRIPTION = "AutoML Extension storage — auto-created by the AutoML App"
+
+# Upload settings (matching python-domino SDK defaults)
+_UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024  # 8 MB
+_UPLOAD_MAX_RETRIES = 10
 
 # Ordered list of mount path templates to probe after dataset creation.
 _MOUNT_TEMPLATES = [
@@ -95,6 +102,125 @@ class ProjectStorageResolver:
             self._cache.pop(project_id, None)
         else:
             self._cache.clear()
+
+    async def upload_file(
+        self,
+        dataset_id: str,
+        file_path: str,
+        file_content: bytes,
+        collision_setting: str = "Overwrite",
+        chunk_size: int = _UPLOAD_CHUNK_SIZE,
+    ) -> None:
+        """Upload a file to a dataset via the v4 chunked upload API.
+
+        Supports files of any size by splitting into chunks (default 8 MB).
+        This follows the same workflow as the python-domino SDK:
+          1. POST .../snapshot/file/start → get upload_key
+          2. POST .../snapshot/file (multipart chunk) → upload data (repeated per chunk)
+          3. GET  .../snapshot/file/end/{key} → finalize
+        """
+        # Step 1: Start upload session
+        resp = await domino_request(
+            "POST",
+            f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/start",
+            json={
+                "filePaths": [file_path],
+                "fileCollisionSetting": collision_setting,
+            },
+        )
+        upload_key = resp.json()
+        if not isinstance(upload_key, str):
+            upload_key = upload_key.get("upload_key") or upload_key.get("uploadKey") or upload_key.get("key")
+        if not upload_key:
+            raise RuntimeError(f"Failed to start upload session for dataset {dataset_id}")
+
+        logger.debug("Upload session started for dataset %s, key=%s", dataset_id, upload_key)
+
+        try:
+            await self._upload_chunks(
+                dataset_id, upload_key, file_path, file_content, chunk_size
+            )
+
+            # Step 3: Finalize
+            await domino_request(
+                "GET",
+                f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/end/{upload_key}",
+            )
+            logger.info(
+                "Uploaded '%s' (%d bytes, %d chunk(s)) to dataset %s",
+                file_path,
+                len(file_content),
+                max(1, (len(file_content) + chunk_size - 1) // chunk_size),
+                dataset_id,
+            )
+
+        except Exception:
+            # Cancel on failure
+            try:
+                await domino_request(
+                    "GET",
+                    f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/cancel/{upload_key}",
+                )
+            except Exception:
+                pass
+            raise
+
+    async def _upload_chunks(
+        self,
+        dataset_id: str,
+        upload_key: str,
+        file_path: str,
+        file_content: bytes,
+        chunk_size: int,
+    ) -> None:
+        """Split *file_content* into chunks and upload each sequentially."""
+        total_size = len(file_content)
+        total_chunks = max(1, (total_size + chunk_size - 1) // chunk_size)
+        identifier = file_path.replace(".", "-").replace("/", "-")
+
+        for chunk_num in range(1, total_chunks + 1):
+            start = (chunk_num - 1) * chunk_size
+            end = min(start + chunk_size, total_size)
+            chunk_data = file_content[start:end]
+            chunk_checksum = hashlib.md5(chunk_data).hexdigest()
+
+            chunk_params = {
+                "key": upload_key,
+                "resumableChunkNumber": chunk_num,
+                "resumableChunkSize": chunk_size,
+                "resumableCurrentChunkSize": len(chunk_data),
+                "resumableTotalChunks": total_chunks,
+                "resumableIdentifier": identifier,
+                "resumableRelativePath": file_path,
+                "checksum": chunk_checksum,
+            }
+
+            for attempt in range(_UPLOAD_MAX_RETRIES):
+                try:
+                    await domino_request(
+                        "POST",
+                        f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file",
+                        params=chunk_params,
+                        files={file_path: (file_path, io.BytesIO(chunk_data), "application/octet-stream")},
+                        headers={"Csrf-Token": "nocheck"},
+                        max_retries=0,  # we handle retries here
+                    )
+                    break
+                except Exception:
+                    if attempt == _UPLOAD_MAX_RETRIES - 1:
+                        raise
+                    backoff = 2 ** attempt
+                    logger.warning(
+                        "Chunk %d/%d upload failed, retrying in %ds (attempt %d/%d)",
+                        chunk_num, total_chunks, backoff, attempt + 1, _UPLOAD_MAX_RETRIES,
+                    )
+                    await asyncio.sleep(backoff)
+
+            if total_chunks > 1:
+                logger.debug(
+                    "Uploaded chunk %d/%d (%d bytes) for '%s'",
+                    chunk_num, total_chunks, len(chunk_data), file_path,
+                )
 
     # ------------------------------------------------------------------
     # Internal helpers

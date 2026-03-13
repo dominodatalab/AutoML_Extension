@@ -13,6 +13,7 @@ Usage:
 
 import argparse
 import asyncio
+import hashlib
 import io
 import json
 import os
@@ -153,6 +154,8 @@ async def find_dataset(
     datasets = data if isinstance(data, list) else (
         data.get("items") or data.get("datasets") or data.get("data") or []
     )
+    # v2 wraps each item as {"dataset": {...}} — unwrap
+    datasets = [ds.get("dataset", ds) if isinstance(ds, dict) and "dataset" in ds else ds for ds in datasets]
     for ds in datasets:
         ds_name = ds.get("datasetName") or ds.get("name") or ""
         if ds_name == name:
@@ -167,21 +170,121 @@ async def get_dataset_details(
     dataset_id: str,
 ) -> Optional[dict]:
     """GET full dataset details."""
-    resp = await api_request(
-        client,
-        "GET",
-        f"/api/datasetrw/v2/datasets/{dataset_id}",
-        headers=headers,
-        base_url=base_url,
-    )
-    if resp.status_code == 200:
-        return resp.json()
+    # v1 is the working endpoint for single-dataset GET
+    for version in ("v1", "v2"):
+        resp = await api_request(
+            client,
+            "GET",
+            f"/api/datasetrw/{version}/datasets/{dataset_id}",
+            headers=headers,
+            base_url=base_url,
+        )
+        if resp.status_code == 200:
+            return resp.json()
     return None
 
 
 # ---------------------------------------------------------------------------
 # Upload discovery: try every known pattern
 # ---------------------------------------------------------------------------
+
+
+async def probe_v4_chunked_upload(
+    client: httpx.AsyncClient,
+    headers: dict,
+    base_url: str,
+    dataset_id: str,
+) -> bool:
+    """Domino's actual upload workflow via /v4/datasetrw/ chunked upload API.
+
+    This is the same flow used by the python-domino SDK:
+      1. POST .../snapshot/file/start → get upload_key
+      2. POST .../snapshot/file?key=...&chunk params → upload chunk(s)
+      3. GET  .../snapshot/file/end/{upload_key} → finalize
+    """
+    print(f"\n[probe] v4 chunked upload workflow for dataset {dataset_id}")
+
+    file_bytes = TEST_FILE_CONTENT.encode()
+    file_checksum = hashlib.md5(file_bytes).hexdigest()
+    # Use filename as identifier (same as python-domino)
+    identifier = TEST_FILE_NAME.replace(".", "-").replace("/", "-")
+
+    # Step 1: Start upload session
+    start_body = {
+        "filePaths": [TEST_FILE_NAME],
+        "fileCollisionSetting": "Overwrite",
+    }
+    resp = await api_request(
+        client,
+        "POST",
+        f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/start",
+        headers=headers,
+        base_url=base_url,
+        json_body=start_body,
+    )
+    if resp.status_code not in (200, 201):
+        print(f"  -> Start upload failed ({resp.status_code})")
+        return False
+
+    data = resp.json()
+    # Response may be a plain string (the key itself) or a dict
+    if isinstance(data, str):
+        upload_key = data
+    elif isinstance(data, dict):
+        upload_key = data.get("upload_key") or data.get("uploadKey") or data.get("key")
+    else:
+        upload_key = None
+    if not upload_key:
+        print(f"  -> No upload key in response: {data!r}")
+        return False
+    print(f"  -> Upload key: {upload_key}")
+
+    # Step 2: Upload single chunk as multipart form data (matching python-domino SDK)
+    chunk_params = {
+        "key": upload_key,
+        "resumableChunkNumber": 1,
+        "resumableChunkSize": len(file_bytes),
+        "resumableCurrentChunkSize": len(file_bytes),
+        "resumableTotalChunks": 1,
+        "resumableIdentifier": identifier,
+        "resumableRelativePath": TEST_FILE_NAME,
+        "checksum": file_checksum,
+    }
+    resp = await api_request(
+        client,
+        "POST",
+        f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file",
+        headers=headers,
+        base_url=base_url,
+        params=chunk_params,
+        files={TEST_FILE_NAME: (TEST_FILE_NAME, io.BytesIO(file_bytes), "application/octet-stream")},
+        extra_headers={"Csrf-Token": "nocheck"},
+    )
+    if resp.status_code not in (200, 201, 204):
+        print(f"  -> Chunk upload failed ({resp.status_code})")
+        # Try to cancel
+        await api_request(
+            client, "GET",
+            f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/cancel/{upload_key}",
+            headers=headers, base_url=base_url,
+        )
+        return False
+    print(f"  -> Chunk uploaded successfully")
+
+    # Step 3: End upload session
+    resp = await api_request(
+        client,
+        "GET",
+        f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/end/{upload_key}",
+        headers=headers,
+        base_url=base_url,
+    )
+    if resp.status_code in (200, 201, 204):
+        print(f"  -> Upload finalized successfully!")
+        return True
+    else:
+        print(f"  -> End upload failed ({resp.status_code})")
+        return False
 
 
 async def probe_snapshot_workflow(
@@ -565,7 +668,12 @@ async def main(
         # --- Upload probes ---
         results = {}
 
-        # Probe 1: Snapshot-based workflow (most likely for Domino)
+        # Probe 0: v4 chunked upload (actual Domino SDK workflow)
+        results["v4_chunked"] = await probe_v4_chunked_upload(
+            client, headers, base_url, dataset_id
+        )
+
+        # Probe 1: Snapshot-based workflow (v1 API)
         snapshot_result = await probe_snapshot_workflow(
             client, headers, base_url, dataset_id
         )
@@ -592,7 +700,8 @@ async def main(
     print("# Upload Test Summary")
     print(f"#   Dataset ID:        {dataset_id}")
     print(f"#")
-    print(f"#   Snapshot workflow:  {'WORKED' if results['snapshot'] else 'FAILED'}")
+    print(f"#   v4 chunked upload: {'WORKED' if results['v4_chunked'] else 'FAILED'}")
+    print(f"#   Snapshot workflow: {'WORKED' if results['snapshot'] else 'FAILED'}")
     print(f"#   Direct upload:     {'WORKED' if results['direct'] else 'FAILED'}")
     print(f"#   Presigned URL:     {'WORKED' if results['presigned'] else 'FAILED'}")
     print(f"#   Mount write:       {'WORKED' if results['mount_write'] else 'FAILED'}")

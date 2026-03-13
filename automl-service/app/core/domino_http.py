@@ -88,6 +88,8 @@ async def domino_request(
     *,
     json: Any = None,
     params: Optional[dict[str, Any]] = None,
+    files: Optional[dict] = None,
+    headers: Optional[dict[str, str]] = None,
     timeout: float = _DEFAULT_TIMEOUT,
     max_retries: int = _DEFAULT_MAX_RETRIES,
     retry_statuses: tuple[int, ...] = _RETRYABLE_STATUS_CODES,
@@ -103,10 +105,14 @@ async def domino_request(
     last_exc: Optional[Exception] = None
 
     for attempt in range(max_retries + 1):
-        headers = await get_domino_auth_headers()
+        auth_headers = await get_domino_auth_headers()
+        merged_headers = {**auth_headers, **(headers or {})}
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.request(method, url, json=json, params=params, headers=headers)
+                resp = await client.request(
+                    method, url, json=json, params=params,
+                    files=files, headers=merged_headers,
+                )
                 if resp.status_code in retry_statuses and attempt < max_retries:
                     backoff = 2**attempt  # 1, 2, 4, 8
                     logger.warning(
