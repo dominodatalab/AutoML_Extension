@@ -53,6 +53,12 @@ print_env() {
     echo ""
 }
 
+# this helper is used by the Dockerfile to build the
+# application ahead of time for use in production
+# this is run when the Domnio Environment is built
+build_prod_app() {
+}
+
 is_truthy() {
     case "${1,,}" in
         1|true|yes|y|on) return 0 ;;
@@ -137,7 +143,10 @@ build_frontend() {
     echo "Building frontend..."
     cd "${SCRIPT_DIR}/automl-ui"
     echo "Node.js: $(node --version), npm: $(npm --version)"
-    npm install --silent
+    if [ $1 != "prod" ]
+    then
+        npm install --silent
+    fi
     npm run build
 
     # Generate runtime config (empty API_URL = same origin)
@@ -253,6 +262,28 @@ case "$MODE" in
 
         trap "kill $BACKEND_PID 2>/dev/null; exit 0" SIGTERM SIGINT
         npm run dev -- --host 0.0.0.0 --port "$FRONTEND_PORT"
+        ;;
+
+    --prod)
+        print_header "Prod Mode"
+        ensure_dirs
+
+        # Build frontend
+        build_frontend "prod"
+
+        # Start backend serving both API and static files
+        export STATIC_DIR="${SCRIPT_DIR}/automl-ui/dist"
+        if [ -d "/mnt/code/automl-ui/dist" ]; then
+            export STATIC_DIR="/mnt/code/automl-ui/dist"
+        fi
+
+        echo ""
+        echo "Starting AutoML Studio on http://0.0.0.0:$PORT"
+        echo "  API:      /svc/v1/*"
+        echo "  Frontend: / (served from $STATIC_DIR)"
+        echo ""
+
+        start_backend "$PORT"
         ;;
 
     --all|*)

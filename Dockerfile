@@ -8,6 +8,7 @@ LABEL maintainer="Domino Data Lab"
 LABEL description="AutoGluon AutoML environment for Domino Data Lab"
 LABEL version="1.0.0"
 
+ARG EXTENSION_VERSION=main
 ARG DUSER=ubuntu
 ARG DGROUP=ubuntu
 ARG DEBIAN_FRONTEND=noninteractive
@@ -53,6 +54,22 @@ RUN if ! id 12574 >/dev/null 2>&1; then \
     fi
 
 RUN chown -R ${DOMINO_USER}:${DOMINO_GROUP} "/home/${DOMINO_USER}"
+
+# TODO refactor the pip installations to also use this
+RUN git clone https://github.com/niole/AutoML_Extension.git --depth 1 --branch $EXTENSION_VERSION
+
+WORKDIR AutoML_Extension
+
+#
+# Install frontend dependencies
+#
+
+# Install nodejs 20
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+ && apt-get install -y nodejs
+
+# Install npm packages
+RUN cd automl-ui && npm i -g
 
 # Install backend/job dependencies
 #
@@ -222,13 +239,10 @@ RUN pip install \
 # ============================================
 RUN pip install "dominodatalab[agents] @ git+https://github.com/dominodatalab/python-domino.git@release-$DOMINO_PYTHON_SDK_VERSION"
 
-#
-# Install frontend dependencies
-#
-
-# Install nodejs 20
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
- && apt-get install -y nodejs
-
 # Cleanup after apt package installs
 RUN rm -rf /var/lib/apt/lists/*
+
+# Cleanup git repo used for package installation
+RUN rm -rf $HOME/AutoML_Extension
+
+WORKDIR /
