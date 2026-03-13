@@ -53,12 +53,6 @@ print_env() {
     echo ""
 }
 
-# this helper is used by the Dockerfile to build the
-# application ahead of time for use in production
-# this is run when the Domnio Environment is built
-build_prod_app() {
-}
-
 is_truthy() {
     case "${1,,}" in
         1|true|yes|y|on) return 0 ;;
@@ -135,10 +129,6 @@ ensure_node() {
     export PATH="${NODE_DIR}/bin:$PATH"
 }
 
-install_lightweight_deps() {
-    pip install -q --no-deps aiosqlite aiofiles pydantic-settings python-multipart httpx 2>/dev/null || true
-}
-
 build_frontend() {
     echo "Building frontend..."
     cd "${SCRIPT_DIR}/automl-ui"
@@ -167,7 +157,6 @@ start_backend() {
     fi
 
     cd "$service_dir"
-    install_lightweight_deps
 
     if [ "${RELOAD:-true}" = "true" ]; then
         echo "Starting backend (dev mode with reload) on port $port..."
@@ -188,7 +177,6 @@ start_backend_background() {
     fi
 
     cd "$service_dir"
-    install_lightweight_deps
 
     if [ "${RELOAD:-true}" = "true" ]; then
         uvicorn app.main:app --host 127.0.0.1 --port "$port" --reload --log-level warning &

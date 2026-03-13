@@ -87,7 +87,7 @@ RUN pip install mlflow==$MLFLOW_VERSION
 # ============================================
 # App dependencies
 # ============================================
-RUN pip install aiosqlite==0.22.1
+RUN pip install aiosqlite==0.22.1 aiofiles
 
 # ============================================
 # PyTorch Installation (CPU Version)
