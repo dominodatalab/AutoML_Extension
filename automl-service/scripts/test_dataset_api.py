@@ -24,7 +24,7 @@ import httpx
 # Config
 # ---------------------------------------------------------------------------
 
-DATASET_NAME = "automl-extension"
+DATASET_NAME = "automl-extension_1"
 DESCRIPTION = "AutoML Extension storage — auto-created by the AutoML App"
 
 MOUNT_CANDIDATES = [
@@ -149,9 +149,11 @@ async def list_datasets(
         datasets = data.get("items") or data.get("datasets") or data.get("data") or []
         if not datasets:
             print(f"  -> Response keys: {list(data.keys())}")
-            # Maybe the dict itself is one dataset? Unlikely but log it.
     else:
         datasets = []
+
+    # v2 wraps each item as {"dataset": {...}} — unwrap to the inner dict
+    datasets = [ds.get("dataset", ds) if isinstance(ds, dict) and "dataset" in ds else ds for ds in datasets]
 
     print(f"  -> Found {len(datasets)} dataset(s)")
     for ds in datasets:
@@ -240,14 +242,14 @@ async def create_dataset(
         print("  -> Created with payload v3 (name + projectId)")
         return resp.json()
 
-    # Attempt 4: v1 endpoint path
+    # Attempt 4: v1 endpoint path (requires "name" not "datasetName")
     resp = await api_request(
         client,
         "POST",
         "/api/datasetrw/v1/datasets",
         headers=headers,
         base_url=base_url,
-        json_body=payload_v1,
+        json_body=payload_v3,
     )
     if resp.status_code in (200, 201):
         print("  -> Created with v1 endpoint path")
@@ -345,13 +347,13 @@ async def test_share_api(
     """Discover dataset sharing/grant API endpoints."""
     print(f"\n[step 6] Exploring dataset share/grant API for dataset {dataset_id}")
 
-    # Try various known/guessed share endpoints
+    # v1 grants endpoint requires targetId + targetRole
+    # Valid roles: DatasetRwOwner, DatasetRwEditor, DatasetRwReader
     share_endpoints = [
-        ("POST", f"/api/datasetrw/v2/datasets/{dataset_id}/shares", {"projectId": app_project_id}),
-        ("POST", f"/api/datasetrw/v2/datasets/{dataset_id}/grants", {"projectId": app_project_id}),
-        ("PUT", f"/api/datasetrw/v2/datasets/{dataset_id}/projects/{app_project_id}", {}),
-        ("POST", f"/api/datasetrw/v2/datasets/{dataset_id}/projects", {"projectId": app_project_id}),
-        ("PATCH", f"/api/datasetrw/v2/datasets/{dataset_id}", {"sharedProjectIds": [app_project_id]}),
+        ("POST", f"/api/datasetrw/v1/datasets/{dataset_id}/grants",
+         {"targetId": app_project_id, "targetRole": "DatasetRwEditor"}),
+        ("POST", f"/api/datasetrw/v1/datasets/{dataset_id}/grants",
+         {"targetId": app_project_id, "targetRole": "DatasetRwReader"}),
     ]
 
     for method, path, body in share_endpoints:
@@ -373,15 +375,17 @@ async def get_dataset_details(
 ) -> Optional[dict]:
     """GET full dataset details to inspect sharing/mount info."""
     print(f"\n[step extra] Getting full dataset details for {dataset_id}")
-    resp = await api_request(
-        client,
-        "GET",
-        f"/api/datasetrw/v2/datasets/{dataset_id}",
-        headers=headers,
-        base_url=base_url,
-    )
-    if resp.status_code == 200:
-        return resp.json()
+    # v1 is the working endpoint for single-dataset GET
+    for version in ("v1", "v2"):
+        resp = await api_request(
+            client,
+            "GET",
+            f"/api/datasetrw/{version}/datasets/{dataset_id}",
+            headers=headers,
+            base_url=base_url,
+        )
+        if resp.status_code == 200:
+            return resp.json()
     return None
 
 
@@ -424,7 +428,9 @@ async def main(target_project_id: str, dataset_name: str, skip_create: bool) -> 
             if not created:
                 print("\n  FAILED to create dataset. Exiting.")
                 return
-            dataset_id = created.get("datasetId") or created.get("id")
+            # v1 create wraps result as {"dataset": {...}}
+            ds_obj = created.get("dataset", created)
+            dataset_id = ds_obj.get("datasetId") or ds_obj.get("id")
 
             # Step 3: Verify
             verified = await verify_creation(client, headers, base_url, target_project_id, dataset_name)

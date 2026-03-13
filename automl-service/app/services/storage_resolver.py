@@ -2,7 +2,8 @@
 
 Ensures a writable ``automl-extension`` dataset exists for a given target
 project and returns the local mount path.  The dataset is created via the
-Domino Dataset RW v2 API if it does not already exist.
+Domino Dataset RW API (v1 for create/grants, v2 for listing) if it
+does not already exist.
 
 Usage::
 
@@ -114,6 +115,13 @@ class ProjectStorageResolver:
 
         logger.info("Creating dataset '%s' in project %s", DATASET_NAME, project_id)
         created = await self._create_dataset(project_id)
+
+        # If the dataset lives in a different project than the app,
+        # grant the app project editor access so the mount will appear.
+        app_project_id = os.environ.get("DOMINO_PROJECT_ID")
+        if app_project_id and app_project_id != project_id and created.dataset_id:
+            await self._grant_project_access(created.dataset_id, app_project_id)
+
         self._cache[project_id] = created
         return created
 
@@ -164,53 +172,85 @@ class ProjectStorageResolver:
             },
         ]
 
+        # v2 POST returns 404 on some Domino versions; v1 requires "name".
+        endpoints = [
+            "/api/datasetrw/v2/datasets",
+            "/api/datasetrw/v1/datasets",
+        ]
+
         last_error: Optional[str] = None
-        for payload in payloads:
-            try:
-                resp = await domino_request(
-                    "POST",
-                    "/api/datasetrw/v2/datasets",
-                    json=payload,
-                )
-                body = resp.json()
-                ds_id = str(
-                    body.get("datasetId")
-                    or body.get("id")
-                    or body.get("dataset", {}).get("id")
-                    or ""
-                )
-                ds_name = (
-                    body.get("datasetName")
-                    or body.get("name")
-                    or body.get("dataset", {}).get("name")
-                    or DATASET_NAME
-                )
-                logger.info(
-                    "Created dataset '%s' (id=%s) in project %s",
-                    ds_name,
-                    ds_id,
-                    project_id,
-                )
-                mount = self._probe_mount(ds_name)
-                return DatasetInfo(
-                    dataset_id=ds_id,
-                    name=ds_name,
-                    project_id=project_id,
-                    mount_path=mount,
-                )
-            except Exception as exc:
-                last_error = str(exc)
-                logger.debug(
-                    "Create attempt failed with payload %s: %s",
-                    list(payload.keys()),
-                    exc,
-                )
-                continue
+        for endpoint in endpoints:
+            for payload in payloads:
+                try:
+                    resp = await domino_request(
+                        "POST",
+                        endpoint,
+                        json=payload,
+                    )
+                    body = resp.json()
+                    ds_id = str(
+                        body.get("datasetId")
+                        or body.get("id")
+                        or body.get("dataset", {}).get("id")
+                        or ""
+                    )
+                    ds_name = (
+                        body.get("datasetName")
+                        or body.get("name")
+                        or body.get("dataset", {}).get("name")
+                        or DATASET_NAME
+                    )
+                    logger.info(
+                        "Created dataset '%s' (id=%s) in project %s via %s",
+                        ds_name,
+                        ds_id,
+                        project_id,
+                        endpoint,
+                    )
+                    mount = self._probe_mount(ds_name)
+                    return DatasetInfo(
+                        dataset_id=ds_id,
+                        name=ds_name,
+                        project_id=project_id,
+                        mount_path=mount,
+                    )
+                except Exception as exc:
+                    last_error = str(exc)
+                    logger.debug(
+                        "Create attempt failed on %s with payload %s: %s",
+                        endpoint,
+                        list(payload.keys()),
+                        exc,
+                    )
+                    continue
 
         raise RuntimeError(
             f"Failed to create dataset '{DATASET_NAME}' in project {project_id}. "
             f"Last error: {last_error}"
         )
+
+    async def _grant_project_access(self, dataset_id: str, target_project_id: str) -> None:
+        """Grant DatasetRwEditor to a project via the v1 grants API."""
+        try:
+            await domino_request(
+                "POST",
+                f"/api/datasetrw/v1/datasets/{dataset_id}/grants",
+                json={
+                    "targetId": target_project_id,
+                    "targetRole": "DatasetRwEditor",
+                },
+            )
+            logger.info(
+                "Granted DatasetRwEditor on dataset %s to project %s",
+                dataset_id,
+                target_project_id,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to grant access on dataset %s to project %s",
+                dataset_id,
+                target_project_id,
+            )
 
     @staticmethod
     def _probe_mount(dataset_name: str) -> Optional[str]:
@@ -235,17 +275,28 @@ class ProjectStorageResolver:
 
 
 def _extract_dataset_list(data: object) -> list[dict]:
-    """Normalize the Dataset RW API list response into a list of dicts."""
+    """Normalize the Dataset RW API list response into a list of dicts.
+
+    The v2 response wraps each item as ``{"dataset": {...}}``; this helper
+    unwraps to the inner dict so callers can access fields directly.
+    """
     if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        return (
+        items = data
+    elif isinstance(data, dict):
+        items = (
             data.get("items")
             or data.get("datasets")
             or data.get("data")
             or []
         )
-    return []
+    else:
+        return []
+
+    # Unwrap v2 nested {"dataset": {...}} wrappers
+    return [
+        item.get("dataset", item) if isinstance(item, dict) and "dataset" in item else item
+        for item in items
+    ]
 
 
 @lru_cache()

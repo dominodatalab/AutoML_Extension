@@ -209,6 +209,12 @@ class DominoDatasetManager:
             if not items:
                 break
 
+            # v2 wraps each item as {"dataset": {...}} — unwrap
+            items = [
+                it.get("dataset", it) if isinstance(it, dict) and "dataset" in it else it
+                for it in items
+            ]
+
             for item in items:
                 ds = self._api_item_to_dataset_response(item)
                 if ds is not None:
