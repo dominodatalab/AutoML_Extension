@@ -3,7 +3,11 @@
 import logging
 import mimetypes
 import os
+import uuid
+from io import BytesIO
 from typing import Optional
+
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +25,7 @@ from app.api.schemas.dataset import (
     FileUploadResponse,
 )
 from app.services.dataset_service import (
+    ALLOWED_UPLOAD_EXTENSIONS,
     get_dataset_manager,
     get_dataset_or_404,
     get_dataset_schema_response,
@@ -135,29 +140,83 @@ async def upload_file(
     request: Request,
     file: UploadFile = File(..., description="CSV or Parquet file to upload"),
 ):
-    """Upload a file for training."""
+    """Upload a file for training.
+
+    When a target project_id is present (and not standalone), reads the file
+    into memory and uploads it directly to the project's automl-extension
+    dataset via the v4 chunked API — no local file needed.
+
+    Falls back to local disk via ``save_uploaded_file`` when no project_id
+    is available or in standalone mode.
+    """
     from app.config import get_settings as _get_settings
 
     project_id = _resolve_project_id(request)
-    upload_dir = None
+
     if project_id and not _get_settings().standalone_mode:
+        # --- Domino dataset upload path (in-memory) ---
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="No file provided")
+
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        if file_ext not in ALLOWED_UPLOAD_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File type not supported. Allowed: {list(ALLOWED_UPLOAD_EXTENSIONS)}",
+            )
+
+        content = await file.read()
+
+        safe_filename = f"{str(uuid.uuid4())[:8]}_{file.filename}"
+
+        # Extract metadata from the in-memory buffer
+        try:
+            if file_ext == ".csv":
+                header_df = pd.read_csv(BytesIO(content), nrows=0)
+                row_count = max(content.count(b"\n") - 1, 0)
+            else:
+                pq_df = pd.read_parquet(BytesIO(content))
+                header_df = pq_df
+                row_count = len(pq_df)
+            columns = list(header_df.columns)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400, detail=f"Failed to read file: {exc}"
+            ) from exc
+
         from app.services.storage_resolver import get_storage_resolver
 
         resolver = get_storage_resolver()
 
-        # Pre-create the dataset so future Jobs/restarts will have the mount.
-        # Best-effort — upload proceeds regardless.
-        await resolver.ensure_dataset_exists(project_id)
-
-        # Use the mount if available; fall back to app-local uploads_path.
-        mounted, mount_path = await resolver.check_project_storage(project_id)
-        if mounted and mount_path:
-            upload_dir = os.path.join(mount_path, "uploads")
-        else:
-            logger.info(
-                "Dataset mount not available for project %s; using local uploads_path",
-                project_id,
+        dataset_info = await resolver.ensure_dataset_exists(project_id)
+        if not dataset_info:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to create/find dataset for project {project_id}",
             )
-        if upload_dir:
-            os.makedirs(upload_dir, exist_ok=True)
-    return await save_uploaded_file(file, upload_dir=upload_dir)
+
+        dataset_path = f"uploads/{safe_filename}"
+        try:
+            await resolver.upload_file(
+                dataset_info.dataset_id, dataset_path, content
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to upload file to dataset: {exc}",
+            ) from exc
+
+        # Canonical mount path the training job will see
+        file_path = f"/domino/datasets/local/automl-extension/{dataset_path}"
+
+        return FileUploadResponse(
+            success=True,
+            file_path=file_path,
+            file_name=file.filename,
+            file_size=len(content),
+            columns=columns,
+            row_count=row_count,
+        )
+
+    # --- Standalone / no project_id: save to local disk ---
+    return await save_uploaded_file(file)
