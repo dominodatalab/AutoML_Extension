@@ -333,6 +333,23 @@ async def create_job_with_context(
         from app.core.domino_job_launcher import get_domino_job_launcher
 
         settings = get_settings()
+
+        # Pre-create the automl-extension dataset so the Domino Job
+        # boots with the mount already available.
+        if project_id and not settings.standalone_mode:
+            try:
+                from app.services.storage_resolver import get_storage_resolver
+
+                await asyncio.wait_for(
+                    get_storage_resolver().ensure_dataset_exists(project_id),
+                    timeout=30.0,
+                )
+            except (asyncio.TimeoutError, Exception):
+                logger.warning(
+                    "Pre-launch dataset creation failed for %s; job proceeds anyway",
+                    project_id,
+                )
+
         launcher = get_domino_job_launcher()
         launch_result = await launcher.start_training_job(
             job_id=job.id,

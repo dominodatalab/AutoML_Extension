@@ -4,7 +4,7 @@ import logging
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.core.data_profiler import get_data_profiler
@@ -429,8 +429,10 @@ async def profile_timeseries(request: TimeSeriesProfileRequest):
 
 @router.post("/profile/async/start", response_model=AsyncProfileStartResponse)
 @handle_errors("Async profiling start error")
-async def start_profile_async(request: AsyncProfileStartRequest):
+async def start_profile_async(request: AsyncProfileStartRequest, http_request: Request):
     """Start async EDA profiling as an external Domino Job."""
+    import asyncio
+
     if request.mode == "timeseries":
         if not request.time_column or not request.target_column:
             raise HTTPException(
@@ -447,6 +449,25 @@ async def start_profile_async(request: AsyncProfileStartRequest):
         request_payload=request.model_dump(exclude_none=True),
     )
 
+    # Resolve project context for dataset pre-creation and job launch
+    project_id = http_request.headers.get("X-Project-Id") if http_request else None
+
+    # Pre-create the automl-extension dataset so the EDA Domino Job
+    # boots with the mount already available for writing results.
+    if project_id and not settings.standalone_mode:
+        try:
+            from app.services.storage_resolver import get_storage_resolver
+
+            await asyncio.wait_for(
+                get_storage_resolver().ensure_dataset_exists(project_id),
+                timeout=30.0,
+            )
+        except (asyncio.TimeoutError, Exception):
+            logger.warning(
+                "Pre-launch dataset creation failed for EDA job in project %s; job proceeds anyway",
+                project_id,
+            )
+
     launcher = get_domino_job_launcher()
     launch_result = await launcher.start_eda_job(
         request_id=request_id,
@@ -461,6 +482,7 @@ async def start_profile_async(request: AsyncProfileStartRequest):
         rolling_window=request.rolling_window,
         hardware_tier_name=request.domino_hardware_tier_name or settings.domino_eda_hardware_tier_name,
         environment_id=request.domino_environment_id or settings.domino_eda_environment_id,
+        project_id=project_id,
     )
     if not launch_result.get("success"):
         error_message = launch_result.get("error", "Failed to launch async profiling job")

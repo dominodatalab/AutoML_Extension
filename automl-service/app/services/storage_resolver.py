@@ -156,6 +156,34 @@ class ProjectStorageResolver:
         mount = self._probe_mount(info.name)
         return (mount is not None), mount
 
+    async def ensure_dataset_exists(self, project_id: str) -> Optional[DatasetInfo]:
+        """Pre-create the automl-extension dataset in a project (best-effort).
+
+        Unlike ``ensure_project_storage``, this does NOT probe for a local
+        mount — the mount only appears inside a Domino Job that boots
+        *after* the dataset exists.  Call this before launching a Job so
+        the dataset mount is available when the Job starts.
+
+        Returns ``DatasetInfo`` on success, ``None`` on failure (never raises).
+        """
+        try:
+            info = await self._resolve_or_create(project_id)
+            logger.info(
+                "Pre-launch dataset ready: '%s' (id=%s) in project %s",
+                info.name,
+                info.dataset_id,
+                project_id,
+            )
+            return info
+        except Exception:
+            logger.warning(
+                "Pre-launch dataset creation failed for project %s; "
+                "job will proceed without pre-created dataset",
+                project_id,
+                exc_info=True,
+            )
+            return None
+
     async def get_dataset_info(self, project_id: str) -> Optional[DatasetInfo]:
         """Return cached dataset info for a project, or None."""
         if project_id in self._cache:
