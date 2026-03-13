@@ -16,13 +16,42 @@ def _utc_now_iso() -> str:
 class EDAJobStore:
     """Persist async EDA job state in a shared filesystem path."""
 
-    def __init__(self):
-        settings = get_settings()
-        self.base_dir = Path(settings.eda_results_path)
-        self.meta_dir = self.base_dir / "meta"
-        self.result_dir = self.base_dir / "results"
-        self.error_dir = self.base_dir / "errors"
-        self._ensure_dirs()
+    @property
+    def base_dir(self) -> Path:
+        # Prefer dataset mount so EDA results live outside app-local storage
+        if not hasattr(self, "_base_dir_cached"):
+            self._base_dir_cached = self._resolve_base_dir()
+        return self._base_dir_cached
+
+    @staticmethod
+    def _resolve_base_dir() -> Path:
+        """Return the best available eda_results directory.
+
+        Probes dataset mount locations first; falls back to the app-local
+        settings path when no mount is available (standalone mode).
+        """
+        import os
+        from app.services.storage_resolver import _MOUNT_TEMPLATES, DATASET_NAME
+
+        for template in _MOUNT_TEMPLATES:
+            mount = template.format(name=DATASET_NAME)
+            candidate = os.path.join(mount, "eda_results")
+            if os.path.isdir(mount) and os.access(mount, os.W_OK):
+                return Path(candidate)
+
+        return Path(get_settings().eda_results_path)
+
+    @property
+    def meta_dir(self) -> Path:
+        return self.base_dir / "meta"
+
+    @property
+    def result_dir(self) -> Path:
+        return self.base_dir / "results"
+
+    @property
+    def error_dir(self) -> Path:
+        return self.base_dir / "errors"
 
     def _ensure_dirs(self) -> None:
         self.base_dir.mkdir(parents=True, exist_ok=True)
@@ -52,6 +81,7 @@ class EDAJobStore:
         mode: str,
         request_payload: dict[str, Any],
     ) -> dict[str, Any]:
+        self._ensure_dirs()
         meta = {
             "request_id": request_id,
             "status": "pending",
@@ -73,6 +103,7 @@ class EDAJobStore:
             return json.load(f)
 
     def update_request(self, request_id: str, **updates: Any) -> Optional[dict[str, Any]]:
+        self._ensure_dirs()
         current = self.get_request(request_id)
         if current is None:
             return None
@@ -82,6 +113,7 @@ class EDAJobStore:
         return current
 
     def write_result(self, request_id: str, mode: str, result: dict[str, Any]) -> None:
+        self._ensure_dirs()
         payload = {
             "request_id": request_id,
             "mode": mode,
@@ -98,6 +130,7 @@ class EDAJobStore:
             return json.load(f)
 
     def write_error(self, request_id: str, error_message: str) -> None:
+        self._ensure_dirs()
         with self._error_path(request_id).open("w", encoding="utf-8") as f:
             f.write(error_message)
 

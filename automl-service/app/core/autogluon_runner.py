@@ -55,6 +55,7 @@ class AutoGluonRunner:
         advanced_config: Optional[AdvancedConfig] = None,
         timeseries_config: Optional[Dict[str, Any]] = None,
         log_callback: Optional[Callable] = None,
+        models_path: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Run AutoGluon training based on model type with advanced options.
@@ -74,8 +75,9 @@ class AutoGluonRunner:
 
             # Create model save path
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            base_models_path = models_path or self.settings.models_path
             model_path = os.path.join(
-                self.settings.models_path,
+                base_models_path,
                 f"job_{job_id}_{timestamp}",
             )
             os.makedirs(model_path, exist_ok=True)

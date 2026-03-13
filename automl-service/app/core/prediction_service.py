@@ -24,8 +24,33 @@ class PredictionService:
         self._loaded_models: Dict[str, Any] = {}
 
     def _get_model_path(self, model_id: str) -> Path:
-        """Get the path to a trained model."""
-        return Path(self.settings.models_path) / model_id
+        """Get the path to a trained model.
+
+        Checks the default settings path first, then probes dataset mount
+        locations so that models stored on per-project dataset mounts are
+        found correctly.
+        """
+        # If model_id is already an absolute path that exists, use it directly
+        candidate = Path(model_id)
+        if candidate.is_absolute() and candidate.is_dir():
+            return candidate
+
+        # Check default settings path
+        default = Path(self.settings.models_path) / model_id
+        if default.is_dir():
+            return default
+
+        # Probe dataset mount locations
+        from app.services.storage_resolver import _MOUNT_TEMPLATES, DATASET_NAME
+
+        for template in _MOUNT_TEMPLATES:
+            mount = template.format(name=DATASET_NAME)
+            mount_candidate = Path(mount) / "models" / model_id
+            if mount_candidate.is_dir():
+                return mount_candidate
+
+        # Fall back to default (will fail at load time with a clear error)
+        return default
 
     def _load_model(self, model_id: str, model_type: str) -> Any:
         """Load a model from disk with caching."""

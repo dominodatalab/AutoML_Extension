@@ -1,9 +1,11 @@
 """Dataset management endpoints."""
 
+import mimetypes
 import os
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Request, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Query
+from fastapi.responses import FileResponse
 
 from app.api.error_handler import handle_errors
 
@@ -102,9 +104,43 @@ async def preview_file_by_path(request: FilePreviewRequest):
     )
 
 
+@router.get("/{dataset_id}/files/{file_name:path}/download")
+async def download_dataset_file(
+    dataset_id: str,
+    file_name: str,
+    dataset_manager=Depends(get_dataset_manager),
+):
+    """Download a file from a mounted dataset."""
+    try:
+        file_path = await dataset_manager.get_dataset_file_path(dataset_id, file_name)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"File '{file_name}' not found in dataset {dataset_id}")
+
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail=f"File not found at resolved path: {file_path}")
+
+    media_type, _ = mimetypes.guess_type(file_path)
+    return FileResponse(
+        path=file_path,
+        filename=os.path.basename(file_path),
+        media_type=media_type or "application/octet-stream",
+    )
+
+
 @router.post("/upload", response_model=FileUploadResponse)
 async def upload_file(
+    request: Request,
     file: UploadFile = File(..., description="CSV or Parquet file to upload"),
 ):
     """Upload a file for training."""
-    return await save_uploaded_file(file)
+    from app.config import get_settings as _get_settings
+
+    project_id = _resolve_project_id(request)
+    upload_dir = None
+    if project_id and not _get_settings().standalone_mode:
+        from app.services.storage_resolver import get_storage_resolver
+
+        paths = await get_storage_resolver().resolve_project_paths(project_id)
+        upload_dir = paths.uploads_path
+        os.makedirs(upload_dir, exist_ok=True)
+    return await save_uploaded_file(file, upload_dir=upload_dir)

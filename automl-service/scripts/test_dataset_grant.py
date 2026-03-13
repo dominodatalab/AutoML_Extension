@@ -123,6 +123,8 @@ async def find_dataset_by_name(
     datasets = data if isinstance(data, list) else (
         data.get("items") or data.get("datasets") or data.get("data") or []
     )
+    # v2 wraps each item as {"dataset": {...}} — unwrap
+    datasets = [ds.get("dataset", ds) if isinstance(ds, dict) and "dataset" in ds else ds for ds in datasets]
     for ds in datasets:
         ds_name = ds.get("datasetName") or ds.get("name") or ""
         if ds_name == name:
@@ -133,16 +135,17 @@ async def find_dataset_by_name(
 async def get_dataset_details(
     client: httpx.AsyncClient, headers: dict, base_url: str, dataset_id: str
 ) -> Optional[dict]:
-    """GET /api/datasetrw/v2/datasets/{id} for full details."""
-    resp = await api_request(
-        client,
-        "GET",
-        f"/api/datasetrw/v2/datasets/{dataset_id}",
-        headers=headers,
-        base_url=base_url,
-    )
-    if resp.status_code == 200:
-        return resp.json()
+    """GET dataset details (v1 is the working endpoint)."""
+    for version in ("v1", "v2"):
+        resp = await api_request(
+            client,
+            "GET",
+            f"/api/datasetrw/{version}/datasets/{dataset_id}",
+            headers=headers,
+            base_url=base_url,
+        )
+        if resp.status_code == 200:
+            return resp.json()
     return None
 
 
@@ -154,61 +157,90 @@ async def try_grant_endpoints(
     target_project_id: str,
 ) -> bool:
     """Try various grant/share endpoints to give the App project access."""
-    print(f"\n[grant] Attempting to grant project {target_project_id} access to dataset {dataset_id}")
+    print(f"\n[grant] Attempting to grant access to dataset {dataset_id}")
+    print(f"        target_project_id = {target_project_id}")
 
-    attempts = [
-        # Most likely REST patterns for Domino
-        (
-            "POST",
-            f"/api/datasetrw/v2/datasets/{dataset_id}/shares",
-            {"projectId": target_project_id},
-        ),
-        (
-            "POST",
-            f"/api/datasetrw/v2/datasets/{dataset_id}/grants",
-            {"projectId": target_project_id},
-        ),
-        (
-            "PUT",
-            f"/api/datasetrw/v2/datasets/{dataset_id}/projects/{target_project_id}",
-            None,
-        ),
-        (
-            "POST",
-            f"/api/datasetrw/v2/datasets/{dataset_id}/projects",
-            {"projectId": target_project_id},
-        ),
-        (
-            "PATCH",
-            f"/api/datasetrw/v2/datasets/{dataset_id}",
-            {"sharedProjectIds": [target_project_id]},
-        ),
-        # v1 variants
-        (
-            "POST",
-            f"/api/datasetrw/v1/datasets/{dataset_id}/shares",
-            {"projectId": target_project_id},
-        ),
-        (
-            "POST",
-            f"/api/datasetrw/v1/datasets/{dataset_id}/grants",
-            {"projectId": target_project_id},
-        ),
+    # Resolve the project's owner ID — grants may need a user ID, not project ID
+    owner_id = None
+    resp = await api_request(
+        client, "GET", f"/v4/projects/{target_project_id}",
+        headers=headers, base_url=base_url,
+    )
+    if resp.status_code == 200:
+        proj = resp.json()
+        owner_id = proj.get("ownerId")
+        print(f"        project owner = {proj.get('ownerUsername')} (id={owner_id})")
+
+    # ----- Approach 1: Link shared dataset to the project -----
+    # POST /api/projects/v1/projects/{projectId}/shared-datasets
+    print("\n  --- Approach 1: Link dataset to project via shared-datasets API ---")
+
+    # First list current shared datasets
+    resp = await api_request(
+        client, "GET",
+        f"/api/projects/v1/projects/{target_project_id}/shared-datasets",
+        headers=headers, base_url=base_url,
+    )
+
+    # Try different payload shapes for linking
+    link_payloads = [
+        {"datasetId": dataset_id},
+        {"datasetId": dataset_id, "snapshotPolicy": "latest"},
+        {"id": dataset_id},
     ]
-
-    for method, path, body in attempts:
+    for payload in link_payloads:
         resp = await api_request(
-            client, method, path, headers=headers, base_url=base_url, json_body=body
+            client, "POST",
+            f"/api/projects/v1/projects/{target_project_id}/shared-datasets",
+            headers=headers, base_url=base_url,
+            json_body=payload,
         )
         if resp.status_code in (200, 201, 204):
-            print(f"\n  -> GRANT SUCCEEDED via {method} {path}")
+            print(f"\n  -> LINK SUCCEEDED with payload {list(payload.keys())}")
             return True
-        # 409 might mean "already shared"
         if resp.status_code == 409:
-            print(f"\n  -> 409 Conflict — may already be shared via {method} {path}")
+            print(f"\n  -> 409 Conflict — already linked")
             return True
 
-    print("\n  -> All grant attempts failed")
+    # ----- Approach 2: v1 grants (previously worked on some datasets) -----
+    print("\n  --- Approach 2: v1 grants API ---")
+
+    # Also try the current user's ID from the auth token
+    user_resp = await api_request(
+        client, "GET", "/v4/users/self",
+        headers=headers, base_url=base_url,
+    )
+    current_user_id = None
+    if user_resp.status_code == 200:
+        user_data = user_resp.json()
+        current_user_id = user_data.get("id")
+        print(f"        current user = {user_data.get('userName')} (id={current_user_id})")
+
+    target_ids = [
+        ("project_id", target_project_id),
+    ]
+    if owner_id and owner_id != target_project_id:
+        target_ids.append(("owner_user_id", owner_id))
+    if current_user_id and current_user_id not in [tid for _, tid in target_ids]:
+        target_ids.append(("current_user_id", current_user_id))
+
+    for id_label, tid in target_ids:
+        for role in ("DatasetRwEditor", "DatasetRwReader"):
+            print(f"\n  Trying targetId={tid} ({id_label}), role={role}")
+            resp = await api_request(
+                client, "POST",
+                f"/api/datasetrw/v1/datasets/{dataset_id}/grants",
+                headers=headers, base_url=base_url,
+                json_body={"targetId": tid, "targetRole": role},
+            )
+            if resp.status_code in (200, 201, 204):
+                print(f"\n  -> GRANT SUCCEEDED with {id_label} + {role}")
+                return True
+            if resp.status_code == 409:
+                print(f"\n  -> 409 Conflict — already granted via {id_label} + {role}")
+                return True
+
+    print("\n  -> All approaches failed")
     return False
 
 
@@ -275,19 +307,37 @@ async def main(
             dataset_id = ds.get("datasetId") or ds.get("id")
             print(f"\n  Found dataset: id={dataset_id}")
 
-        # Get current dataset details (to see current sharing state)
+        # Get current dataset details
         print("\n[step 1] Current dataset details:")
         details = await get_dataset_details(client, headers, base_url, dataset_id)
-        if details:
-            # Look for sharing-related fields
-            sharing_keys = [
-                k for k in details.keys()
-                if any(term in k.lower() for term in ("shar", "grant", "project", "access", "mount"))
-            ]
-            if sharing_keys:
-                print(f"\n  Sharing-related fields: {sharing_keys}")
-                for k in sharing_keys:
-                    print(f"    {k}: {json.dumps(details[k], indent=2)[:500]}")
+
+        # List existing grants (try both v1 path styles)
+        print("\n[step 2] Current grants:")
+        for grant_path in (
+            f"/api/datasetrw/v1/datasets/{dataset_id}/grants",
+            f"/v4/datasetrw/datasets/{dataset_id}/grants",
+        ):
+            resp = await api_request(
+                client, "GET", grant_path,
+                headers=headers, base_url=base_url,
+            )
+            if resp.status_code == 200:
+                break
+
+        # Cross-check: look at grants on the original dataset that succeeded earlier
+        original_dataset_id = "69b45b4148a2c1576748a62a"  # automl-extension
+        if dataset_id != original_dataset_id:
+            print(f"\n[step 2b] Cross-check: grants on original dataset {original_dataset_id}")
+            for grant_path in (
+                f"/api/datasetrw/v1/datasets/{original_dataset_id}/grants",
+                f"/v4/datasetrw/datasets/{original_dataset_id}/grants",
+            ):
+                resp = await api_request(
+                    client, "GET", grant_path,
+                    headers=headers, base_url=base_url,
+                )
+                if resp.status_code == 200:
+                    break
 
         # Check if mount already exists (App may already have access)
         mount_before = check_mount_paths(dataset_name)

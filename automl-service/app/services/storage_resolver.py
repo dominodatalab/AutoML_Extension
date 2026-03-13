@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Optional
 
+from fastapi import HTTPException
+
 from app.core.domino_http import domino_request, resolve_domino_api_host
 
 logger = logging.getLogger(__name__)
@@ -39,6 +41,18 @@ _MOUNT_TEMPLATES = [
     "/mnt/data/{name}",
     "/mnt/imported/data/{name}",
 ]
+
+
+@dataclass
+class ProjectPaths:
+    """Resolved storage paths for a specific target project."""
+
+    project_id: str
+    mount_path: str          # e.g. /domino/datasets/local/automl-extension
+    models_path: str         # {mount}/models
+    uploads_path: str        # {mount}/uploads
+    eda_results_path: str    # {mount}/eda_results
+    temp_path: str           # {mount}/temp
 
 
 @dataclass
@@ -90,11 +104,126 @@ class ProjectStorageResolver:
             f"be restarted with the dataset attached, or sharing may be required."
         )
 
+    async def resolve_project_paths(self, project_id: str) -> ProjectPaths:
+        """Resolve storage paths for a target project.
+
+        Raises ``HTTPException(503)`` if the dataset exists but is not
+        mounted (a restart is required to pick up the new mount).
+        """
+        from app.config import get_settings
+
+        settings = get_settings()
+        if settings.standalone_mode:
+            return ProjectPaths(
+                project_id=project_id,
+                mount_path=settings.models_path.rsplit("/", 1)[0],  # parent of models/
+                models_path=settings.models_path,
+                uploads_path=settings.uploads_path,
+                eda_results_path=settings.eda_results_path,
+                temp_path=os.path.join(
+                    settings.models_path.rsplit("/", 1)[0], "temp"
+                ),
+            )
+
+        info = await self._resolve_or_create(project_id)
+        mount = self._probe_mount(info.name)
+        if not mount:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Dataset '{info.name}' exists but is not mounted. "
+                       f"Please restart the app.",
+            )
+        return ProjectPaths(
+            project_id=project_id,
+            mount_path=mount,
+            models_path=os.path.join(mount, "models"),
+            uploads_path=os.path.join(mount, "uploads"),
+            eda_results_path=os.path.join(mount, "eda_results"),
+            temp_path=os.path.join(mount, "temp"),
+        )
+
+    async def check_project_storage(
+        self, project_id: str
+    ) -> tuple[bool, Optional[str]]:
+        """Check mount status without raising.
+
+        Returns ``(mounted, mount_path_or_none)``.
+        """
+        try:
+            info = await self._resolve_or_create(project_id)
+        except Exception:
+            return False, None
+        mount = self._probe_mount(info.name)
+        return (mount is not None), mount
+
     async def get_dataset_info(self, project_id: str) -> Optional[DatasetInfo]:
         """Return cached dataset info for a project, or None."""
         if project_id in self._cache:
             return self._cache[project_id]
         return await self._find_existing(project_id)
+
+    async def delete_dataset(self, dataset_id: str) -> None:
+        """Delete a dataset via the v1 API and remove it from the cache."""
+        await domino_request("DELETE", f"/api/datasetrw/v1/datasets/{dataset_id}")
+        self._cache = {k: v for k, v in self._cache.items() if v.dataset_id != dataset_id}
+        logger.info("Deleted dataset %s", dataset_id)
+
+    async def list_files(self, dataset_id: str) -> list[dict]:
+        """List files in a dataset's latest snapshot.
+
+        Tries snapshot-based file listing endpoints.  Returns a list of
+        file metadata dicts, or an empty list if no endpoint works.
+        """
+        # First get the latest snapshot ID
+        snapshot_id = await self._get_latest_snapshot_id(dataset_id)
+
+        endpoints: list[str] = []
+        if snapshot_id:
+            endpoints.append(
+                f"/api/datasetrw/v1/datasets/{dataset_id}/snapshots/{snapshot_id}/files"
+            )
+            endpoints.append(
+                f"/api/datasetrw/v2/datasets/{dataset_id}/snapshots/{snapshot_id}/files"
+            )
+        endpoints.extend([
+            f"/api/datasetrw/v1/datasets/{dataset_id}/files",
+            f"/api/datasetrw/v2/datasets/{dataset_id}/files",
+        ])
+
+        for endpoint in endpoints:
+            try:
+                resp = await domino_request("GET", endpoint)
+                data = resp.json()
+                files = data if isinstance(data, list) else (
+                    data.get("files") or data.get("items") or data.get("contents") or []
+                )
+                logger.debug("Listed %d file(s) from %s", len(files), endpoint)
+                return files
+            except Exception:
+                logger.debug("File listing failed on %s", endpoint)
+                continue
+
+        logger.warning("No file listing endpoint worked for dataset %s", dataset_id)
+        return []
+
+    async def _get_latest_snapshot_id(self, dataset_id: str) -> Optional[str]:
+        """Return the latest snapshot ID for a dataset, or None."""
+        for version in ("v2", "v1"):
+            try:
+                resp = await domino_request(
+                    "GET",
+                    f"/api/datasetrw/{version}/datasets/{dataset_id}/snapshots",
+                )
+                data = resp.json()
+                snapshots = data if isinstance(data, list) else (
+                    data.get("snapshots") or data.get("items") or []
+                )
+                if snapshots:
+                    s = snapshots[0]
+                    return str(s.get("id") or s.get("snapshotId") or "")
+            except Exception:
+                continue
+        return None
 
     def invalidate(self, project_id: Optional[str] = None) -> None:
         """Clear cached info for one or all projects."""

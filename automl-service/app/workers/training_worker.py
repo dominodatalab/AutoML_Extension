@@ -262,6 +262,22 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                     timeseries_config = job.autogluon_config["timeseries"]
                     logger.info(f"[TRAINING] Parsed timeseries config: {timeseries_config}")
 
+            # Resolve project-scoped storage for model output
+            models_path = None
+            if job.project_id and not settings.standalone_mode:
+                try:
+                    from app.services.storage_resolver import get_storage_resolver
+
+                    project_paths = await get_storage_resolver().resolve_project_paths(
+                        job.project_id
+                    )
+                    models_path = project_paths.models_path
+                    os.makedirs(models_path, exist_ok=True)
+                except Exception as e:
+                    logger.warning(
+                        "Could not resolve project storage, using default: %s", e
+                    )
+
             # Run training with advanced config
             result = await runner.run_training(
                 job_id=job_id,
@@ -277,6 +293,7 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                 eval_metric=job.eval_metric,
                 advanced_config=adv_config,
                 timeseries_config=timeseries_config,
+                models_path=models_path,
             )
 
             await crud.add_job_log(db, job_id, "Training completed successfully")

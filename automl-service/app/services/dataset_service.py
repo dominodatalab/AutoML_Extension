@@ -301,7 +301,9 @@ async def build_compat_dataset_preview_payload(
     raise HTTPException(status_code=400, detail="Either file_path or dataset_id is required")
 
 
-async def save_uploaded_file(file: UploadFile) -> FileUploadResponse:
+async def save_uploaded_file(
+    file: UploadFile, upload_dir: Optional[str] = None
+) -> FileUploadResponse:
     """Save an uploaded dataset file and return metadata."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
@@ -313,7 +315,8 @@ async def save_uploaded_file(file: UploadFile) -> FileUploadResponse:
             detail=f"File type not supported. Allowed: {list(ALLOWED_UPLOAD_EXTENSIONS)}",
         )
 
-    upload_dir = get_settings().uploads_path
+    if upload_dir is None:
+        upload_dir = get_settings().uploads_path
     os.makedirs(upload_dir, exist_ok=True)
 
     unique_id = str(uuid.uuid4())[:8]

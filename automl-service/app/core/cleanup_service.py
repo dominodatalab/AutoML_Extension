@@ -210,6 +210,25 @@ class CleanupService:
             "errors": all_errors,
         }
 
+    def _collect_artifact_roots(self) -> tuple[list[str], list[str]]:
+        """Return (model_roots, upload_roots) including dataset mount paths."""
+        from app.services.storage_resolver import _MOUNT_TEMPLATES, DATASET_NAME
+
+        model_roots = [self.settings.models_path]
+        upload_roots = [self.settings.uploads_path]
+
+        # Probe known dataset mount locations for automl-extension
+        for template in _MOUNT_TEMPLATES:
+            mount = template.format(name=DATASET_NAME)
+            models_candidate = os.path.join(mount, "models")
+            uploads_candidate = os.path.join(mount, "uploads")
+            if os.path.isdir(models_candidate) and models_candidate not in model_roots:
+                model_roots.append(models_candidate)
+            if os.path.isdir(uploads_candidate) and uploads_candidate not in upload_roots:
+                upload_roots.append(uploads_candidate)
+
+        return model_roots, upload_roots
+
     def find_orphans(self) -> dict:
         """Scan model, upload, and mlruns directories for orphaned artifacts.
 
@@ -220,28 +239,30 @@ class CleanupService:
         orphaned_models = []
         orphaned_uploads = []
 
-        # Scan models directory for job_* dirs
-        models_path = self.settings.models_path
-        if os.path.isdir(models_path):
-            for entry in os.scandir(models_path):
-                if entry.is_dir() and entry.name.startswith("job_"):
-                    size = _dir_size(entry.path)
-                    orphaned_models.append({
-                        "path": entry.path,
-                        "size_bytes": size,
-                        "name": entry.name,
-                    })
+        model_roots, upload_roots = self._collect_artifact_roots()
 
-        # Scan uploads directory
-        uploads_path = self.settings.uploads_path
-        if os.path.isdir(uploads_path):
-            for entry in os.scandir(uploads_path):
-                if entry.is_file():
-                    orphaned_uploads.append({
-                        "path": entry.path,
-                        "size_bytes": entry.stat().st_size,
-                        "name": entry.name,
-                    })
+        # Scan models directories for job_* dirs
+        for models_path in model_roots:
+            if os.path.isdir(models_path):
+                for entry in os.scandir(models_path):
+                    if entry.is_dir() and entry.name.startswith("job_"):
+                        size = _dir_size(entry.path)
+                        orphaned_models.append({
+                            "path": entry.path,
+                            "size_bytes": size,
+                            "name": entry.name,
+                        })
+
+        # Scan uploads directories
+        for uploads_path in upload_roots:
+            if os.path.isdir(uploads_path):
+                for entry in os.scandir(uploads_path):
+                    if entry.is_file():
+                        orphaned_uploads.append({
+                            "path": entry.path,
+                            "size_bytes": entry.stat().st_size,
+                            "name": entry.name,
+                        })
 
         # Scan mlruns directory for run folders
         orphaned_mlflow_runs = _scan_mlruns_for_orphans()
