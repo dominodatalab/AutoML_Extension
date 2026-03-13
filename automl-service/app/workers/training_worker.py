@@ -264,6 +264,7 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
 
             # Resolve project-scoped storage for model output
             models_path = None
+            temp_path = None
             if job.project_id and not settings.standalone_mode:
                 try:
                     from app.services.storage_resolver import get_storage_resolver
@@ -273,6 +274,8 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                     )
                     models_path = project_paths.models_path
                     os.makedirs(models_path, exist_ok=True)
+                    temp_path = project_paths.temp_path
+                    os.makedirs(temp_path, exist_ok=True)
                 except Exception as e:
                     logger.warning(
                         "Could not resolve project storage, using default: %s", e
@@ -294,6 +297,7 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                 advanced_config=adv_config,
                 timeseries_config=timeseries_config,
                 models_path=models_path,
+                temp_path=temp_path,
             )
 
             await crud.add_job_log(db, job_id, "Training completed successfully")
@@ -384,6 +388,7 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                     model_path=model_path,
                     predictor=predictor,
                     test_data=test_data,
+                    temp_path=temp_path,
                 )
 
                 await crud.add_job_log(db, job_id, f"Model runs logged to MLflow experiment")
@@ -445,6 +450,7 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                         experiment_name=experiment_name,  # Use same experiment as training
                         project_id=job.project_id,
                         project_name=job.project_name,
+                        temp_path=temp_path,
                     )
                     if reg_result.get("success"):
                         await crud.add_job_log(
@@ -537,6 +543,19 @@ async def register_trained_model(
         if not job.model_path:
             raise ValueError(f"Job has no model path: {job_id}")
 
+        # Resolve temp_path from project storage or fall back to settings
+        temp_path = None
+        if job.project_id and not get_settings().standalone_mode:
+            try:
+                from app.services.storage_resolver import get_storage_resolver
+
+                project_paths = await get_storage_resolver().resolve_project_paths(
+                    job.project_id
+                )
+                temp_path = project_paths.temp_path
+            except Exception:
+                pass
+
         # Use Domino registry
         registry = get_domino_registry()
 
@@ -567,6 +586,7 @@ async def register_trained_model(
             metrics=job.metrics if hasattr(job, 'metrics') and job.metrics else {},
             params=job_info,
             experiment_name=exp_name,  # Use same experiment as training
+            temp_path=temp_path,
         )
 
         if not result.get("success"):

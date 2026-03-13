@@ -7,15 +7,19 @@ import shutil
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
+from app.config import get_settings
+
 logger = logging.getLogger(__name__)
 
 
 class ModelExporter:
     """Handles model export to various formats for deployment."""
 
-    def __init__(self, output_dir: str = "/tmp/model_exports"):
-        self.output_dir = output_dir
-        os.makedirs(output_dir, exist_ok=True)
+    def __init__(self, output_dir: Optional[str] = None):
+        self.output_dir = output_dir or os.path.join(
+            get_settings().temp_path, "model_exports"
+        )
+        os.makedirs(self.output_dir, exist_ok=True)
 
     @staticmethod
     def _remove_path_if_exists(path: str) -> None:

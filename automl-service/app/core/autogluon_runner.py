@@ -56,6 +56,7 @@ class AutoGluonRunner:
         timeseries_config: Optional[Dict[str, Any]] = None,
         log_callback: Optional[Callable] = None,
         models_path: Optional[str] = None,
+        temp_path: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Run AutoGluon training based on model type with advanced options.
@@ -121,7 +122,7 @@ class AutoGluonRunner:
                 raise ValueError(f"Unsupported model type: {model_type}")
 
             # Log final metrics to MLflow
-            self._log_training_end(result)
+            self._log_training_end(result, temp_path=temp_path, job_id=job_id)
 
             return result
 
@@ -172,7 +173,12 @@ class AutoGluonRunner:
         except Exception as e:
             logger.warning(f"Could not log to MLflow: {e}")
 
-    def _log_training_end(self, result: Dict[str, Any]):
+    def _log_training_end(
+        self,
+        result: Dict[str, Any],
+        temp_path: Optional[str] = None,
+        job_id: Optional[str] = None,
+    ):
         """Log training results to MLflow."""
         try:
             metrics = result.get("metrics", {})
@@ -180,20 +186,26 @@ class AutoGluonRunner:
                 if isinstance(value, (int, float)) and not np.isnan(value):
                     mlflow.log_metric(key, value)
 
+            temp_dir = temp_path or self.settings.temp_path
+            os.makedirs(temp_dir, exist_ok=True)
+            suffix = f"_{job_id}" if job_id else ""
+
             # Log leaderboard as artifact
             leaderboard = result.get("leaderboard", {})
             if leaderboard:
-                leaderboard_path = "/tmp/leaderboard.json"
+                leaderboard_path = os.path.join(temp_dir, f"leaderboard{suffix}.json")
                 with open(leaderboard_path, "w") as f:
                     json.dump(leaderboard, f, indent=2, default=str)
                 mlflow.log_artifact(leaderboard_path)
+                os.unlink(leaderboard_path)
 
             # Log feature importance if available
             if "feature_importance" in result:
-                fi_path = "/tmp/feature_importance.json"
+                fi_path = os.path.join(temp_dir, f"feature_importance{suffix}.json")
                 with open(fi_path, "w") as f:
                     json.dump(result["feature_importance"], f, indent=2)
                 mlflow.log_artifact(fi_path)
+                os.unlink(fi_path)
 
         except Exception as e:
             logger.warning(f"Could not log results to MLflow: {e}")

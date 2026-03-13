@@ -117,14 +117,17 @@ class ExperimentTracker:
         mlflow.log_artifacts(local_dir, artifact_path)
         logger.debug(f"Logged artifacts from directory: {local_dir}")
 
-    def log_artifact_dict(self, data: dict, filename: str):
+    def log_artifact_dict(self, data: dict, filename: str, temp_dir: Optional[str] = None):
         """Log a dictionary as a JSON artifact to MLflow."""
         import json
         import tempfile
         import mlflow
 
         try:
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            with tempfile.NamedTemporaryFile(
+                mode='w', suffix='.json', delete=False,
+                dir=(temp_dir or self.settings.temp_path),
+            ) as f:
                 json.dump(data, f, indent=2, default=str)
                 temp_path = f.name
 
@@ -134,14 +137,17 @@ class ExperimentTracker:
         except Exception as e:
             logger.warning(f"Failed to log artifact dict {filename}: {e}")
 
-    def log_text(self, text: str, filename: str):
+    def log_text(self, text: str, filename: str, temp_dir: Optional[str] = None):
         """Log text content as an artifact to MLflow."""
         import tempfile
         import mlflow
 
         try:
             suffix = os.path.splitext(filename)[1] or '.txt'
-            with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False) as f:
+            with tempfile.NamedTemporaryFile(
+                mode='w', suffix=suffix, delete=False,
+                dir=(temp_dir or self.settings.temp_path),
+            ) as f:
                 f.write(text)
                 temp_path = f.name
 
@@ -613,6 +619,7 @@ class ExperimentTracker:
         model_path: str,
         predictor: Any = None,
         test_data: Any = None,
+        temp_path: Optional[str] = None,
     ) -> str:
         """Log complete training results with individual model runs.
 
@@ -705,13 +712,14 @@ class ExperimentTracker:
 
                 # Log leaderboard as artifact (ensure it's in dict format)
                 leaderboard_data = {"models": models} if isinstance(leaderboard, list) else leaderboard
-                self.log_artifact_dict(leaderboard_data, "leaderboard.json")
+                self.log_artifact_dict(leaderboard_data, "leaderboard.json", temp_dir=temp_path)
 
                 # Log feature importance if available
                 if metrics.get("feature_importance"):
                     self.log_artifact_dict(
                         {"features": metrics["feature_importance"]},
-                        "feature_importance.json"
+                        "feature_importance.json",
+                        temp_dir=temp_path,
                     )
 
                 # Log model artifacts
