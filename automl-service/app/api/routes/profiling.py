@@ -13,6 +13,7 @@ from app.core.eda_job_store import get_eda_job_store
 from app.core.ts_profiler import get_ts_profiler
 from app.api.error_handler import handle_errors
 from app.config import get_settings
+from app.core.utils import ensure_local_file
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -91,13 +92,16 @@ class TargetSuggestionsResponse(BaseModel):
 
 @router.post("/profile", response_model=ProfileResponse)
 @handle_errors("Profiling error")
-async def profile_data(request: ProfileRequest):
+async def profile_data(request: ProfileRequest, http_request: Request):
     """Generate a comprehensive profile of a data file."""
+    project_id = http_request.headers.get("X-Project-Id")
+    resolved_path = await ensure_local_file(request.file_path, project_id)
+
     profiler = get_data_profiler()
 
     try:
         profile = profiler.profile_file(
-            file_path=request.file_path,
+            file_path=resolved_path,
             sample_size=request.sample_size,
             sampling_strategy=request.sampling_strategy,
             stratify_column=request.stratify_column,
@@ -117,13 +121,16 @@ async def profile_data(request: ProfileRequest):
 
 @router.post("/profile/suggest-target", response_model=TargetSuggestionsResponse)
 @handle_errors("Error suggesting targets")
-async def suggest_target_column(request: ProfileRequest):
+async def suggest_target_column(request: ProfileRequest, http_request: Request):
     """Suggest potential target columns based on data profile."""
+    project_id = http_request.headers.get("X-Project-Id")
+    resolved_path = await ensure_local_file(request.file_path, project_id)
+
     profiler = get_data_profiler()
 
     try:
         profile = profiler.profile_file(
-            file_path=request.file_path,
+            file_path=resolved_path,
             sample_size=request.sample_size,
             sampling_strategy=request.sampling_strategy,
             stratify_column=request.stratify_column,
@@ -141,11 +148,14 @@ async def suggest_target_column(request: ProfileRequest):
 
 @router.post("/profile/quick")
 @handle_errors("Quick profile error")
-async def quick_profile(file_path: str):
+async def quick_profile(file_path: str, http_request: Request):
     """Get a quick profile summary (faster than full profile)."""
+    project_id = http_request.headers.get("X-Project-Id")
+    resolved_path = await ensure_local_file(file_path, project_id)
+
     profiler = get_data_profiler()
 
-    profile = profiler.profile_file(file_path, sample_size=1000)
+    profile = profiler.profile_file(resolved_path, sample_size=1000)
 
     # Return simplified summary
     return {
@@ -171,12 +181,15 @@ async def quick_profile(file_path: str):
 
 @router.post("/profile/column/{column_name}")
 @handle_errors("Column profile error")
-async def profile_column(file_path: str, column_name: str):
+async def profile_column(file_path: str, column_name: str, http_request: Request):
     """Get detailed profile for a specific column."""
+    project_id = http_request.headers.get("X-Project-Id")
+    resolved_path = await ensure_local_file(file_path, project_id)
+
     profiler = get_data_profiler()
 
     try:
-        profile = profiler.profile_file(file_path, sample_size=10000)
+        profile = profiler.profile_file(resolved_path, sample_size=10000)
 
         for col in profile["columns"]:
             if col["name"] == column_name:
@@ -394,13 +407,16 @@ class AsyncProfileStatusResponse(BaseModel):
 
 @router.post("/profile/timeseries", response_model=TimeSeriesProfileResponse)
 @handle_errors("Time series profiling error")
-async def profile_timeseries(request: TimeSeriesProfileRequest):
+async def profile_timeseries(request: TimeSeriesProfileRequest, http_request: Request):
     """Generate a comprehensive time series profile."""
+    project_id = http_request.headers.get("X-Project-Id")
+    resolved_path = await ensure_local_file(request.file_path, project_id)
+
     profiler = get_ts_profiler()
 
     try:
         result = profiler.profile_timeseries_file(
-            file_path=request.file_path,
+            file_path=resolved_path,
             time_column=request.time_column,
             target_column=request.target_column,
             id_column=request.id_column,

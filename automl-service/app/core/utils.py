@@ -1,10 +1,18 @@
 """Shared utility helpers."""
 
+import hashlib
 import logging
 import os
+import re
+from typing import Optional
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
+
+# Pattern: /domino/datasets/local/<dataset_name>/<relative_path>
+_DATASET_MOUNT_RE = re.compile(
+    r"^/domino/datasets/local/(?P<dataset_name>[^/]+)/(?P<relative>.+)$"
+)
 
 
 def utc_now() -> datetime:
@@ -51,3 +59,56 @@ def remap_shared_path(path: str) -> str:
                 return candidate
 
     return path
+
+
+async def ensure_local_file(file_path: str, project_id: Optional[str] = None) -> str:
+    """Return a local path to *file_path*, downloading from the dataset API if needed.
+
+    If the file already exists locally (directly or via ``remap_shared_path``),
+    it is returned as-is.  Otherwise, if the path looks like a Domino dataset
+    mount path, the file is downloaded via the Dataset RW API into a local
+    cache directory.
+    """
+    if os.path.exists(file_path):
+        return file_path
+
+    remapped = remap_shared_path(file_path)
+    if os.path.exists(remapped):
+        return remapped
+
+    m = _DATASET_MOUNT_RE.match(file_path)
+    if not m or not project_id:
+        return file_path  # can't resolve — return original, will fail downstream
+
+    relative_path = m.group("relative")
+
+    from app.config import get_settings
+    from app.services.storage_resolver import get_storage_resolver
+
+    resolver = get_storage_resolver()
+    info = await resolver.get_dataset_info(project_id)
+    if not info:
+        # Try resolve_or_create to ensure the dataset record exists
+        try:
+            info = await resolver._resolve_or_create(project_id)
+        except Exception:
+            logger.warning("Cannot resolve dataset for project %s", project_id)
+            return file_path
+
+    cache_key = hashlib.sha256(
+        f"{info.dataset_id}:{relative_path}".encode()
+    ).hexdigest()[:16]
+
+    settings = get_settings()
+    dest_path = os.path.join(settings.temp_path, "dataset_cache", cache_key, relative_path)
+
+    if os.path.exists(dest_path) and os.path.getsize(dest_path) > 0:
+        logger.debug("Using cached download: %s", dest_path)
+        return dest_path
+
+    logger.info(
+        "File %s not found locally; downloading from dataset %s",
+        file_path, info.dataset_id,
+    )
+    await resolver.download_file(info.dataset_id, relative_path, dest_path)
+    return dest_path

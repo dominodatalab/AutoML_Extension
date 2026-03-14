@@ -149,3 +149,26 @@ async def domino_request(
 
     # Should not reach here, but satisfy type checker.
     raise last_exc or RuntimeError("Domino request failed after retries")
+
+
+async def domino_download(path: str, dest_path: str, *, timeout: float = 300.0) -> None:
+    """Stream a file from the Domino API to a local path.
+
+    Uses the same auth and host resolution as ``domino_request`` but
+    streams the response body to *dest_path* in chunks to avoid loading
+    large files into memory.
+    """
+    base_url = resolve_domino_api_host()
+    url = f"{base_url}{path}"
+    auth_headers = await get_domino_auth_headers()
+
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        async with client.stream("GET", url, headers=auth_headers) as resp:
+            resp.raise_for_status()
+            with open(dest_path, "wb") as f:
+                async for chunk in resp.aiter_bytes(chunk_size=8192):
+                    f.write(chunk)
+
+    logger.info("Downloaded %s -> %s", path, dest_path)

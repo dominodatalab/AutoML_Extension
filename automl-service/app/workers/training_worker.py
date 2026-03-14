@@ -17,7 +17,7 @@ from app.core.dataset_manager import DominoDatasetManager
 from app.core.domino_registry import get_domino_registry
 from app.core.model_diagnostics import get_model_diagnostics
 from app.core.model_loader import load_predictor, load_dataframe
-from app.core.utils import remap_shared_path, utc_now
+from app.core.utils import ensure_local_file, remap_shared_path, utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +166,8 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
             else:
                 data_path = remap_shared_path(job.file_path)
                 await crud.add_job_log(db, job_id, f"Using uploaded file: {data_path}")
+
+            data_path = await ensure_local_file(data_path, getattr(job, 'project_id', None))
 
             logger.info(f"[TRAINING DEBUG] Resolved data_path: {data_path}")
             await crud.add_job_log(db, job_id, f"[DEBUG] Data path resolved to: {data_path}", "INFO")

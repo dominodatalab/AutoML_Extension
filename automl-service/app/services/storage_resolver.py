@@ -23,7 +23,7 @@ from typing import Optional
 
 from fastapi import HTTPException
 
-from app.core.domino_http import domino_request, resolve_domino_api_host
+from app.core.domino_http import domino_download, domino_request, resolve_domino_api_host
 
 logger = logging.getLogger(__name__)
 
@@ -195,6 +195,48 @@ class ProjectStorageResolver:
         await domino_request("DELETE", f"/api/datasetrw/v1/datasets/{dataset_id}")
         self._cache = {k: v for k, v in self._cache.items() if v.dataset_id != dataset_id}
         logger.info("Deleted dataset %s", dataset_id)
+
+    async def download_file(
+        self,
+        dataset_id: str,
+        file_path: str,
+        dest_path: str,
+    ) -> str:
+        """Download a single file from a dataset to *dest_path*.
+
+        Tries snapshot-based and direct download endpoints in order.
+        Returns *dest_path* on success, raises on failure.
+        """
+        snapshot_id = await self._get_latest_snapshot_id(dataset_id)
+
+        endpoints: list[str] = []
+        if snapshot_id:
+            endpoints.append(
+                f"/api/datasetrw/v1/datasets/{dataset_id}"
+                f"/snapshots/{snapshot_id}/files/{file_path}"
+            )
+        endpoints.extend([
+            f"/api/datasetrw/v1/datasets/{dataset_id}/files/{file_path}",
+            f"/v4/datasetrw/datasets/{dataset_id}/files/{file_path}",
+        ])
+
+        last_error: Optional[Exception] = None
+        for endpoint in endpoints:
+            try:
+                await domino_download(endpoint, dest_path)
+                logger.info(
+                    "Downloaded '%s' from dataset %s via %s",
+                    file_path, dataset_id, endpoint,
+                )
+                return dest_path
+            except Exception as exc:
+                last_error = exc
+                logger.debug("Download failed on %s: %s", endpoint, exc)
+                continue
+
+        raise RuntimeError(
+            f"Failed to download '{file_path}' from dataset {dataset_id}: {last_error}"
+        )
 
     async def list_files(self, dataset_id: str) -> list[dict]:
         """List files in a dataset's latest snapshot.
