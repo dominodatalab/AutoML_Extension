@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 from pathlib import Path
@@ -21,6 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run AutoML training job from Domino")
     parser.add_argument("--job-id", required=True, help="AutoML job id")
     parser.add_argument("--database-url", default=None, help="Override DATABASE_URL for cross-project jobs")
+    parser.add_argument("--job-config", default=None, help="JSON-encoded job config to skip initial DB read")
     return parser.parse_args()
 
 
@@ -32,9 +34,11 @@ def main() -> None:
     if args.database_url:
         os.environ["DATABASE_URL"] = args.database_url
 
+    job_config = json.loads(args.job_config) if args.job_config else None
+
     from app.workers.training_worker import run_training_job
 
-    asyncio.run(run_training_job(args.job_id))
+    asyncio.run(run_training_job(args.job_id, job_config=job_config))
 
 
 if __name__ == "__main__":

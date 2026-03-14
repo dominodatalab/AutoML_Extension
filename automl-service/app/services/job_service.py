@@ -51,6 +51,32 @@ _DOMINO_MISSING_ERROR_MARKERS = (
 )
 
 
+def serialize_job_config(job: Job) -> dict:
+    """Extract read-only fields the training worker needs into a JSON-safe dict."""
+    return {
+        "name": job.name,
+        "data_source": job.data_source,
+        "file_path": job.file_path,
+        "dataset_id": job.dataset_id,
+        "model_type": job.model_type.value,
+        "problem_type": job.problem_type.value if job.problem_type else None,
+        "target_column": job.target_column,
+        "time_column": job.time_column,
+        "id_column": job.id_column,
+        "prediction_length": job.prediction_length,
+        "preset": job.preset,
+        "time_limit": job.time_limit,
+        "eval_metric": job.eval_metric,
+        "autogluon_config": job.autogluon_config,
+        "enable_mlflow": job.enable_mlflow,
+        "experiment_name": job.experiment_name,
+        "project_id": job.project_id,
+        "project_name": job.project_name,
+        "auto_register": job.auto_register,
+        "register_name": job.register_name,
+    }
+
+
 def _normalize_job_name(name: str) -> str:
     """Return canonical job name used for validation and persistence."""
     return name.strip()
@@ -353,6 +379,7 @@ async def create_job_with_context(
         launcher = get_domino_job_launcher()
         launch_result = await launcher.start_training_job(
             job_id=job.id,
+            job_config=serialize_job_config(job),
             title=job.name,
             hardware_tier_name=job_request.domino_hardware_tier_name or settings.domino_training_hardware_tier_name,
             environment_id=job_request.domino_environment_id or settings.domino_training_environment_id,

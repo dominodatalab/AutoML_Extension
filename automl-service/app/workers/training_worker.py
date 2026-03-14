@@ -4,12 +4,13 @@ import asyncio
 import json
 import logging
 import os
+import types
 from typing import Any, Dict, Optional
 
 from app.config import get_settings
 from app.db.database import async_session_maker
 from app.db import crud
-from app.db.models import JobStatus
+from app.db.models import JobStatus, ModelType, ProblemType
 from app.core.autogluon_runner import AutoGluonRunner
 from app.api.schemas.job import AdvancedAutoGluonConfig as AdvancedConfig
 from app.core.experiment_tracker import ExperimentTracker
@@ -20,6 +21,16 @@ from app.core.model_loader import load_predictor, load_dataframe
 from app.core.utils import ensure_local_file, remap_shared_path, utc_now
 
 logger = logging.getLogger(__name__)
+
+
+def _deserialize_job_config(config_dict: dict) -> types.SimpleNamespace:
+    """Restore a serialized job config dict into a namespace with enum fields."""
+    obj = types.SimpleNamespace(**config_dict)
+    if isinstance(obj.model_type, str):
+        obj.model_type = ModelType(obj.model_type)
+    if obj.problem_type is not None and isinstance(obj.problem_type, str):
+        obj.problem_type = ProblemType(obj.problem_type)
+    return obj
 
 
 async def _check_cancelled(job_id: str, db_session: Optional[Any] = None) -> None:
@@ -121,7 +132,7 @@ class TrainingProgressReporter:
         )
 
 
-async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]] = None):
+async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]] = None, job_config: Optional[Dict[str, Any]] = None):
     """
     Run a training job in the background with Domino experiment tracking.
 
@@ -132,11 +143,15 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
 
     async with async_session_maker() as db:
         try:
-            # Get job from database
-            job = await crud.get_job(db, job_id)
-            if not job:
-                logger.error(f"Job not found: {job_id}")
-                return
+            # Use CLI-provided config when available, fall back to DB read
+            if job_config:
+                job = _deserialize_job_config(job_config)
+                logger.info("Using job config from CLI args (skipped DB read)")
+            else:
+                job = await crud.get_job(db, job_id)
+                if not job:
+                    logger.error(f"Job not found: {job_id}")
+                    return
 
             await _check_cancelled(job_id, db)
 

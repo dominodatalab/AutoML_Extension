@@ -327,6 +327,7 @@ class DominoJobLauncher:
     async def start_training_job(
         self,
         job_id: str,
+        job_config: Optional[dict] = None,
         title: Optional[str] = None,
         hardware_tier_name: Optional[str] = None,
         environment_id: Optional[str] = None,
@@ -340,9 +341,13 @@ class DominoJobLauncher:
             }
 
         try:
+            args: dict[str, Any] = {"job_id": job_id, "database_url": self.settings.database_url}
+            if job_config is not None:
+                args["job_config"] = json.dumps(job_config)
+
             command = self._build_command(
                 "app.workers.domino_training_runner",
-                {"job_id": job_id, "database_url": self.settings.database_url},
+                args,
             )
             response = await self._job_start(
                 command=command,
