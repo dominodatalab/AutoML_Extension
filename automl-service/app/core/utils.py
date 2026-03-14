@@ -4,6 +4,7 @@ import hashlib
 import logging
 import os
 import re
+import time
 from typing import Optional
 from datetime import datetime, timezone
 
@@ -13,6 +14,33 @@ logger = logging.getLogger(__name__)
 _DATASET_MOUNT_RE = re.compile(
     r"^/domino/datasets/local/(?P<dataset_name>[^/]+)/(?P<relative>.+)$"
 )
+
+
+def cleanup_dataset_cache(cache_dir: str, max_age_hours: float = 24.0) -> int:
+    """Delete cached dataset files older than *max_age_hours*. Returns count deleted."""
+    if not os.path.isdir(cache_dir):
+        return 0
+
+    cutoff = time.time() - max_age_hours * 3600
+    deleted = 0
+
+    for dirpath, _, filenames in os.walk(cache_dir, topdown=False):
+        for fname in filenames:
+            fpath = os.path.join(dirpath, fname)
+            try:
+                if os.path.getmtime(fpath) < cutoff:
+                    os.remove(fpath)
+                    deleted += 1
+            except OSError:
+                pass
+        # Remove empty directories
+        try:
+            if dirpath != cache_dir:
+                os.rmdir(dirpath)  # only succeeds if empty
+        except OSError:
+            pass
+
+    return deleted
 
 
 def utc_now() -> datetime:

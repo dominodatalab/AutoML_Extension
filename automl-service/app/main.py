@@ -76,6 +76,11 @@ async def lifespan(app: FastAPI):
     os.makedirs(os.path.join(settings.datasets_path, "uploads"), exist_ok=True)
     logger.info(f"Required directories created (uploads: {settings.uploads_path})")
 
+    from app.core.utils import cleanup_dataset_cache
+    deleted = cleanup_dataset_cache(os.path.join(settings.temp_path, "dataset_cache"))
+    if deleted:
+        logger.info("Cleaned up %d stale cached dataset files", deleted)
+
     from app.core.job_queue import get_job_queue
     queue = get_job_queue()
     await queue.startup()
