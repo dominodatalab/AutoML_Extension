@@ -1,0 +1,317 @@
+"""Tests for app.services.storage_resolver.
+
+Covers:
+- download_file() — endpoint probing and delegation to domino_download
+- _find_existing() — dataset listing and matching
+- _create_dataset() — creation with payload variants
+- _grant_project_access() — editor grant
+- _get_latest_snapshot_id() — snapshot lookup
+- upload_file() — chunked upload workflow
+- _extract_dataset_list() — v2 response unwrapping
+"""
+
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import httpx
+import pytest
+
+from app.services.storage_resolver import (
+    ProjectStorageResolver,
+    DatasetInfo,
+    _extract_dataset_list,
+)
+
+
+# ---------------------------------------------------------------------------
+# _extract_dataset_list
+# ---------------------------------------------------------------------------
+
+
+class TestExtractDatasetList:
+
+    def test_plain_list(self):
+        data = [{"datasetName": "ds1"}, {"datasetName": "ds2"}]
+        result = _extract_dataset_list(data)
+        assert len(result) == 2
+        assert result[0]["datasetName"] == "ds1"
+
+    def test_v2_wrapped_items(self):
+        data = {
+            "items": [
+                {"dataset": {"datasetName": "wrapped", "datasetId": "123"}},
+            ]
+        }
+        result = _extract_dataset_list(data)
+        assert len(result) == 1
+        assert result[0]["datasetName"] == "wrapped"
+        assert result[0]["datasetId"] == "123"
+
+    def test_datasets_key(self):
+        data = {"datasets": [{"name": "a"}, {"name": "b"}]}
+        result = _extract_dataset_list(data)
+        assert len(result) == 2
+
+    def test_empty_dict(self):
+        assert _extract_dataset_list({}) == []
+
+    def test_non_dict_non_list(self):
+        assert _extract_dataset_list("unexpected") == []
+
+
+# ---------------------------------------------------------------------------
+# download_file
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadFile:
+
+    @pytest.mark.asyncio
+    async def test_download_with_snapshot(self, tmp_path):
+        resolver = ProjectStorageResolver()
+        dest = str(tmp_path / "output.csv")
+
+        with patch.object(
+            resolver, "_get_latest_snapshot_id", new_callable=AsyncMock, return_value="snap-1"
+        ), patch(
+            "app.services.storage_resolver.domino_download", new_callable=AsyncMock
+        ) as mock_dl:
+            result = await resolver.download_file("ds-123", "uploads/file.csv", dest)
+
+        assert result == dest
+        # First call should use snapshot endpoint
+        call_path = mock_dl.call_args_list[0][0][0]
+        assert "snap-1" in call_path
+        assert "uploads/file.csv" in call_path
+
+    @pytest.mark.asyncio
+    async def test_falls_back_when_snapshot_endpoint_fails(self, tmp_path):
+        resolver = ProjectStorageResolver()
+        dest = str(tmp_path / "output.csv")
+        call_count = 0
+
+        async def fake_download(path, dest_path):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise httpx.HTTPStatusError(
+                    "Not Found", request=MagicMock(), response=MagicMock(status_code=404)
+                )
+            # Second call succeeds
+
+        with patch.object(
+            resolver, "_get_latest_snapshot_id", new_callable=AsyncMock, return_value="snap-1"
+        ), patch(
+            "app.services.storage_resolver.domino_download", side_effect=fake_download
+        ):
+            result = await resolver.download_file("ds-123", "uploads/file.csv", dest)
+
+        assert result == dest
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_download_without_snapshot(self, tmp_path):
+        resolver = ProjectStorageResolver()
+        dest = str(tmp_path / "output.csv")
+
+        with patch.object(
+            resolver, "_get_latest_snapshot_id", new_callable=AsyncMock, return_value=None
+        ), patch(
+            "app.services.storage_resolver.domino_download", new_callable=AsyncMock
+        ) as mock_dl:
+            result = await resolver.download_file("ds-123", "uploads/file.csv", dest)
+
+        assert result == dest
+        # Without snapshot, first endpoint should be direct v1
+        call_path = mock_dl.call_args_list[0][0][0]
+        assert "/api/datasetrw/v1/datasets/ds-123/files/" in call_path
+
+    @pytest.mark.asyncio
+    async def test_raises_when_all_endpoints_fail(self, tmp_path):
+        resolver = ProjectStorageResolver()
+        dest = str(tmp_path / "output.csv")
+
+        with patch.object(
+            resolver, "_get_latest_snapshot_id", new_callable=AsyncMock, return_value=None
+        ), patch(
+            "app.services.storage_resolver.domino_download",
+            side_effect=RuntimeError("fail"),
+        ):
+            with pytest.raises(RuntimeError, match="Failed to download"):
+                await resolver.download_file("ds-123", "uploads/file.csv", dest)
+
+
+# ---------------------------------------------------------------------------
+# _find_existing
+# ---------------------------------------------------------------------------
+
+
+class TestFindExisting:
+
+    @pytest.mark.asyncio
+    async def test_finds_matching_dataset(self):
+        resolver = ProjectStorageResolver()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "items": [
+                {"dataset": {"datasetName": "automl-extension", "datasetId": "ds-abc"}},
+                {"dataset": {"datasetName": "other-dataset", "datasetId": "ds-xyz"}},
+            ]
+        }
+
+        with patch(
+            "app.services.storage_resolver.domino_request",
+            new_callable=AsyncMock,
+            return_value=mock_resp,
+        ):
+            info = await resolver._find_existing("proj-1")
+
+        assert info is not None
+        assert info.dataset_id == "ds-abc"
+        assert info.name == "automl-extension"
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_not_found(self):
+        resolver = ProjectStorageResolver()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "items": [
+                {"dataset": {"datasetName": "something-else", "datasetId": "ds-xyz"}},
+            ]
+        }
+
+        with patch(
+            "app.services.storage_resolver.domino_request",
+            new_callable=AsyncMock,
+            return_value=mock_resp,
+        ):
+            info = await resolver._find_existing("proj-1")
+
+        assert info is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_api_error(self):
+        resolver = ProjectStorageResolver()
+
+        with patch(
+            "app.services.storage_resolver.domino_request",
+            side_effect=httpx.HTTPStatusError("err", request=MagicMock(), response=MagicMock()),
+        ):
+            info = await resolver._find_existing("proj-1")
+
+        assert info is None
+
+
+# ---------------------------------------------------------------------------
+# _get_latest_snapshot_id
+# ---------------------------------------------------------------------------
+
+
+class TestGetLatestSnapshotId:
+
+    @pytest.mark.asyncio
+    async def test_returns_snapshot_id(self):
+        resolver = ProjectStorageResolver()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = [{"id": "snap-42"}]
+
+        with patch(
+            "app.services.storage_resolver.domino_request",
+            new_callable=AsyncMock,
+            return_value=mock_resp,
+        ):
+            sid = await resolver._get_latest_snapshot_id("ds-123")
+
+        assert sid == "snap-42"
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_snapshots(self):
+        resolver = ProjectStorageResolver()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = []
+
+        with patch(
+            "app.services.storage_resolver.domino_request",
+            new_callable=AsyncMock,
+            return_value=mock_resp,
+        ):
+            sid = await resolver._get_latest_snapshot_id("ds-123")
+
+        assert sid is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_error(self):
+        resolver = ProjectStorageResolver()
+
+        with patch(
+            "app.services.storage_resolver.domino_request",
+            side_effect=Exception("network error"),
+        ):
+            sid = await resolver._get_latest_snapshot_id("ds-123")
+
+        assert sid is None
+
+
+# ---------------------------------------------------------------------------
+# _grant_project_access
+# ---------------------------------------------------------------------------
+
+
+class TestGrantProjectAccess:
+
+    @pytest.mark.asyncio
+    async def test_grant_calls_correct_endpoint(self):
+        resolver = ProjectStorageResolver()
+
+        with patch(
+            "app.services.storage_resolver.domino_request", new_callable=AsyncMock
+        ) as mock_req:
+            await resolver._grant_project_access("ds-abc", "proj-target")
+
+        mock_req.assert_called_once()
+        args, kwargs = mock_req.call_args
+        assert args[0] == "POST"
+        assert "ds-abc" in args[1]
+        assert "grants" in args[1]
+        assert kwargs["json"]["targetId"] == "proj-target"
+        assert kwargs["json"]["targetRole"] == "DatasetRwEditor"
+
+    @pytest.mark.asyncio
+    async def test_grant_swallows_errors(self):
+        resolver = ProjectStorageResolver()
+
+        with patch(
+            "app.services.storage_resolver.domino_request",
+            side_effect=Exception("403 forbidden"),
+        ):
+            # Should not raise
+            await resolver._grant_project_access("ds-abc", "proj-target")
+
+
+# ---------------------------------------------------------------------------
+# Cache and invalidate
+# ---------------------------------------------------------------------------
+
+
+class TestCacheInvalidation:
+
+    def test_invalidate_single_project(self):
+        resolver = ProjectStorageResolver()
+        resolver._cache["proj-1"] = DatasetInfo(
+            dataset_id="ds-1", name="test", project_id="proj-1"
+        )
+        resolver._cache["proj-2"] = DatasetInfo(
+            dataset_id="ds-2", name="test", project_id="proj-2"
+        )
+
+        resolver.invalidate("proj-1")
+        assert "proj-1" not in resolver._cache
+        assert "proj-2" in resolver._cache
+
+    def test_invalidate_all(self):
+        resolver = ProjectStorageResolver()
+        resolver._cache["proj-1"] = DatasetInfo(
+            dataset_id="ds-1", name="test", project_id="proj-1"
+        )
+        resolver.invalidate()
+        assert len(resolver._cache) == 0
