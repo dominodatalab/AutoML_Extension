@@ -136,6 +136,7 @@ def register_pattern_routes(app: FastAPI) -> None:
         ("/svcregressiondiagnostics", "app.api.routes.predictions", "get_regression_diagnostics", "DiagnosticsRequest", False),
         ("/svcexportdeployment", "app.api.routes.export", "export_deployment_package", "DeploymentPackageRequest", False),
         ("/svcexportdeploymentdownload", "app.api.routes.export", "download_deployment_package", "DeploymentDownloadRequest", False),
+        ("/svcexportdeploymentzip", "app.api.routes.export", "export_deployment_zip", "DeploymentZipRequest", False),
         ("/svclearningcurves", "app.api.routes.export", "get_learning_curves", "LearningCurvesRequest", False),
         ("/svcexportnotebook", "app.api.routes.export", "export_notebook", "ExportNotebookRequest", False),
         ("/svcjobcleanup", "app.api.compat.adapters.jobs", "bulk_cleanup", "CleanupRequest", True),

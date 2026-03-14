@@ -127,6 +127,36 @@ export function useDownloadDeploymentPackage() {
   })
 }
 
+// Hook for combined build-and-download deployment zip (no intermediate copy)
+export function useExportDeploymentZip() {
+  return useMutation({
+    mutationFn: async (params: { job_id: string; model_type?: string }) => {
+      const { getBasePath } = await import('../utils/basePath')
+      const basePath = getBasePath()
+      const url = `${basePath}/svcexportdeploymentzip`
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(params),
+      })
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => response.statusText)
+        throw new Error(errText || 'Download failed')
+      }
+
+      const blob = await response.blob()
+      const disposition = response.headers.get('Content-Disposition') || ''
+      const match = disposition.match(/filename="?([^"]+)"?/)
+      const filename = match?.[1] || 'deployment_package.zip'
+
+      return { blob, filename }
+    },
+  })
+}
+
 export function useExportNotebook() {
   return useMutation({
     mutationFn: async (jobId: string) => {

@@ -4,6 +4,7 @@ import io
 import logging
 import json
 import os
+import tempfile
 import zipfile
 from typing import Any, Dict, Optional
 
@@ -12,6 +13,7 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.core.model_export import get_model_exporter
 from app.core.model_diagnostics import get_model_diagnostics
 from app.core.dataset_manager import DominoDatasetManager
@@ -29,7 +31,7 @@ class DeploymentPackageRequest(BaseModel):
     """Request for deployment package export."""
     job_id: str = Field(..., description="ID of the completed training job")
     model_type: Optional[str] = Field(None, description="Type: tabular, timeseries (optional)")
-    output_dir: str = Field(..., description="Output directory for deployment package")
+    output_dir: Optional[str] = Field(None, description="Output directory (server resolves when omitted)")
 
 
 class DeploymentPackageResponse(BaseModel):
@@ -124,11 +126,18 @@ async def export_deployment_package(
     model_path, model_type, _, _ = await get_job_paths(db, request.job_id)
     actual_model_type = request.model_type or model_type
 
+    # Resolve output_dir server-side when not provided
+    output_dir = request.output_dir
+    if not output_dir:
+        output_dir = tempfile.mkdtemp(
+            prefix="automl_export_", dir=get_settings().temp_path
+        )
+
     exporter = get_model_exporter()
     result = exporter.export_for_deployment(
         model_path=model_path,
         model_type=actual_model_type,
-        output_dir=request.output_dir,
+        output_dir=output_dir,
     )
 
     return DeploymentPackageResponse(**result)
@@ -146,20 +155,111 @@ async def download_deployment_package(request: DeploymentDownloadRequest):
     if not os.path.isdir(target_dir):
         raise HTTPException(status_code=404, detail=f"Deployment package not found at: {target_dir}")
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, _dirs, files in os.walk(target_dir):
-            for file_name in files:
-                file_path = os.path.join(root, file_name)
-                arcname = os.path.relpath(file_path, target_dir)
-                zf.write(file_path, arcname)
-    buf.seek(0)
-
     basename = os.path.basename(target_dir.rstrip("/"))
     zip_filename = f"{basename}.zip" if basename else "deployment_package.zip"
 
+    spooled = _zip_directory_to_spooled(target_dir)
     return StreamingResponse(
-        buf,
+        _iter_spooled(spooled),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{zip_filename}"'},
+    )
+
+
+_ZIP_CHUNK_SIZE = 8 * 1024 * 1024  # 8 MB read chunks
+_SPOOLED_MAX = 50 * 1024 * 1024   # 50 MB before spilling to disk
+
+
+def _zip_directory_to_spooled(
+    target_dir: str,
+) -> tempfile.SpooledTemporaryFile:
+    """Zip a directory into a SpooledTemporaryFile (spills to disk >50 MB)."""
+    spooled = tempfile.SpooledTemporaryFile(max_size=_SPOOLED_MAX)
+    with zipfile.ZipFile(spooled, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, _dirs, files in os.walk(target_dir):
+            for fname in files:
+                fpath = os.path.join(root, fname)
+                arcname = os.path.relpath(fpath, target_dir)
+                zf.write(fpath, arcname)
+    spooled.seek(0)
+    return spooled
+
+
+def _zip_model_and_files(
+    model_path: str,
+    text_files: Dict[str, str],
+) -> tempfile.SpooledTemporaryFile:
+    """Build a zip with model files from disk + generated text files, no intermediate copy."""
+    spooled = tempfile.SpooledTemporaryFile(max_size=_SPOOLED_MAX)
+    with zipfile.ZipFile(spooled, "w", zipfile.ZIP_DEFLATED) as zf:
+        # Add generated text files
+        for name, content in text_files.items():
+            zf.writestr(name, content)
+
+        # Stream model files directly from source — no shutil.copytree
+        if os.path.isdir(model_path):
+            for root, _dirs, files in os.walk(model_path):
+                for fname in files:
+                    fpath = os.path.join(root, fname)
+                    arcname = os.path.join(
+                        "model", os.path.relpath(fpath, model_path)
+                    )
+                    zf.write(fpath, arcname)
+        elif os.path.isfile(model_path):
+            zf.write(model_path, os.path.join("model", os.path.basename(model_path)))
+
+    spooled.seek(0)
+    return spooled
+
+
+def _iter_spooled(
+    spooled: tempfile.SpooledTemporaryFile,
+    chunk_size: int = _ZIP_CHUNK_SIZE,
+):
+    """Yield chunks from a SpooledTemporaryFile, then close it."""
+    try:
+        while True:
+            chunk = spooled.read(chunk_size)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        spooled.close()
+
+
+class DeploymentZipRequest(BaseModel):
+    """Request for combined build-and-download zip."""
+    job_id: str = Field(..., description="ID of the completed training job")
+    model_type: Optional[str] = Field(None, description="Type: tabular, timeseries (optional)")
+
+
+@router.post("/export/deployment/zip")
+async def export_deployment_zip(
+    request: DeploymentZipRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Build and stream a deployment zip directly from the model's dataset mount.
+
+    Combines build + download into a single request. No intermediate copy
+    of model files — they are read directly from the dataset mount and
+    streamed into the zip.
+    """
+    model_path, model_type, _, _ = await get_job_paths(db, request.job_id)
+    actual_model_type = request.model_type or model_type
+
+    if not os.path.exists(model_path):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Model artifacts not found at: {model_path}",
+        )
+
+    exporter = get_model_exporter()
+    text_files = exporter.generate_deployment_files(actual_model_type)
+    spooled = _zip_model_and_files(model_path, text_files)
+
+    zip_filename = f"deployment_{request.job_id}.zip"
+    return StreamingResponse(
+        _iter_spooled(spooled),
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{zip_filename}"'},
     )
