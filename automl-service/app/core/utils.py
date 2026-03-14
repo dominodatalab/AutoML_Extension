@@ -51,6 +51,7 @@ def utc_now() -> datetime:
 # Known Domino shared-dataset mount prefixes (order: most common first).
 _MOUNT_ROOTS = [
     "/mnt/data/",
+    "/mnt/imported/data/",
     "/domino/datasets/",
     "/domino/datasets/local/",
 ]

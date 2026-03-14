@@ -32,7 +32,9 @@ def main() -> None:
     _ensure_project_root_on_path()
 
     if args.database_url:
-        os.environ["DATABASE_URL"] = args.database_url
+        from app.workers._db_url_remap import remap_database_url
+
+        os.environ["DATABASE_URL"] = remap_database_url(args.database_url)
 
     job_config = json.loads(args.job_config) if args.job_config else None
 

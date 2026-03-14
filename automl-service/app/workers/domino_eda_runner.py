@@ -38,7 +38,9 @@ def main() -> None:
     _ensure_project_root_on_path()
 
     if args.database_url:
-        os.environ["DATABASE_URL"] = args.database_url
+        from app.workers._db_url_remap import remap_database_url
+
+        os.environ["DATABASE_URL"] = remap_database_url(args.database_url)
 
     from app.core.data_profiler import get_data_profiler
     from app.core.eda_job_store import get_eda_job_store
