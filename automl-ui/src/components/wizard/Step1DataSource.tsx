@@ -3,10 +3,10 @@ import { useDropzone } from 'react-dropzone'
 import { CloudArrowUpIcon, CircleStackIcon, CheckCircleIcon, DocumentIcon } from '@heroicons/react/24/outline'
 import clsx from 'clsx'
 import { useWizard } from '../../hooks/useWizard'
-import { useDatasets, useUploadFile, useDatasetPreview } from '../../hooks/useDatasets'
+import { useDatasets, useUploadFile, useDatasetPreview, useSnapshotVerification } from '../../hooks/useDatasets'
 import { useStore } from '../../store'
 import Spinner from '../common/Spinner'
-import { Dataset, DatasetFile } from '../../types/dataset'
+import { Dataset, DatasetFile, FileUploadResponse } from '../../types/dataset'
 
 function Step1DataSource() {
   const { dataSource, setDataSource } = useWizard()
@@ -17,6 +17,8 @@ function Step1DataSource() {
     dataSource?.type || 'upload'
   )
   const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null)
+  const [uploadResult, setUploadResult] = useState<FileUploadResponse | null>(null)
+  const { isVerifying, isVerified, error: verifyError } = useSnapshotVerification(uploadResult)
 
   const datasets = datasetsData?.datasets || []
   const datasetLoadError = datasetsError instanceof Error ? datasetsError.message : null
@@ -28,6 +30,19 @@ function Step1DataSource() {
     10 // Only fetch 10 rows to get columns
   )
 
+  // Once snapshot is verified (or standalone upload), set the data source
+  useEffect(() => {
+    if (isVerified && uploadResult) {
+      setDataSource({
+        type: 'upload',
+        filePath: uploadResult.file_path,
+        fileName: uploadResult.file_name,
+        columns: uploadResult.columns,
+        rowCount: uploadResult.row_count,
+      })
+    }
+  }, [isVerified, uploadResult])
+
   const onDrop = useCallback(
     async (acceptedFiles: File[]) => {
       if (acceptedFiles.length === 0) return
@@ -35,13 +50,7 @@ function Step1DataSource() {
       const file = acceptedFiles[0]
       try {
         const result = await uploadMutation.mutateAsync(file)
-        setDataSource({
-          type: 'upload',
-          filePath: result.file_path,
-          fileName: result.file_name,
-          columns: result.columns,
-          rowCount: result.row_count,
-        })
+        setUploadResult(result)
       } catch (error) {
         console.error('Upload failed:', error)
         addNotification(
@@ -50,7 +59,7 @@ function Step1DataSource() {
         )
       }
     },
-    [uploadMutation, setDataSource, addNotification]
+    [uploadMutation, addNotification]
   )
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -164,6 +173,41 @@ function Step1DataSource() {
               <div className="flex flex-col items-center">
                 <Spinner className="mb-4" />
                 <p className="text-domino-text-secondary">Uploading...</p>
+              </div>
+            ) : isVerifying ? (
+              <div className="flex flex-col items-center">
+                <Spinner className="mb-4" />
+                <p className="font-medium text-domino-text-primary">
+                  {uploadResult?.file_name}
+                </p>
+                <p className="text-domino-text-secondary mt-2">Syncing with dataset...</p>
+                <div className="w-48 h-1 bg-domino-border rounded mt-3 overflow-hidden">
+                  <div className="h-full bg-domino-accent-purple rounded animate-pulse" style={{ width: '60%' }} />
+                </div>
+              </div>
+            ) : verifyError ? (
+              <div className="flex flex-col items-center">
+                <p className="font-medium text-domino-text-primary">
+                  {uploadResult?.file_name}
+                </p>
+                <p className="text-sm text-domino-accent-red mt-2">{verifyError}</p>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    if (uploadResult) {
+                      setDataSource({
+                        type: 'upload',
+                        filePath: uploadResult.file_path,
+                        fileName: uploadResult.file_name,
+                        columns: uploadResult.columns,
+                        rowCount: uploadResult.row_count,
+                      })
+                    }
+                  }}
+                  className="mt-3 text-sm text-domino-accent-purple hover:underline"
+                >
+                  Proceed Anyway
+                </button>
               </div>
             ) : dataSource?.type === 'upload' && dataSource.fileName ? (
               <div className="flex flex-col items-center">

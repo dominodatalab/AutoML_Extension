@@ -28,6 +28,14 @@ def register_custom_dataset_routes(app: FastAPI) -> None:
         return await build_compat_dataset_preview_payload(get_dataset_manager(), body)
 
     @app.post("/svcupload")
-    async def svc_upload_file(file: UploadFile = File(...)):
-        result = await save_uploaded_file(file)
+    async def svc_upload_file(request: Request, file: UploadFile = File(...)):
+        from app.api.routes.datasets import upload_file as _upload_file
+
+        result = await _upload_file(request, file)
         return result.model_dump() if hasattr(result, "model_dump") else result
+
+    @app.get("/svcverifysnapshot")
+    async def svc_verify_snapshot(dataset_id: str, file_path: str):
+        from app.api.routes.datasets import verify_snapshot as _verify_snapshot
+
+        return await _verify_snapshot(dataset_id=dataset_id, file_path=file_path)

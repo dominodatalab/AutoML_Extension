@@ -64,6 +64,9 @@ class FileUploadResponse(BaseModel):
     file_size: int
     columns: list[str]
     row_count: int
+    dataset_id: Optional[str] = None
+    snapshot_file_path: Optional[str] = None
+    snapshot_verified: bool = True
 
 
 class FilePreviewRequest(BaseModel):

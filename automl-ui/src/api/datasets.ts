@@ -1,5 +1,5 @@
 import api from './index'
-import { Dataset, DatasetPreview, DatasetSchema, FileUploadResponse } from '../types/dataset'
+import { Dataset, DatasetPreview, DatasetSchema, FileUploadResponse, SnapshotVerifyResponse } from '../types/dataset'
 
 interface DatasetListResponse {
   datasets: Dataset[]
@@ -47,5 +47,12 @@ export async function uploadFile(file: File): Promise<FileUploadResponse> {
   const formData = new FormData()
   formData.append('file', file)
   const response = await api.post<FileUploadResponse>('/upload', formData)
+  return response.data
+}
+
+export async function verifySnapshot(datasetId: string, filePath: string): Promise<SnapshotVerifyResponse> {
+  const response = await api.get<SnapshotVerifyResponse>('/verify-snapshot', {
+    params: { dataset_id: datasetId, file_path: filePath }
+  })
   return response.data
 }

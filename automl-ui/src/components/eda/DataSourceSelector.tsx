@@ -21,6 +21,10 @@ interface DataSourceSelectorProps {
   onSelectDataset: (dataset: Dataset) => void
   onSelectFile: (file: DatasetFile) => void
   formatSize: (bytes: number) => string
+  isVerifying?: boolean
+  verifyError?: string | null
+  uploadedFileName?: string | null
+  onProceedAnyway?: () => void
 }
 
 export function DataSourceSelector({
@@ -35,6 +39,10 @@ export function DataSourceSelector({
   onSelectDataset,
   onSelectFile,
   formatSize,
+  isVerifying,
+  verifyError,
+  uploadedFileName,
+  onProceedAnyway,
 }: DataSourceSelectorProps) {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -94,6 +102,28 @@ export function DataSourceSelector({
               <div className="flex flex-col items-center">
                 <Spinner className="mb-4" />
                 <p className="text-domino-text-secondary">Uploading...</p>
+              </div>
+            ) : isVerifying ? (
+              <div className="flex flex-col items-center">
+                <Spinner className="mb-4" />
+                <p className="font-medium text-domino-text-primary">{uploadedFileName}</p>
+                <p className="text-domino-text-secondary mt-2">Syncing with dataset...</p>
+                <div className="w-48 h-1 bg-domino-border rounded mt-3 overflow-hidden">
+                  <div className="h-full bg-domino-accent-purple rounded animate-pulse" style={{ width: '60%' }} />
+                </div>
+              </div>
+            ) : verifyError ? (
+              <div className="flex flex-col items-center">
+                <p className="font-medium text-domino-text-primary">{uploadedFileName}</p>
+                <p className="text-sm text-domino-accent-red mt-2">{verifyError}</p>
+                {onProceedAnyway && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onProceedAnyway() }}
+                    className="mt-3 text-sm text-domino-accent-purple hover:underline"
+                  >
+                    Proceed Anyway
+                  </button>
+                )}
               </div>
             ) : (
               <div className="flex flex-col items-center">

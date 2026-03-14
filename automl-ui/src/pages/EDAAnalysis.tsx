@@ -1,10 +1,10 @@
 import { useCallback, useState, useEffect, useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { useDatasets, useUploadFile, useDatasetPreview } from '../hooks/useDatasets'
+import { useDatasets, useUploadFile, useDatasetPreview, useSnapshotVerification } from '../hooks/useDatasets'
 import { useEdaAsyncProfiling } from '../hooks/useEdaAsyncProfiling'
 import { useProfiling } from '../hooks/useProfiling'
 import { useStore } from '../store'
-import { Dataset, DatasetFile } from '../types/dataset'
+import { Dataset, DatasetFile, FileUploadResponse } from '../types/dataset'
 import type { TransformConfig } from '../types/eda'
 import { generateEDANotebook } from '../utils/notebookGenerator'
 import { getFileName } from '../utils/path'
@@ -38,6 +38,8 @@ function EDAAnalysis() {
   const [stratifyColumn, setStratifyColumn] = useState('')
   const [edaExecutionTarget, setEdaExecutionTarget] = useState<'local' | 'domino_job'>('local')
   const [edaMode, setEdaMode] = useState<'tabular' | 'timeseries'>('tabular')
+  const [uploadResult, setUploadResult] = useState<FileUploadResponse | null>(null)
+  const { isVerifying, isVerified, error: verifyError } = useSnapshotVerification(uploadResult)
 
   // Force local if Domino Jobs capability is unavailable
   useEffect(() => {
@@ -124,14 +126,21 @@ function EDAAnalysis() {
     void startAsyncTabularProfiling(selectedFilePath, sampleSize, samplingStrategy, stratifyColumn || undefined)
   }, [selectedFilePath, edaExecutionTarget, profileFile, resetAsyncState, startAsyncTabularProfiling])
 
+  // Once snapshot is verified, set file path to trigger profiling
+  useEffect(() => {
+    if (isVerified && uploadResult) {
+      setSelectedFilePath(uploadResult.file_path)
+      setSelectedFileName(uploadResult.file_name)
+    }
+  }, [isVerified, uploadResult])
+
   const onDrop = useCallback(
     async (acceptedFiles: File[]) => {
       if (acceptedFiles.length === 0) return
       const file = acceptedFiles[0]
       try {
         const result = await uploadMutation.mutateAsync(file)
-        setSelectedFilePath(result.file_path)
-        setSelectedFileName(result.file_name)
+        setUploadResult(result)
       } catch (error) {
         addNotification(
           error instanceof Error ? error.message : 'Upload failed',
@@ -296,6 +305,13 @@ function EDAAnalysis() {
           onSelectDataset={handleSelectDataset}
           onSelectFile={handleSelectFile}
           formatSize={formatSize}
+          isVerifying={isVerifying}
+          verifyError={verifyError}
+          uploadedFileName={uploadResult?.file_name}
+          onProceedAnyway={uploadResult ? () => {
+            setSelectedFilePath(uploadResult.file_path)
+            setSelectedFileName(uploadResult.file_name)
+          } : undefined}
         />
       </div>
     )

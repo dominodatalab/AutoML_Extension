@@ -38,6 +38,29 @@ from app.services.dataset_service import (
 
 router = APIRouter()
 
+_VERIFY_BACKOFF = [1, 2, 3, 4, 5]  # ~15s total — keep short to avoid proxy timeouts
+
+
+async def _verify_file_in_snapshot(
+    resolver, dataset_id: str, expected_path: str
+) -> bool:
+    """Poll dataset snapshot until the uploaded file appears (or timeout)."""
+    import asyncio
+
+    for delay in _VERIFY_BACKOFF:
+        await asyncio.sleep(delay)
+        try:
+            files = await resolver.list_files(dataset_id)
+            for f in files:
+                path = f.get("path") or f.get("name") or f.get("fileName") or ""
+                if path.endswith(expected_path) or expected_path.endswith(path):
+                    logger.info("Snapshot verified: %s in dataset %s", expected_path, dataset_id)
+                    return True
+        except Exception:
+            logger.debug("Snapshot poll failed for %s", dataset_id, exc_info=True)
+    logger.warning("Snapshot verification timed out for %s in dataset %s", expected_path, dataset_id)
+    return False
+
 
 def _resolve_project_id(request: Request) -> Optional[str]:
     """Extract project ID from request header with env var fallback."""
@@ -57,6 +80,28 @@ async def list_datasets(
     """List available datasets scoped to the current project."""
     project_id = _resolve_project_id(request)
     return await list_datasets_response(dataset_manager, project_id=project_id)
+
+
+@router.get("/verify-snapshot")
+async def verify_snapshot(
+    dataset_id: str = Query(..., description="Dataset ID to check"),
+    file_path: str = Query(..., description="Expected file path in dataset"),
+):
+    """Check whether a file is visible in the dataset's latest snapshot."""
+    from app.services.storage_resolver import get_storage_resolver
+
+    resolver = get_storage_resolver()
+    try:
+        files = await resolver.list_files(dataset_id)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to list files: {exc}") from exc
+
+    verified = any(
+        (f.get("path") or f.get("name") or f.get("fileName") or "").endswith(file_path)
+        or file_path.endswith(f.get("path") or f.get("name") or f.get("fileName") or "\x00")
+        for f in files
+    )
+    return {"verified": verified, "dataset_id": dataset_id, "file_path": file_path}
 
 
 @router.get("/{dataset_id}", response_model=DatasetResponse)
@@ -227,6 +272,11 @@ async def upload_file(
         except Exception:
             logger.warning("Failed to cache upload locally", exc_info=True)
 
+        # Verify the file appears in the dataset snapshot before returning
+        snapshot_verified = await _verify_file_in_snapshot(
+            resolver, dataset_info.dataset_id, dataset_path
+        )
+
         return FileUploadResponse(
             success=True,
             file_path=file_path,
@@ -234,6 +284,9 @@ async def upload_file(
             file_size=len(content),
             columns=columns,
             row_count=row_count,
+            dataset_id=dataset_info.dataset_id,
+            snapshot_file_path=dataset_path,
+            snapshot_verified=snapshot_verified,
         )
 
     # --- Standalone / no project_id: save to local disk ---
