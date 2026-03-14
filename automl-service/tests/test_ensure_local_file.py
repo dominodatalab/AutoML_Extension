@@ -210,3 +210,27 @@ class TestEnsureLocalFileDownload:
             result = await ensure_local_file(file_path, project_id="proj-1")
 
         assert result == file_path
+
+    @pytest.mark.asyncio
+    async def test_returns_original_when_download_fails(self, tmp_path):
+        """When download_file raises (no read API), returns original path."""
+        file_path = "/domino/datasets/local/automl-extension/uploads/train.csv"
+
+        mock_info = MagicMock()
+        mock_info.dataset_id = "ds-abc-123"
+
+        mock_resolver = MagicMock()
+        mock_resolver.get_dataset_info = AsyncMock(return_value=mock_info)
+        mock_resolver.download_file = AsyncMock(
+            side_effect=RuntimeError("No download API")
+        )
+
+        mock_settings = MagicMock()
+        mock_settings.temp_path = str(tmp_path)
+
+        with patch("app.core.utils.remap_shared_path", return_value=file_path), \
+             patch("app.services.storage_resolver.get_storage_resolver", return_value=mock_resolver), \
+             patch("app.config.get_settings", return_value=mock_settings):
+            result = await ensure_local_file(file_path, project_id="proj-1")
+
+        assert result == file_path

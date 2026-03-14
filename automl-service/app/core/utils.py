@@ -106,9 +106,20 @@ async def ensure_local_file(file_path: str, project_id: Optional[str] = None) ->
         logger.debug("Using cached download: %s", dest_path)
         return dest_path
 
+    # Domino Dataset RW API has no file read/download endpoints.
+    # Files should have been cached locally during upload.
+    # If we reach here, the cache is missing — try download as last resort.
     logger.info(
-        "File %s not found locally; downloading from dataset %s",
+        "File %s not found locally or in cache; attempting download from dataset %s",
         file_path, info.dataset_id,
     )
-    await resolver.download_file(info.dataset_id, relative_path, dest_path)
-    return dest_path
+    try:
+        await resolver.download_file(info.dataset_id, relative_path, dest_path)
+        return dest_path
+    except Exception:
+        logger.warning(
+            "Download failed (Domino has no file read API). "
+            "File %s must be re-uploaded or accessed via dataset mount.",
+            file_path,
+        )
+        return file_path

@@ -1,5 +1,6 @@
 """Dataset management endpoints."""
 
+import hashlib
 import logging
 import mimetypes
 import os
@@ -208,6 +209,23 @@ async def upload_file(
 
         # Canonical mount path the training job will see
         file_path = f"/domino/datasets/local/automl-extension/{dataset_path}"
+
+        # Save a local copy so ensure_local_file() can resolve the mount path
+        # without needing a download API (which Domino doesn't provide).
+        try:
+            settings = _get_settings()
+            cache_key = hashlib.sha256(
+                f"{dataset_info.dataset_id}:{dataset_path}".encode()
+            ).hexdigest()[:16]
+            local_cache_path = os.path.join(
+                settings.temp_path, "dataset_cache", cache_key, dataset_path
+            )
+            os.makedirs(os.path.dirname(local_cache_path), exist_ok=True)
+            with open(local_cache_path, "wb") as fh:
+                fh.write(content)
+            logger.info("Cached upload locally: %s", local_cache_path)
+        except Exception:
+            logger.warning("Failed to cache upload locally", exc_info=True)
 
         return FileUploadResponse(
             success=True,
