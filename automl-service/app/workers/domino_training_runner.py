@@ -20,6 +20,7 @@ def parse_args() -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(description="Run AutoML training job from Domino")
     parser.add_argument("--job-id", required=True, help="AutoML job id")
+    parser.add_argument("--database-url", default=None, help="Override DATABASE_URL for cross-project jobs")
     return parser.parse_args()
 
 
@@ -27,6 +28,9 @@ def main() -> None:
     """CLI entrypoint."""
     args = parse_args()
     _ensure_project_root_on_path()
+
+    if args.database_url:
+        os.environ["DATABASE_URL"] = args.database_url
 
     from app.workers.training_worker import run_training_job
 

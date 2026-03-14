@@ -28,6 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-column", default=None)
     parser.add_argument("--id-column", default=None)
     parser.add_argument("--rolling-window", type=int, default=None)
+    parser.add_argument("--database-url", default=None, help="Override DATABASE_URL for cross-project jobs")
     return parser.parse_args()
 
 
@@ -35,6 +36,9 @@ def main() -> None:
     """CLI entrypoint."""
     args = parse_args()
     _ensure_project_root_on_path()
+
+    if args.database_url:
+        os.environ["DATABASE_URL"] = args.database_url
 
     from app.core.data_profiler import get_data_profiler
     from app.core.eda_job_store import get_eda_job_store

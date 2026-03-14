@@ -342,7 +342,7 @@ class DominoJobLauncher:
         try:
             command = self._build_command(
                 "app.workers.domino_training_runner",
-                {"job_id": job_id},
+                {"job_id": job_id, "database_url": self.settings.database_url},
             )
             response = await self._job_start(
                 command=command,
@@ -406,6 +406,7 @@ class DominoJobLauncher:
                     "target_column": target_column,
                     "id_column": id_column,
                     "rolling_window": rolling_window,
+                    "database_url": self.settings.database_url,
                 },
             )
             response = await self._job_start(
