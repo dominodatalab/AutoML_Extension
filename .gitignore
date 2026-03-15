@@ -2,11 +2,12 @@
 data/models/
 data/datasets/uploads/
 data/temp/
-automl-service/local_data/
+**/**/local_data/
 automl-service/mlruns/
+**/*/mlflow.db
 
 # Database
-automl.db
+**/*/automl.db
 automl-service/automl.db
 automl-service/uploads/
 
@@ -59,3 +60,6 @@ Thumbs.db
 
 # Archives
 *.zip
+
+# Agent context
+AGENTS.md

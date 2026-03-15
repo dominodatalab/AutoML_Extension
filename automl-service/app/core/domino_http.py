@@ -30,6 +30,7 @@ async def get_domino_auth_headers() -> dict[str, str]:
     """
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
+            # TODO this url must be dynamically resolved
             resp = await client.get("http://localhost:8899/access-token")
         if resp.status_code == 200 and resp.text.strip():
             return {"Authorization": f"Bearer {resp.text.strip()}"}

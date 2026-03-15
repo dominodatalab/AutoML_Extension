@@ -136,7 +136,6 @@ install_lightweight_deps() {
 build_frontend() {
     echo "Building frontend..."
     cd "${SCRIPT_DIR}/automl-ui"
-    ensure_node
     echo "Node.js: $(node --version), npm: $(npm --version)"
     npm install --silent
     npm run build

@@ -27,6 +27,7 @@ async def _get_auth_headers() -> dict[str, str]:
     # Priority 1: ephemeral token from Domino App/Run sidecar
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
+            # TODO this url should be dynamically resolved
             resp = await client.get("http://localhost:8899/access-token")
         if resp.status_code == 200 and resp.text.strip():
             return {"Authorization": f"Bearer {resp.text.strip()}"}

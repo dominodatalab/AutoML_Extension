@@ -41,6 +41,7 @@ class DominoModelAPIClient:
         """Get a short-lived Domino access token for this request."""
         try:
             async with httpx.AsyncClient(timeout=5.0) as token_client:
+                # TODO this url must be dynamically resolved
                 response = await token_client.get("http://localhost:8899/access-token")
             if response.status_code == 200 and response.text:
                 return response.text.strip()
