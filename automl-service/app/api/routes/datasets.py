@@ -260,8 +260,16 @@ async def upload_file(
                 detail=f"Failed to upload file to dataset: {exc}",
             ) from exc
 
-        # Canonical mount path the training job will see
-        file_path = f"/domino/datasets/local/automl-extension/{dataset_path}"
+        # Canonical mount path the training job will see.
+        # Use the probed mount if available; otherwise pick the best guess
+        # based on project type (DFS vs git-based).
+        mount = dataset_info.mount_path
+        if not mount:
+            mount = resolver._probe_mount(dataset_info.name)
+        if not mount:
+            # Default: DFS-style path (most common in Domino)
+            mount = f"/domino/datasets/local/{dataset_info.name}"
+        file_path = f"{mount}/{dataset_path}"
 
         # Save a local copy so ensure_local_file() can resolve the mount path
         # without needing a download API (which Domino doesn't provide).

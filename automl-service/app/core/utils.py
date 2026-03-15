@@ -10,9 +10,13 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-# Pattern: /domino/datasets/local/<dataset_name>/<relative_path>
+# Patterns for dataset mount paths across Domino project types:
+#   DFS projects:      /domino/datasets/local/<name>/...
+#   Git-based projects: /mnt/data/<name>/... or /mnt/imported/data/<name>/...
+#   Alternative:       /domino/datasets/<name>/...
 _DATASET_MOUNT_RE = re.compile(
-    r"^/domino/datasets/local/(?P<dataset_name>[^/]+)/(?P<relative>.+)$"
+    r"^(?:/domino/datasets/local|/domino/datasets|/mnt/data|/mnt/imported/data)"
+    r"/(?P<dataset_name>[^/]+)/(?P<relative>.+)$"
 )
 
 
