@@ -1,4 +1,4 @@
-"""Resolve Domino project metadata from the V4 projects API."""
+"""Resolve Domino project metadata from the public projects API."""
 
 import logging
 import os
@@ -73,7 +73,7 @@ async def resolve_project(project_id: str) -> Optional[ProjectInfo]:
         import httpx
 
         headers = await _get_auth_headers()
-        url = f"{api_host}/v4/projects/{project_id}"
+        url = f"{api_host}/api/projects/v1/projects/{project_id}"
 
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(url, headers=headers)
@@ -85,14 +85,16 @@ async def resolve_project(project_id: str) -> Optional[ProjectInfo]:
             return None
 
         data = resp.json()
-        name = data.get("name")
-        owner = data.get("ownerUsername") or data.get("owner", {}).get("userName")
+        # v1 API wraps the project in {"project": {...}, "metadata": {...}}
+        project = data.get("project", data)
+        name = project.get("name")
+        owner = project.get("ownerUsername") or project.get("owner", {}).get("userName")
 
         if not name or not owner:
             logger.warning(
                 "Project %s response missing name/owner: %s",
                 project_id,
-                {k: data.get(k) for k in ("name", "ownerUsername", "owner")},
+                {k: project.get(k) for k in ("name", "ownerUsername", "owner")},
             )
             return None
 
