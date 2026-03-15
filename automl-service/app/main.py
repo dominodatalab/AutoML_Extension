@@ -102,6 +102,13 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Debug request/response logging (AUTOML_DEBUG_LOGGING=true)
+    if settings.debug_logging:
+        from app.api.middleware import DebugLoggingMiddleware
+        app.add_middleware(DebugLoggingMiddleware)
+        logging.getLogger("automl.debug").setLevel(logging.DEBUG)
+        logger.info("Debug request/response logging ENABLED (AUTOML_DEBUG_LOGGING=true)")
+
     # CORS
     app.add_middleware(
         CORSMiddleware,

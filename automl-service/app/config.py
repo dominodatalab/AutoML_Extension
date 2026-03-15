@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     app_name: str = "AutoML Service"
     app_version: str = "1.0.0"
     debug: bool = False
+    debug_logging: bool = False  # AUTOML_DEBUG_LOGGING - verbose request/response logging
 
     # Database
     database_url: str = ""

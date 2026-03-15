@@ -12,7 +12,19 @@ automl-service/
 │   ├── dependencies.py          # Dependency injection (DB sessions)
 │   ├── api/
 │   │   ├── error_handler.py     # @handle_errors() decorator
-│   │   ├── compat_routes.py     # Single-segment /svc* routes for Domino proxy
+│   │   ├── middleware.py         # Debug request/response logging middleware
+│   │   ├── utils.py             # API utility functions
+│   │   ├── compat_routes.py     # Single-segment /svc* route registration entry
+│   │   ├── compat/              # Modular compat route layer
+│   │   │   ├── patterns.py      # Pattern-based endpoint factory (5 patterns)
+│   │   │   ├── common.py        # lazy_import() utility
+│   │   │   ├── custom.py        # Custom compat routes
+│   │   │   ├── custom_jobs.py   # Job-specific compat routes
+│   │   │   ├── custom_datasets.py # Dataset-specific compat routes
+│   │   │   ├── custom_models.py # Model-specific compat routes
+│   │   │   ├── custom_misc.py   # Miscellaneous compat routes
+│   │   │   └── adapters/
+│   │   │       └── jobs.py      # Job service adapters for compat layer
 │   │   ├── routes/
 │   │   │   ├── health.py        # /svc/v1/health — service health, readiness, user info
 │   │   │   ├── jobs.py          # /svc/v1/jobs — training job CRUD, progress, logs
@@ -27,13 +39,17 @@ automl-service/
 │   │       ├── dataset.py       # Dataset schemas
 │   │       └── model.py         # Model registry schemas
 │   ├── core/
+│   │   ├── autogluon_runner.py  # AutoGluon execution wrapper
 │   │   ├── data_profiler.py     # Tabular EDA (stats, outliers, correlations)
 │   │   ├── ts_profiler.py       # Time series EDA (ADF, ACF/PACF, decomposition)
+│   │   ├── dataset_manager.py   # Dataset lifecycle management
 │   │   ├── job_queue.py         # In-process async job queue with semaphore
 │   │   ├── cleanup_service.py   # Bulk cleanup, orphan detection
 │   │   ├── dataset_mounts.py    # Domino dataset mount resolution
 │   │   ├── notebook_generator.py # Jupyter notebook generation
 │   │   ├── experiment_tracker.py # MLflow integration
+│   │   ├── eda_job_store.py     # Shared EDA async result storage
+│   │   ├── domino_http.py       # Domino REST API HTTP abstraction
 │   │   ├── domino_job_launcher.py # Launch training as Domino Jobs
 │   │   ├── domino_model_api.py  # Domino Model API deployment
 │   │   ├── domino_registry.py   # Domino Model Registry API
@@ -41,7 +57,10 @@ automl-service/
 │   │   ├── model_diagnostics.py # SHAP, feature importance
 │   │   ├── model_export.py      # Export trained models
 │   │   ├── model_loader.py      # Model deserialization
+│   │   ├── utils.py             # Shared core utilities
 │   │   ├── trainers/
+│   │   │   ├── base.py          # Base trainer interface
+│   │   │   ├── callbacks.py     # Training callbacks (progress, early stopping)
 │   │   │   ├── tabular.py       # AutoGluon TabularPredictor training
 │   │   │   └── timeseries.py    # AutoGluon TimeSeriesPredictor training
 │   │   └── websocket_manager.py # Real-time job progress via WebSocket
@@ -54,7 +73,11 @@ automl-service/
 │   │   ├── job_links.py         # Deep links to Domino UI
 │   │   ├── dataset_service.py   # Dataset preview, upload handling
 │   │   ├── deployment_service.py # Model API deployment orchestration
-│   │   └── model_service.py     # Registered model queries
+│   │   ├── model_service.py     # Registered model queries
+│   │   ├── project_resolver.py  # Project context resolution
+│   │   └── storage_resolver.py  # Project-scoped storage path resolution
+│   ├── serving/
+│   │   └── model_api_entrypoint.py # Domino Model API serving entrypoint
 │   └── workers/
 │       ├── training_worker.py   # Async training execution loop
 │       ├── domino_training_runner.py
@@ -72,7 +95,10 @@ automl-service/
 │   ├── test_*.py                # Unit tests (mocked DB, no live services)
 │   └── conftest.py              # Unit test fixtures
 ├── scripts/
-│   └── generate_synthetic_test_datasets.py
+│   ├── generate_synthetic_test_datasets.py
+│   ├── diagnose_api_routing.py  # API routing diagnostics
+│   ├── test_dataset_api.py      # Dataset API test script
+│   └── test_dataset_upload.py   # Dataset upload test script
 ├── Dockerfile
 ├── requirements.txt
 └── pytest.ini
@@ -131,6 +157,15 @@ All settings are loaded from environment variables. Key variables:
 
 | Variable | Description |
 |---|---|
+| `AUTOML_DEBUG_LOGGING` | Enable verbose request/response logging (`true`/`false`, default `false`) |
+| `AUTOML_STANDALONE_MODE` | Force standalone mode without Domino services (`true`/`false`) |
+| `ENABLE_LOCAL_COMPUTE` | Enable in-app local queue execution (`true`/`false`, default `true`) |
+| `WORKERS` | Uvicorn worker count (must be `1` when local compute is enabled) |
+| `STATIC_DIR` | Serve frontend static files from this directory (combined mode) |
+| `DATABASE_URL` | SQLite connection string override |
+| `MODELS_PATH` | Override models storage path |
+| `UPLOADS_PATH` | Override uploads storage path |
+| `DATASETS_PATH` | Override datasets storage path |
 | `DOMINO_API_HOST` | Domino API host URL |
 | `DOMINO_API_KEY` | Domino API key (primary) |
 | `DOMINO_USER_API_KEY` | Domino user API key (legacy fallback) |
@@ -140,11 +175,10 @@ All settings are loaded from environment variables. Key variables:
 | `DOMINO_USER_HOST` | Domino tenant URL for UI links |
 | `DOMINO_TRAINING_HARDWARE_TIER_NAME` | Hardware tier for training jobs |
 | `DOMINO_TRAINING_ENVIRONMENT_ID` | Environment ID for training jobs |
+| `DOMINO_EDA_HARDWARE_TIER_NAME` | Hardware tier for async EDA jobs |
+| `DOMINO_EDA_ENVIRONMENT_ID` | Environment ID for async EDA jobs |
 | `MLFLOW_TRACKING_URI` | MLflow tracking server URL |
-| `DATABASE_URL` | SQLite connection string override |
-| `MODELS_PATH` | Override models storage path |
-| `UPLOADS_PATH` | Override uploads storage path |
-| `DATASETS_PATH` | Override datasets storage path |
+| `MLFLOW_TRACKING_TOKEN` | MLflow auth token |
 
 See `app/config.py` for the full `Settings` class.
 

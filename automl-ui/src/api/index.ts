@@ -1,4 +1,5 @@
 import { getBasePath } from '../utils/basePath'
+import { debug } from '../utils/logger'
 
 /**
  * Extract projectId from a Location-like object (search then hash).
@@ -158,8 +159,12 @@ class ApiClient {
       }
     }
 
+    const startTime = performance.now()
+    debug.request(method, fullUrl, data, headers)
+
     try {
       const response = await fetch(fullUrl, fetchConfig)
+      const elapsed = performance.now() - startTime
 
       if (!response.ok) {
         // Check if response is HTML (common when Domino intercepts)
@@ -167,6 +172,7 @@ class ApiClient {
         if (contentType.includes('text/html')) {
           console.error(`[API] Received HTML response instead of JSON for ${fullUrl}`)
           console.error('[API] This usually means Domino is intercepting the request')
+          debug.error(method, fullUrl, `HTML response (status ${response.status})`, elapsed)
           throw new Error(`API returned HTML instead of JSON (status ${response.status}). Check if endpoint exists.`)
         }
         const errorData = await response.json().catch(() => ({}))
@@ -182,12 +188,14 @@ class ApiClient {
           message = errorData.detail || errorData.error || response.statusText || 'An error occurred'
         }
         console.error('API Error:', message)
+        debug.error(method, fullUrl, { status: response.status, message, errorData }, elapsed)
         const error = new Error(message)
         ;(error as any).status = response.status
         throw error
       }
 
       if (response.status === 204) {
+        debug.response(method, fullUrl, 204, '(no content)', elapsed)
         return { data: {} as T }
       }
 
@@ -196,13 +204,19 @@ class ApiClient {
       if (contentType.includes('text/html')) {
         const htmlPreview = await response.text()
         console.error(`[API] Received HTML instead of JSON for ${fullUrl}:`, htmlPreview.substring(0, 200))
+        debug.error(method, fullUrl, `HTML response: ${htmlPreview.substring(0, 200)}`, elapsed)
         throw new Error('API returned HTML instead of JSON')
       }
 
       const responseData = await response.json()
+      debug.response(method, fullUrl, response.status, responseData, elapsed)
       return { data: responseData }
     } catch (error) {
-      console.error(`[API] Error for ${fullUrl}:`, error)
+      const elapsed = performance.now() - startTime
+      if (!debug.enabled) {
+        console.error(`[API] Error for ${fullUrl}:`, error)
+      }
+      debug.error(method, fullUrl, error, elapsed)
       throw error
     }
   }
