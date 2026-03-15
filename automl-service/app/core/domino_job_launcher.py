@@ -29,7 +29,7 @@ class DominoJobLauncher:
         self.settings = get_settings()
 
     @staticmethod
-    def _remap_db_url_for_target(database_url: str) -> str:
+    def _remap_db_url_for_target(database_url: str, target_project_id: Optional[str] = None) -> str:
         """Pre-remap the database URL for a cross-project Domino Job.
 
         The App's DB lives at e.g. ``/mnt/data/automl_shared_db/automl.db``
@@ -37,11 +37,15 @@ class DominoJobLauncher:
         App's data under ``/mnt/imported/data/`` instead. Swap the prefix
         now so the job command contains the correct path from the start.
 
-        Unlike ``_db_url_remap.remap_database_url`` (which probes the
-        local filesystem), this always remaps ``/mnt/data/`` →
-        ``/mnt/imported/data/`` because the target Job is in a different
-        project by definition.
+        When ``target_project_id`` matches the App's own project
+        (``DOMINO_PROJECT_ID``), no remap is needed — the job runs in
+        the same project and sees the same mounts.
         """
+        # Same-project job — no remap needed
+        app_project_id = os.environ.get("DOMINO_PROJECT_ID")
+        if app_project_id and target_project_id and app_project_id == target_project_id:
+            return database_url
+
         prefix = "sqlite:////"
         if not database_url.startswith(prefix):
             return database_url
@@ -357,7 +361,7 @@ class DominoJobLauncher:
             }
 
         try:
-            args: dict[str, Any] = {"job_id": job_id, "database_url": self._remap_db_url_for_target(self.settings.database_url)}
+            args: dict[str, Any] = {"job_id": job_id, "database_url": self._remap_db_url_for_target(self.settings.database_url, project_id)}
             if job_config is not None:
                 args["job_config"] = json.dumps(job_config)
 
@@ -427,7 +431,7 @@ class DominoJobLauncher:
                     "target_column": target_column,
                     "id_column": id_column,
                     "rolling_window": rolling_window,
-                    "database_url": self._remap_db_url_for_target(self.settings.database_url),
+                    "database_url": self._remap_db_url_for_target(self.settings.database_url, project_id),
                 },
             )
             response = await self._job_start(
