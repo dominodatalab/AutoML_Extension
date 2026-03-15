@@ -119,6 +119,23 @@ class JobLog(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
+class EDAResult(Base):
+    """Async EDA job state and results."""
+    __tablename__ = "eda_results"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)  # request_id UUID
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending, running, completed, failed
+    mode: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # tabular, timeseries
+    domino_job_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    domino_job_status: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    domino_job_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    request_payload: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON string
+    result_payload: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON string (large)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
+
+
 class RegisteredModel(Base):
     """Registered models for tracking deployments."""
     __tablename__ = "registered_models"

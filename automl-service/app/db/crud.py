@@ -1,6 +1,7 @@
 """Database CRUD operations."""
 
-from datetime import datetime, timedelta
+import json
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Sequence
 
 from sqlalchemy import select, update, desc, delete, func
@@ -9,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.utils import utc_now
 
 from app.db.models import (
+    EDAResult,
     Job,
     JobLog,
     JobStatus,
@@ -357,3 +359,87 @@ async def count_job_logs(db: AsyncSession, job_id: str) -> int:
         select(func.count()).select_from(JobLog).where(JobLog.job_id == job_id)
     )
     return result.scalar()
+
+
+# EDA Result operations
+
+
+async def create_eda_request(
+    db: AsyncSession, request_id: str, mode: str, request_payload: dict
+) -> EDAResult:
+    """Create a new EDA request record."""
+    eda = EDAResult(
+        id=request_id,
+        status="pending",
+        mode=mode,
+        request_payload=json.dumps(request_payload),
+    )
+    db.add(eda)
+    await db.commit()
+    await db.refresh(eda)
+    return eda
+
+
+async def get_eda_request(
+    db: AsyncSession, request_id: str
+) -> Optional[EDAResult]:
+    """Get an EDA request by ID."""
+    result = await db.execute(select(EDAResult).where(EDAResult.id == request_id))
+    return result.scalar_one_or_none()
+
+
+async def update_eda_request(
+    db: AsyncSession, request_id: str, **updates
+) -> Optional[EDAResult]:
+    """Update an EDA request with arbitrary fields."""
+    eda = await get_eda_request(db, request_id)
+    if eda is None:
+        return None
+    for key, value in updates.items():
+        if hasattr(eda, key) and value is not None:
+            setattr(eda, key, value)
+    eda.updated_at = utc_now()
+    await db.commit()
+    await db.refresh(eda)
+    return eda
+
+
+async def write_eda_result(
+    db: AsyncSession, request_id: str, mode: str, result: dict
+) -> Optional[EDAResult]:
+    """Write EDA profiling result payload."""
+    return await update_eda_request(
+        db, request_id, status="completed", mode=mode,
+        result_payload=json.dumps(result), error=None,
+    )
+
+
+async def write_eda_error(
+    db: AsyncSession, request_id: str, error_message: str
+) -> Optional[EDAResult]:
+    """Mark an EDA request as failed with an error message."""
+    return await update_eda_request(
+        db, request_id, status="failed", error=error_message,
+    )
+
+
+async def get_eda_result(
+    db: AsyncSession, request_id: str
+) -> Optional[dict]:
+    """Get the parsed result payload for an EDA request."""
+    eda = await get_eda_request(db, request_id)
+    if eda is None or eda.result_payload is None:
+        return None
+    return json.loads(eda.result_payload)
+
+
+async def delete_stale_eda_results(
+    db: AsyncSession, max_age_hours: float = 72.0
+) -> int:
+    """Delete EDA results older than *max_age_hours*. Returns rows deleted."""
+    cutoff = utc_now() - timedelta(hours=max_age_hours)
+    result = await db.execute(
+        delete(EDAResult).where(EDAResult.created_at < cutoff)
+    )
+    await db.commit()
+    return result.rowcount

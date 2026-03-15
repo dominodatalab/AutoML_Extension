@@ -81,6 +81,13 @@ async def lifespan(app: FastAPI):
     if deleted:
         logger.info("Cleaned up %d stale cached dataset files", deleted)
 
+    from app.dependencies import get_db_session as _get_db_session
+    async with _get_db_session() as db:
+        from app.db.crud import delete_stale_eda_results
+        eda_deleted = await delete_stale_eda_results(db, max_age_hours=72)
+        if eda_deleted:
+            logger.info("Cleaned up %d stale EDA results", eda_deleted)
+
     from app.core.job_queue import get_job_queue
     queue = get_job_queue()
     await queue.startup()

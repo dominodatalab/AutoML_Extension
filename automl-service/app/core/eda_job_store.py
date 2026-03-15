@@ -1,12 +1,12 @@
-"""File-backed metadata/result store for async EDA jobs."""
+"""DB-backed metadata/result store for async EDA jobs."""
 
 import json
-from functools import lru_cache
-from pathlib import Path
+import logging
 from typing import Any, Optional
 
-from app.config import get_settings
 from app.core.utils import utc_now
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now_iso() -> str:
@@ -14,135 +14,94 @@ def _utc_now_iso() -> str:
 
 
 class EDAJobStore:
-    """Persist async EDA job state in a shared filesystem path."""
+    """Persist async EDA job state in the shared SQLite database."""
 
-    @property
-    def base_dir(self) -> Path:
-        # Prefer dataset mount so EDA results live outside app-local storage
-        if not hasattr(self, "_base_dir_cached"):
-            self._base_dir_cached = self._resolve_base_dir()
-        return self._base_dir_cached
-
-    @staticmethod
-    def _resolve_base_dir() -> Path:
-        """Return the best available eda_results directory.
-
-        Probes dataset mount locations first; falls back to the app-local
-        settings path when no mount is available (standalone mode).
-        """
-        import os
-        from app.services.storage_resolver import _MOUNT_TEMPLATES, DATASET_NAME
-
-        for template in _MOUNT_TEMPLATES:
-            mount = template.format(name=DATASET_NAME)
-            candidate = os.path.join(mount, "eda_results")
-            if os.path.isdir(mount) and os.access(mount, os.W_OK):
-                return Path(candidate)
-
-        return Path(get_settings().eda_results_path)
-
-    @property
-    def meta_dir(self) -> Path:
-        return self.base_dir / "meta"
-
-    @property
-    def result_dir(self) -> Path:
-        return self.base_dir / "results"
-
-    @property
-    def error_dir(self) -> Path:
-        return self.base_dir / "errors"
-
-    def _ensure_dirs(self) -> None:
-        self.base_dir.mkdir(parents=True, exist_ok=True)
-        self.meta_dir.mkdir(parents=True, exist_ok=True)
-        self.result_dir.mkdir(parents=True, exist_ok=True)
-        self.error_dir.mkdir(parents=True, exist_ok=True)
-
-    def _meta_path(self, request_id: str) -> Path:
-        return self.meta_dir / f"{request_id}.json"
-
-    def _result_path(self, request_id: str) -> Path:
-        return self.result_dir / f"{request_id}.json"
-
-    def _error_path(self, request_id: str) -> Path:
-        return self.error_dir / f"{request_id}.txt"
-
-    @staticmethod
-    def _write_json(path: Path, payload: dict[str, Any]) -> None:
-        tmp_path = path.with_suffix(path.suffix + ".tmp")
-        with tmp_path.open("w", encoding="utf-8") as f:
-            json.dump(payload, f)
-        tmp_path.replace(path)
-
-    def create_request(
+    async def create_request(
         self,
+        db,
         request_id: str,
         mode: str,
         request_payload: dict[str, Any],
     ) -> dict[str, Any]:
-        self._ensure_dirs()
-        meta = {
+        from app.db import crud
+
+        eda = await crud.create_eda_request(db, request_id, mode, request_payload)
+        return self._to_dict(eda)
+
+    async def get_request(self, db, request_id: str) -> Optional[dict[str, Any]]:
+        from app.db import crud
+
+        eda = await crud.get_eda_request(db, request_id)
+        if eda is None:
+            return None
+        return self._to_dict(eda)
+
+    async def update_request(
+        self, db, request_id: str, **updates: Any
+    ) -> Optional[dict[str, Any]]:
+        from app.db import crud
+
+        eda = await crud.update_eda_request(db, request_id, **updates)
+        if eda is None:
+            return None
+        return self._to_dict(eda)
+
+    async def write_result(
+        self, db, request_id: str, mode: str, result: dict[str, Any]
+    ) -> None:
+        from app.db import crud
+
+        await crud.write_eda_result(db, request_id, mode, result)
+
+    async def get_result(self, db, request_id: str) -> Optional[dict[str, Any]]:
+        from app.db import crud
+
+        result_payload = await crud.get_eda_result(db, request_id)
+        if result_payload is None:
+            return None
+        # Return in the same shape the filesystem store used
+        eda = await crud.get_eda_request(db, request_id)
+        return {
             "request_id": request_id,
-            "status": "pending",
-            "mode": mode,
-            "request": request_payload,
-            "domino_job_id": None,
-            "created_at": _utc_now_iso(),
-            "updated_at": _utc_now_iso(),
-            "error": None,
+            "mode": eda.mode if eda else None,
+            "result": result_payload,
         }
-        self._write_json(self._meta_path(request_id), meta)
-        return meta
 
-    def get_request(self, request_id: str) -> Optional[dict[str, Any]]:
-        path = self._meta_path(request_id)
-        if not path.exists():
+    async def write_error(self, db, request_id: str, error_message: str) -> None:
+        from app.db import crud
+
+        await crud.write_eda_error(db, request_id, error_message)
+
+    async def get_error(self, db, request_id: str) -> Optional[str]:
+        from app.db import crud
+
+        eda = await crud.get_eda_request(db, request_id)
+        if eda is None:
             return None
-        with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
+        return eda.error
 
-    def update_request(self, request_id: str, **updates: Any) -> Optional[dict[str, Any]]:
-        self._ensure_dirs()
-        current = self.get_request(request_id)
-        if current is None:
-            return None
-        current.update(updates)
-        current["updated_at"] = _utc_now_iso()
-        self._write_json(self._meta_path(request_id), current)
-        return current
-
-    def write_result(self, request_id: str, mode: str, result: dict[str, Any]) -> None:
-        self._ensure_dirs()
-        payload = {
-            "request_id": request_id,
-            "mode": mode,
-            "result": result,
-            "completed_at": _utc_now_iso(),
+    @staticmethod
+    def _to_dict(eda) -> dict[str, Any]:
+        """Convert EDAResult ORM object to dict matching the old filesystem format."""
+        return {
+            "request_id": eda.id,
+            "status": eda.status,
+            "mode": eda.mode,
+            "domino_job_id": eda.domino_job_id,
+            "domino_job_status": eda.domino_job_status,
+            "domino_job_url": getattr(eda, "domino_job_url", None),
+            "error": eda.error,
+            "created_at": str(eda.created_at) if eda.created_at else None,
+            "updated_at": str(eda.updated_at) if eda.updated_at else None,
         }
-        self._write_json(self._result_path(request_id), payload)
-
-    def get_result(self, request_id: str) -> Optional[dict[str, Any]]:
-        path = self._result_path(request_id)
-        if not path.exists():
-            return None
-        with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
-
-    def write_error(self, request_id: str, error_message: str) -> None:
-        self._ensure_dirs()
-        with self._error_path(request_id).open("w", encoding="utf-8") as f:
-            f.write(error_message)
-
-    def get_error(self, request_id: str) -> Optional[str]:
-        path = self._error_path(request_id)
-        if not path.exists():
-            return None
-        with path.open("r", encoding="utf-8") as f:
-            return f.read()
 
 
-@lru_cache()
+_store_instance: Optional[EDAJobStore] = None
+
+
 def get_eda_job_store() -> EDAJobStore:
     """Get cached EDA job store."""
-    return EDAJobStore()
+    global _store_instance
+    if _store_instance is None:
+        _store_instance = EDAJobStore()
+    return _store_instance

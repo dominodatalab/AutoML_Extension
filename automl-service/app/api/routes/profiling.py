@@ -14,6 +14,7 @@ from app.core.ts_profiler import get_ts_profiler
 from app.api.error_handler import handle_errors
 from app.config import get_settings
 from app.core.utils import ensure_local_file
+from app.dependencies import get_db_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -459,11 +460,14 @@ async def start_profile_async(request: AsyncProfileStartRequest, http_request: R
     store = get_eda_job_store()
     settings = get_settings()
     request_id = str(uuid4())
-    store.create_request(
-        request_id=request_id,
-        mode=request.mode,
-        request_payload=request.model_dump(exclude_none=True),
-    )
+
+    async with get_db_session() as db:
+        await store.create_request(
+            db,
+            request_id=request_id,
+            mode=request.mode,
+            request_payload=request.model_dump(exclude_none=True),
+        )
 
     # Resolve project context for dataset pre-creation and job launch
     project_id = http_request.headers.get("X-Project-Id") if http_request else None
@@ -502,17 +506,20 @@ async def start_profile_async(request: AsyncProfileStartRequest, http_request: R
     )
     if not launch_result.get("success"):
         error_message = launch_result.get("error", "Failed to launch async profiling job")
-        store.update_request(request_id, status="failed", error=error_message)
+        async with get_db_session() as db:
+            await store.update_request(db, request_id, status="failed", error=error_message)
         raise HTTPException(status_code=502, detail=error_message)
 
-    store.update_request(
-        request_id,
-        status="running",
-        domino_job_id=launch_result.get("domino_job_id"),
-        domino_job_status=launch_result.get("domino_job_status", "Submitted"),
-        domino_job_url=launch_result.get("domino_job_url"),
-        error=None,
-    )
+    async with get_db_session() as db:
+        await store.update_request(
+            db,
+            request_id,
+            status="running",
+            domino_job_id=launch_result.get("domino_job_id"),
+            domino_job_status=launch_result.get("domino_job_status", "Submitted"),
+            domino_job_url=launch_result.get("domino_job_url"),
+            error=None,
+        )
     return AsyncProfileStartResponse(
         request_id=request_id,
         status="running",
@@ -524,17 +531,18 @@ async def start_profile_async(request: AsyncProfileStartRequest, http_request: R
 
 
 async def _build_async_status_response(request_id: str) -> AsyncProfileStatusResponse:
-    """Load async EDA status from file-backed metadata/results."""
+    """Load async EDA status from database."""
     store = get_eda_job_store()
     launcher = get_domino_job_launcher()
 
-    metadata = store.get_request(request_id)
-    if metadata is None:
-        raise HTTPException(status_code=404, detail=f"Async profile request not found: {request_id}")
+    async with get_db_session() as db:
+        metadata = await store.get_request(db, request_id)
+        if metadata is None:
+            raise HTTPException(status_code=404, detail=f"Async profile request not found: {request_id}")
 
-    result_payload = store.get_result(request_id)
-    if result_payload and metadata.get("status") != "completed":
-        metadata = store.update_request(request_id, status="completed", error=None) or metadata
+        result_payload = await store.get_result(db, request_id)
+        if result_payload and metadata.get("status") != "completed":
+            metadata = await store.update_request(db, request_id, status="completed", error=None) or metadata
 
     if result_payload:
         return AsyncProfileStatusResponse(
@@ -555,10 +563,12 @@ async def _build_async_status_response(request_id: str) -> AsyncProfileStatusRes
         if domino_status_result.get("success"):
             latest_domino_status = domino_status_result.get("domino_job_status")
             if latest_domino_status and latest_domino_status != domino_job_status:
-                metadata = store.update_request(
-                    request_id,
-                    domino_job_status=latest_domino_status,
-                ) or metadata
+                async with get_db_session() as db:
+                    metadata = await store.update_request(
+                        db,
+                        request_id,
+                        domino_job_status=latest_domino_status,
+                    ) or metadata
                 domino_job_status = latest_domino_status
 
             if latest_domino_status and latest_domino_status.lower() in {
@@ -569,21 +579,25 @@ async def _build_async_status_response(request_id: str) -> AsyncProfileStatusRes
                 "cancelled",
             }:
                 error_message = f"Domino profiling job ended with status: {latest_domino_status}"
-                metadata = store.update_request(
-                    request_id,
-                    status="failed",
-                    error=error_message,
-                ) or metadata
+                async with get_db_session() as db:
+                    metadata = await store.update_request(
+                        db,
+                        request_id,
+                        status="failed",
+                        error=error_message,
+                    ) or metadata
                 status = "failed"
 
     if status == "failed":
+        async with get_db_session() as db:
+            error_from_db = await store.get_error(db, request_id)
         return AsyncProfileStatusResponse(
             request_id=request_id,
             status="failed",
             mode=metadata.get("mode"),
             domino_job_id=metadata.get("domino_job_id"),
             domino_job_status=metadata.get("domino_job_status"),
-            error=metadata.get("error") or store.get_error(request_id) or "Async profiling failed",
+            error=metadata.get("error") or error_from_db or "Async profiling failed",
         )
 
     return AsyncProfileStatusResponse(
