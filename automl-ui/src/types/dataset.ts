@@ -43,4 +43,5 @@ export interface SnapshotVerifyResponse {
   verified: boolean
   dataset_id: string
   file_path: string
+  snapshot_status?: string
 }

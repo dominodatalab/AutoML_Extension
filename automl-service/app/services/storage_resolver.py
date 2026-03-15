@@ -2,8 +2,8 @@
 
 Ensures a writable ``automl-extension`` dataset exists for a given target
 project and returns the local mount path.  The dataset is created via the
-Domino Dataset RW API (v1 for create/grants, v2 for listing) if it
-does not already exist.
+Domino Dataset RW API (v1 for create, v2 for listing) if it does not
+already exist.
 
 Usage::
 
@@ -238,61 +238,51 @@ class ProjectStorageResolver:
             f"Failed to download '{file_path}' from dataset {dataset_id}: {last_error}"
         )
 
-    async def list_files(self, dataset_id: str) -> list[dict]:
-        """List files in a dataset's latest snapshot.
+    async def get_latest_snapshot_status(self, dataset_id: str) -> Optional[str]:
+        """Return the status of the latest snapshot for a dataset.
 
-        Tries snapshot-based file listing endpoints.  Returns a list of
-        file metadata dicts, or an empty list if no endpoint works.
+        Uses ``GET /api/datasetrw/v1/datasets/{id}/snapshots`` which returns
+        ``{"snapshots": [{"id": ..., "status": "active"|"pending"|...}]}``.
+
+        Returns the status string (``"active"``, ``"pending"``, ``"copying"``,
+        ``"failed"``, etc.) or ``None`` if no snapshot exists.
         """
-        # First get the latest snapshot ID
-        snapshot_id = await self._get_latest_snapshot_id(dataset_id)
-
-        endpoints: list[str] = []
-        if snapshot_id:
-            endpoints.append(
-                f"/api/datasetrw/v1/datasets/{dataset_id}/snapshots/{snapshot_id}/files"
+        try:
+            resp = await domino_request(
+                "GET",
+                f"/api/datasetrw/v1/datasets/{dataset_id}/snapshots",
+                params={"limit": 1},
             )
-            endpoints.append(
-                f"/api/datasetrw/v2/datasets/{dataset_id}/snapshots/{snapshot_id}/files"
-            )
-        endpoints.extend([
-            f"/api/datasetrw/v1/datasets/{dataset_id}/files",
-            f"/api/datasetrw/v2/datasets/{dataset_id}/files",
-        ])
-
-        for endpoint in endpoints:
-            try:
-                resp = await domino_request("GET", endpoint)
-                data = resp.json()
-                files = data if isinstance(data, list) else (
-                    data.get("files") or data.get("items") or data.get("contents") or []
-                )
-                logger.debug("Listed %d file(s) from %s", len(files), endpoint)
-                return files
-            except Exception:
-                logger.debug("File listing failed on %s", endpoint)
-                continue
-
-        logger.warning("No file listing endpoint worked for dataset %s", dataset_id)
-        return []
+            data = resp.json()
+            snapshots = data.get("snapshots") or []
+            if snapshots:
+                snapshot = snapshots[0]
+                # The v1 response wraps as {"snapshot": {...}} — unwrap if needed
+                if "snapshot" in snapshot and isinstance(snapshot["snapshot"], dict):
+                    snapshot = snapshot["snapshot"]
+                return snapshot.get("status")
+        except Exception:
+            logger.debug("Failed to get snapshot status for dataset %s", dataset_id, exc_info=True)
+        return None
 
     async def _get_latest_snapshot_id(self, dataset_id: str) -> Optional[str]:
         """Return the latest snapshot ID for a dataset, or None."""
-        for version in ("v2", "v1"):
-            try:
-                resp = await domino_request(
-                    "GET",
-                    f"/api/datasetrw/{version}/datasets/{dataset_id}/snapshots",
-                )
-                data = resp.json()
-                snapshots = data if isinstance(data, list) else (
-                    data.get("snapshots") or data.get("items") or []
-                )
-                if snapshots:
-                    s = snapshots[0]
-                    return str(s.get("id") or s.get("snapshotId") or "")
-            except Exception:
-                continue
+        try:
+            resp = await domino_request(
+                "GET",
+                f"/api/datasetrw/v1/datasets/{dataset_id}/snapshots",
+                params={"limit": 1},
+            )
+            data = resp.json()
+            snapshots = data.get("snapshots") or []
+            if snapshots:
+                s = snapshots[0]
+                # Unwrap v1 envelope if present
+                if "snapshot" in s and isinstance(s["snapshot"], dict):
+                    s = s["snapshot"]
+                return str(s.get("id") or s.get("snapshotId") or "")
+        except Exception:
+            logger.debug("Failed to get snapshot ID for dataset %s", dataset_id, exc_info=True)
         return None
 
     def invalidate(self, project_id: Optional[str] = None) -> None:
@@ -441,12 +431,6 @@ class ProjectStorageResolver:
         logger.info("Creating dataset '%s' in project %s", DATASET_NAME, project_id)
         created = await self._create_dataset(project_id)
 
-        # If the dataset lives in a different project than the app,
-        # grant the app project editor access so the mount will appear.
-        app_project_id = os.environ.get("DOMINO_PROJECT_ID")
-        if app_project_id and app_project_id != project_id and created.dataset_id:
-            await self._grant_project_access(created.dataset_id, app_project_id)
-
         self._cache[project_id] = created
         return created
 
@@ -553,29 +537,6 @@ class ProjectStorageResolver:
             f"Failed to create dataset '{DATASET_NAME}' in project {project_id}. "
             f"Last error: {last_error}"
         )
-
-    async def _grant_project_access(self, dataset_id: str, target_project_id: str) -> None:
-        """Grant DatasetRwEditor to a project via the v1 grants API."""
-        try:
-            await domino_request(
-                "POST",
-                f"/api/datasetrw/v1/datasets/{dataset_id}/grants",
-                json={
-                    "targetId": target_project_id,
-                    "targetRole": "DatasetRwEditor",
-                },
-            )
-            logger.info(
-                "Granted DatasetRwEditor on dataset %s to project %s",
-                dataset_id,
-                target_project_id,
-            )
-        except Exception:
-            logger.exception(
-                "Failed to grant access on dataset %s to project %s",
-                dataset_id,
-                target_project_id,
-            )
 
     @staticmethod
     def _probe_mount(dataset_name: str) -> Optional[str]:
