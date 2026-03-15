@@ -156,10 +156,14 @@ async def get_dataset_schema(
 
 @router.post("/preview", response_model=DatasetPreviewResponse)
 @handle_errors("[PREVIEW] Error reading file", detail_prefix="Failed to read file")
-async def preview_file_by_path(request: FilePreviewRequest):
+async def preview_file_by_path(request: FilePreviewRequest, http_request: Request):
     """Preview a file by its path with pagination support."""
+    from app.core.utils import ensure_local_file
+
+    project_id = http_request.headers.get("X-Project-Id")
+    resolved_path = await ensure_local_file(request.file_path, project_id)
     return preview_file_response(
-        file_path=request.file_path,
+        file_path=resolved_path,
         limit=request.limit,
         rows=request.rows,
         offset=request.offset,

@@ -24,7 +24,18 @@ def register_custom_dataset_routes(app: FastAPI) -> None:
         return await list_datasets_response(get_dataset_manager(), project_id=project_id)
 
     @app.post("/svcdatasetpreview")
-    async def svc_dataset_preview(body: dict = Body(default={})):
+    async def svc_dataset_preview(request: Request, body: dict = Body(default={})):
+        # Resolve file path through cache for cross-project uploads
+        file_path = body.get("file_path")
+        if file_path:
+            from app.core.utils import ensure_local_file
+
+            project_id = (
+                request.headers.get("X-Project-Id")
+                or os.environ.get("DOMINO_PROJECT_ID")
+                or None
+            )
+            body = {**body, "file_path": await ensure_local_file(file_path, project_id)}
         return await build_compat_dataset_preview_payload(get_dataset_manager(), body)
 
     @app.post("/svcupload")
