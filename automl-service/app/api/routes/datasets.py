@@ -267,8 +267,13 @@ async def upload_file(
         if not mount:
             mount = resolver._probe_mount(dataset_info.name)
         if not mount:
-            # Default: DFS-style path (most common in Domino)
-            mount = f"/domino/datasets/local/{dataset_info.name}"
+            from app.core.domino_project_type import detect_project_type, DominoProjectType
+            project_type = detect_project_type()
+            if project_type == DominoProjectType.GIT:
+                mount = f"/mnt/data/{dataset_info.name}"
+            else:
+                mount = f"/domino/datasets/local/{dataset_info.name}"
+            logger.info("No mount probed; using %s default: %s", project_type.value, mount)
         file_path = f"{mount}/{dataset_path}"
 
         # Save a local copy so ensure_local_file() can resolve the mount path
