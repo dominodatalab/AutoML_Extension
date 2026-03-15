@@ -28,6 +28,37 @@ class DominoJobLauncher:
     def __init__(self):
         self.settings = get_settings()
 
+    @staticmethod
+    def _remap_db_url_for_target(database_url: str) -> str:
+        """Pre-remap the database URL for a cross-project Domino Job.
+
+        The App's DB lives at e.g. ``/mnt/data/automl_shared_db/automl.db``
+        (local mount). A Job running in a *different* project sees the
+        App's data under ``/mnt/imported/data/`` instead. Swap the prefix
+        now so the job command contains the correct path from the start.
+
+        Unlike ``_db_url_remap.remap_database_url`` (which probes the
+        local filesystem), this always remaps ``/mnt/data/`` →
+        ``/mnt/imported/data/`` because the target Job is in a different
+        project by definition.
+        """
+        prefix = "sqlite:////"
+        if not database_url.startswith(prefix):
+            return database_url
+        db_path = "/" + database_url[len(prefix):]
+
+        # /mnt/data/<project>/ → /mnt/imported/data/<project>/
+        if db_path.startswith("/mnt/data/"):
+            remapped = "/mnt/imported/data/" + db_path[len("/mnt/data/"):]
+            return f"sqlite:////{remapped.lstrip('/')}"
+
+        # /domino/datasets/local/<name>/ → /domino/datasets/<name>/
+        if db_path.startswith("/domino/datasets/local/"):
+            remapped = "/domino/datasets/" + db_path[len("/domino/datasets/local/"):]
+            return f"sqlite:////{remapped.lstrip('/')}"
+
+        return database_url
+
     def _project_ref(self) -> Optional[str]:
         owner = self.settings.domino_project_owner or os.environ.get("DOMINO_PROJECT_OWNER")
         project_name = self.settings.domino_project_name or os.environ.get("DOMINO_PROJECT_NAME")
@@ -326,7 +357,7 @@ class DominoJobLauncher:
             }
 
         try:
-            args: dict[str, Any] = {"job_id": job_id, "database_url": self.settings.database_url}
+            args: dict[str, Any] = {"job_id": job_id, "database_url": self._remap_db_url_for_target(self.settings.database_url)}
             if job_config is not None:
                 args["job_config"] = json.dumps(job_config)
 
@@ -396,7 +427,7 @@ class DominoJobLauncher:
                     "target_column": target_column,
                     "id_column": id_column,
                     "rolling_window": rolling_window,
-                    "database_url": self.settings.database_url,
+                    "database_url": self._remap_db_url_for_target(self.settings.database_url),
                 },
             )
             response = await self._job_start(
