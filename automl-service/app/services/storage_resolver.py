@@ -437,6 +437,7 @@ class ProjectStorageResolver:
                         or 0
                     ),
                     "lastModified": row.get("lastModified"),
+                    "url": name_info.get("url"),
                 })
             return result
         except Exception:
@@ -492,15 +493,12 @@ class ProjectStorageResolver:
             # learner.pkl") or just basenames ("learner.pkl").  Normalise to
             # an absolute remote path and a local basename.
             if name.startswith(prefix_slash):
-                # Already a full path — use as-is
                 remote_child = name
                 basename = name[len(prefix_slash):]
             elif "/" not in name:
-                # Simple filename — prepend the current directory
                 remote_child = f"{prefix_slash}{name}"
                 basename = name
             else:
-                # Some other full path — use as-is
                 remote_child = name
                 basename = name.rsplit("/", 1)[-1]
 
@@ -511,7 +509,43 @@ class ProjectStorageResolver:
                     dataset_id, snapshot_id, remote_child, local_child
                 )
             else:
-                await self.download_file(dataset_id, remote_child, local_child)
+                # Prefer the direct URL from the file listing (works through
+                # the proxy for cross-project datasets) over constructing
+                # download endpoints that the proxy may not route.
+                url = entry.get("url")
+                if url:
+                    await self._download_via_url(url, local_child)
+                else:
+                    await self.download_file(dataset_id, remote_child, local_child)
+
+    async def _download_via_url(self, url: str, dest_path: str) -> None:
+        """Download a file using a direct URL from the file-listing response."""
+        import httpx
+
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        auth_headers = await self._get_auth_headers()
+
+        # The URL may be absolute or relative to the API host.
+        if url.startswith("/"):
+            base = resolve_domino_api_host()
+            full_url = f"{base}{url}"
+        else:
+            full_url = url
+
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            async with client.stream("GET", full_url, headers=auth_headers) as resp:
+                resp.raise_for_status()
+                with open(dest_path, "wb") as f:
+                    async for chunk in resp.aiter_bytes(chunk_size=8192):
+                        f.write(chunk)
+
+        logger.info("Downloaded %s via listing URL", dest_path)
+
+    @staticmethod
+    async def _get_auth_headers() -> dict:
+        """Get auth headers for direct URL downloads."""
+        from app.core.domino_http import get_domino_auth_headers
+        return await get_domino_auth_headers()
 
     async def delete_snapshot_files(
         self,
