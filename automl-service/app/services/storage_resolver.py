@@ -463,12 +463,30 @@ class ProjectStorageResolver:
         os.makedirs(local_dir, exist_ok=True)
         entries = await self.list_snapshot_files(snapshot_id, path=remote_path)
 
+        prefix_slash = (remote_path + "/") if remote_path else ""
+
         for entry in entries:
             name = entry.get("fileName", "")
             if not name:
                 continue
-            remote_child = f"{remote_path}/{name}" if remote_path else name
-            local_child = os.path.join(local_dir, name)
+
+            # The v4 files API may return full paths (e.g. "models/job_xxx/
+            # learner.pkl") or just basenames ("learner.pkl").  Normalise to
+            # an absolute remote path and a local basename.
+            if name.startswith(prefix_slash):
+                # Already a full path — use as-is
+                remote_child = name
+                basename = name[len(prefix_slash):]
+            elif "/" not in name:
+                # Simple filename — prepend the current directory
+                remote_child = f"{prefix_slash}{name}"
+                basename = name
+            else:
+                # Some other full path — use as-is
+                remote_child = name
+                basename = name.rsplit("/", 1)[-1]
+
+            local_child = os.path.join(local_dir, basename)
 
             if entry.get("isDirectory"):
                 await self._download_dir_recursive(
