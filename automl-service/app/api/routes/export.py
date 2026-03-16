@@ -4,9 +4,10 @@ import io
 import logging
 import json
 import os
+import shutil
 import tempfile
 import zipfile
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import Response, StreamingResponse
@@ -22,9 +23,88 @@ from app.dependencies import get_db
 from app.db import crud
 from app.api.utils import get_job_paths
 from app.api.error_handler import handle_errors
+from app.services.storage_resolver import DATASET_NAME, get_storage_resolver
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Known mount prefixes for Domino datasets.
+_MOUNT_PREFIXES = [
+    "/mnt/data/",
+    "/mnt/imported/data/",
+    "/domino/datasets/",
+    "/domino/datasets/local/",
+]
+
+
+async def _ensure_local_model(
+    db: AsyncSession,
+    job_id: str,
+) -> Tuple[str, Optional[str]]:
+    """Return a local model path, downloading from the dataset if necessary.
+
+    Returns ``(local_model_path, temp_dir_to_cleanup)``.  When the model is
+    already on the local filesystem, ``temp_dir_to_cleanup`` is ``None``.
+    When files had to be pulled from the Domino Dataset API, it points to
+    the temporary directory that the caller must remove when done.
+    """
+    model_path, _, _, _ = await get_job_paths(db, job_id)
+
+    if os.path.isdir(model_path):
+        return model_path, None
+
+    # Model not locally available — try to download from the dataset.
+    job = await crud.get_job(db, job_id)
+    project_id = getattr(job, "project_id", None) if job else None
+    raw_path = job.model_path if job else model_path
+
+    if not project_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model artifacts not found at: {model_path}",
+        )
+
+    # Derive the relative path inside the dataset.
+    relative: Optional[str] = None
+    ds_slash = DATASET_NAME + "/"
+    for prefix in _MOUNT_PREFIXES:
+        full = prefix + ds_slash
+        if raw_path.startswith(full):
+            relative = raw_path[len(full):]
+            break
+
+    if relative is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model artifacts not found at: {model_path}",
+        )
+
+    resolver = get_storage_resolver()
+    info = await resolver.get_dataset_info(project_id)
+    if not info:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model artifacts not found at: {model_path}",
+        )
+
+    tmp = tempfile.mkdtemp(prefix="automl_model_dl_")
+    local_model = os.path.join(tmp, os.path.basename(relative))
+    try:
+        await resolver.download_directory(
+            info.dataset_id, relative, local_model
+        )
+    except Exception as exc:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to download model from dataset: {exc}",
+        )
+
+    logger.info(
+        "Downloaded model from dataset to temp dir %s for export (job %s)",
+        tmp, job_id,
+    )
+    return local_model, tmp
 
 
 class DeploymentPackageRequest(BaseModel):
@@ -122,8 +202,8 @@ async def export_deployment_package(
     db: AsyncSession = Depends(get_db)
 ):
     """Export model as deployment package with all necessary files (identified by job_id)."""
-    # Look up job to get model_path
-    model_path, model_type, _, _ = await get_job_paths(db, request.job_id)
+    local_model, tmp_cleanup = await _ensure_local_model(db, request.job_id)
+    _, model_type, _, _ = await get_job_paths(db, request.job_id)
     actual_model_type = request.model_type or model_type
 
     # Resolve output_dir server-side when not provided
@@ -133,12 +213,16 @@ async def export_deployment_package(
             prefix="automl_export_", dir=get_settings().temp_path
         )
 
-    exporter = get_model_exporter()
-    result = exporter.export_for_deployment(
-        model_path=model_path,
-        model_type=actual_model_type,
-        output_dir=output_dir,
-    )
+    try:
+        exporter = get_model_exporter()
+        result = exporter.export_for_deployment(
+            model_path=local_model,
+            model_type=actual_model_type,
+            output_dir=output_dir,
+        )
+    finally:
+        if tmp_cleanup:
+            shutil.rmtree(tmp_cleanup, ignore_errors=True)
 
     return DeploymentPackageResponse(**result)
 
@@ -238,24 +322,22 @@ async def export_deployment_zip(
     request: DeploymentZipRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Build and stream a deployment zip directly from the model's dataset mount.
+    """Build and stream a deployment zip directly from the model files.
 
-    Combines build + download into a single request. No intermediate copy
-    of model files — they are read directly from the dataset mount and
-    streamed into the zip.
+    Combines build + download into a single request.  If the model is not
+    on a local mount it is pulled from the Domino Dataset API first.
     """
-    model_path, model_type, _, _ = await get_job_paths(db, request.job_id)
+    local_model, tmp_cleanup = await _ensure_local_model(db, request.job_id)
+    _, model_type, _, _ = await get_job_paths(db, request.job_id)
     actual_model_type = request.model_type or model_type
 
-    if not os.path.exists(model_path):
-        raise HTTPException(
-            status_code=404,
-            detail=f"Model artifacts not found at: {model_path}",
-        )
-
-    exporter = get_model_exporter()
-    text_files = exporter.generate_deployment_files(actual_model_type)
-    spooled = _zip_model_and_files(model_path, text_files)
+    try:
+        exporter = get_model_exporter()
+        text_files = exporter.generate_deployment_files(actual_model_type)
+        spooled = _zip_model_and_files(local_model, text_files)
+    finally:
+        if tmp_cleanup:
+            shutil.rmtree(tmp_cleanup, ignore_errors=True)
 
     zip_filename = f"deployment_{request.job_id}.zip"
     return StreamingResponse(
@@ -271,7 +353,16 @@ async def get_learning_curves(
     db: AsyncSession = Depends(get_db)
 ):
     """Get learning curves for a trained model (identified by job_id)."""
-    # Look up job to get model_path
+    # Try pre-computed diagnostics first
+    job = await crud.get_job(db, request.job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job not found: {request.job_id}")
+
+    stored = getattr(job, "diagnostics_data", None) or {}
+    if "get_learning_curves" in stored:
+        return LearningCurvesResponse(**stored["get_learning_curves"])
+
+    # Fall back to live computation
     model_path, model_type, _, _ = await get_job_paths(db, request.job_id)
     actual_model_type = request.model_type or model_type
 

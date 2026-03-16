@@ -369,6 +369,53 @@ class ProjectStorageResolver:
             )
             return []
 
+    async def download_directory(
+        self,
+        dataset_id: str,
+        remote_path: str,
+        dest_dir: str,
+    ) -> str:
+        """Download an entire directory tree from a dataset to *dest_dir*.
+
+        Recursively lists files in the snapshot and downloads each one.
+        Returns *dest_dir* on success, raises on failure.
+        """
+        rw_id = await self.get_rw_snapshot_id(dataset_id)
+        if not rw_id:
+            raise RuntimeError(
+                f"No RW snapshot found for dataset {dataset_id}"
+            )
+
+        await self._download_dir_recursive(
+            dataset_id, rw_id, remote_path, dest_dir
+        )
+        return dest_dir
+
+    async def _download_dir_recursive(
+        self,
+        dataset_id: str,
+        snapshot_id: str,
+        remote_path: str,
+        local_dir: str,
+    ) -> None:
+        """Recursively list and download files from a snapshot directory."""
+        os.makedirs(local_dir, exist_ok=True)
+        entries = await self.list_snapshot_files(snapshot_id, path=remote_path)
+
+        for entry in entries:
+            name = entry.get("fileName", "")
+            if not name:
+                continue
+            remote_child = f"{remote_path}/{name}" if remote_path else name
+            local_child = os.path.join(local_dir, name)
+
+            if entry.get("isDirectory"):
+                await self._download_dir_recursive(
+                    dataset_id, snapshot_id, remote_child, local_child
+                )
+            else:
+                await self.download_file(dataset_id, remote_child, local_child)
+
     async def delete_snapshot_files(
         self,
         snapshot_id: str,
