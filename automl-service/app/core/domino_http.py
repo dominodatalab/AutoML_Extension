@@ -152,14 +152,36 @@ async def domino_request(
     raise last_exc or RuntimeError("Domino request failed after retries")
 
 
-async def domino_download(path: str, dest_path: str, *, timeout: float = 300.0) -> None:
+def resolve_domino_nucleus_host() -> Optional[str]:
+    """Return the nucleus-frontend host, bypassing the local proxy.
+
+    Returns ``None`` when no direct host is configured (i.e. only the
+    proxy is available).
+    """
+    settings = get_settings()
+    return (
+        settings.domino_api_host
+        or os.environ.get("DOMINO_API_HOST")
+    ) or None
+
+
+async def domino_download(
+    path: str,
+    dest_path: str,
+    *,
+    timeout: float = 300.0,
+    base_url: Optional[str] = None,
+) -> None:
     """Stream a file from the Domino API to a local path.
 
     Uses the same auth and host resolution as ``domino_request`` but
     streams the response body to *dest_path* in chunks to avoid loading
     large files into memory.
+
+    An explicit *base_url* can be passed to bypass the default proxy-first
+    resolution (useful when the proxy does not support the endpoint).
     """
-    base_url = resolve_domino_api_host()
+    base_url = (base_url or resolve_domino_api_host()).rstrip("/")
     url = f"{base_url}{path}"
     auth_headers = await get_domino_auth_headers()
 

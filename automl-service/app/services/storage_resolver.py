@@ -23,7 +23,12 @@ from typing import Optional
 
 from fastapi import HTTPException
 
-from app.core.domino_http import domino_download, domino_request, resolve_domino_api_host
+from app.core.domino_http import (
+    domino_download,
+    domino_request,
+    resolve_domino_api_host,
+    resolve_domino_nucleus_host,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -230,19 +235,32 @@ class ProjectStorageResolver:
             f"/v4/datasetrw/datasets/{dataset_id}/files/{file_path}",
         ])
 
+        # Try each endpoint via the default host (proxy), then fall back
+        # to the nucleus-frontend host directly (proxy may 404 for
+        # cross-project dataset file downloads).
+        base_urls = [None]  # None = default (proxy-first)
+        nucleus = resolve_domino_nucleus_host()
+        if nucleus:
+            base_urls.append(nucleus)
+
         last_error: Optional[Exception] = None
-        for endpoint in endpoints:
-            try:
-                await domino_download(endpoint, dest_path)
-                logger.info(
-                    "Downloaded '%s' from dataset %s via %s",
-                    file_path, dataset_id, endpoint,
-                )
-                return dest_path
-            except Exception as exc:
-                last_error = exc
-                logger.debug("Download failed on %s: %s", endpoint, exc)
-                continue
+        for base_url in base_urls:
+            for endpoint in endpoints:
+                try:
+                    await domino_download(endpoint, dest_path, base_url=base_url)
+                    logger.info(
+                        "Downloaded '%s' from dataset %s via %s (host=%s)",
+                        file_path, dataset_id, endpoint,
+                        base_url or "default",
+                    )
+                    return dest_path
+                except Exception as exc:
+                    last_error = exc
+                    logger.debug(
+                        "Download failed on %s (host=%s): %s",
+                        endpoint, base_url or "default", exc,
+                    )
+                    continue
 
         raise RuntimeError(
             f"Failed to download '{file_path}' from dataset {dataset_id}: {last_error}"
