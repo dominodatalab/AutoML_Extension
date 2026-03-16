@@ -336,19 +336,24 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
             if tracker:
                 tracker.end_run(status="FINISHED")
 
-            # Generate feature importance
+            # Pre-compute all diagnostics while model is on disk (in the Job).
+            # The App may not have the dataset mounted, so we store these in the
+            # DB and serve them directly from there.
+            diagnostics_data = None
             feature_importance = None
             try:
                 diagnostics = get_model_diagnostics()
-                fi_result = diagnostics.get_feature_importance(
+                diagnostics_data = diagnostics.compute_all_diagnostics(
                     model_path=result.get("model_path"),
                     model_type=job.model_type.value,
-                    data_path=data_path
+                    data_path=data_path,
                 )
+                # Extract feature importance for MLflow logging below
+                fi_result = diagnostics_data.get("get_feature_importance", {})
                 if fi_result.get("features"):
                     feature_importance = fi_result["features"]
             except Exception as e:
-                logger.warning(f"Could not generate feature importance: {e}")
+                logger.warning(f"Could not pre-compute diagnostics: {e}")
 
             # Get the predictor for hyperparameter extraction
             predictor = None
@@ -429,6 +434,7 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                 model_path=result["model_path"],
                 experiment_run_id=run_id,
                 experiment_name=experiment_name,
+                diagnostics_data=diagnostics_data,
             )
 
             # Final progress update: complete

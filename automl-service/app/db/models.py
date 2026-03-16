@@ -85,6 +85,7 @@ class Job(Base):
     metrics: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     leaderboard: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     model_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    diagnostics_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     # Experiment tracking
     experiment_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

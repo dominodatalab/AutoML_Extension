@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.prediction_service import get_prediction_service
 from app.core.model_diagnostics import get_model_diagnostics
 from app.core.domino_registry import get_domino_registry
+from app.db import crud
 from app.dependencies import get_db
 from app.api.utils import get_job_paths
 from app.api.error_handler import handle_errors
@@ -30,26 +31,21 @@ async def _run_diagnostics(
 ) -> Dict[str, Any]:
     """Shared helper that handles the common diagnostics flow.
 
-    1. Resolve job paths from the database
-    2. Apply any request-level overrides for model_type / data_path
-    3. Optionally enforce that a data_path is available
-    4. Delegate to the named method on ModelDiagnostics
-    5. Return the raw result dict
-
-    Args:
-        db: Async database session.
-        job_id: The training job ID to look up.
-        diagnostics_method: Name of the method to call on ModelDiagnostics
-            (e.g. "get_confusion_matrix").
-        model_type_override: Optional model_type from the request body.
-        data_path_override: Optional data_path from the request body.
-        require_data_path: If True, raise 400 when no data path is available.
-        extra_kwargs: Any additional keyword arguments forwarded to the
-            diagnostics method.
-
-    Returns:
-        The dict returned by the diagnostics method.
+    First checks the job's pre-computed ``diagnostics_data`` (populated during
+    training while the model was on disk inside the Domino Job).  Falls back to
+    loading the model from disk only when stored diagnostics are unavailable.
     """
+    # Try pre-computed diagnostics first
+    job = await crud.get_job(db, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+
+    stored = getattr(job, "diagnostics_data", None) or {}
+    if diagnostics_method in stored:
+        logger.debug("Serving %s for job %s from stored diagnostics", diagnostics_method, job_id)
+        return stored[diagnostics_method]
+
+    # Fall back to live computation (model must be on disk)
     model_path, model_type, file_path, _ = await get_job_paths(db, job_id)
 
     actual_model_type = model_type_override or model_type

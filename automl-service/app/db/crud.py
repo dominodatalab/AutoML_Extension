@@ -208,6 +208,7 @@ async def update_job_results(
     model_path: str,
     experiment_run_id: Optional[str] = None,
     experiment_name: Optional[str] = None,
+    diagnostics_data: Optional[dict] = None,
 ) -> Optional[Job]:
     """Update job with training results."""
     update_data = {
@@ -225,6 +226,9 @@ async def update_job_results(
 
     if experiment_name:
         update_data["experiment_name"] = experiment_name
+
+    if diagnostics_data is not None:
+        update_data["diagnostics_data"] = diagnostics_data
 
     await db.execute(
         update(Job).where(Job.id == job_id).values(**update_data)

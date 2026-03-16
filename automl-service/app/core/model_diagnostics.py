@@ -636,6 +636,59 @@ class ModelDiagnostics:
         return result
 
 
+    def compute_all_diagnostics(
+        self,
+        model_path: str,
+        model_type: str,
+        data_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Compute all diagnostics at once and return a dict keyed by method name.
+
+        Called during training (in the Domino Job) while the model and data are
+        on the local filesystem.  The returned dict is stored in the DB so the
+        App can serve diagnostics without needing the model files.
+        """
+        stored: Dict[str, Any] = {}
+
+        # --- leaderboard ---
+        stored["get_leaderboard"] = self.get_leaderboard(model_path, model_type)
+
+        # --- feature importance ---
+        stored["get_feature_importance"] = self.get_feature_importance(
+            model_path, model_type, data_path=data_path
+        )
+
+        # --- learning curves ---
+        stored["get_learning_curves"] = self.get_learning_curves(model_path, model_type)
+
+        if not data_path or not os.path.exists(data_path):
+            return stored
+
+        # Diagnostics that require the data file:
+
+        # --- confusion matrix (classification only) ---
+        cm = self.get_confusion_matrix(model_path, model_type, data_path)
+        if not cm.get("error"):
+            stored["get_confusion_matrix"] = cm
+
+        # --- ROC curve (binary classification only) ---
+        roc = self.get_roc_curve(model_path, model_type, data_path)
+        if not roc.get("error"):
+            stored["get_roc_curve"] = roc
+
+        # --- precision-recall curve (binary classification only) ---
+        pr = self.get_precision_recall_curve(model_path, model_type, data_path)
+        if not pr.get("error"):
+            stored["get_precision_recall_curve"] = pr
+
+        # --- regression diagnostics ---
+        reg = self.get_regression_diagnostics(model_path, model_type, data_path)
+        if not reg.get("error"):
+            stored["get_regression_diagnostics"] = reg
+
+        return stored
+
+
 @lru_cache()
 def get_model_diagnostics() -> ModelDiagnostics:
     """Get the model diagnostics singleton (cached)."""
