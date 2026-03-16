@@ -165,12 +165,23 @@ def resolve_domino_nucleus_host() -> Optional[str]:
     ) or None
 
 
+def _get_api_key() -> Optional[str]:
+    """Return the Domino API key from environment or settings."""
+    key = (
+        os.environ.get("DOMINO_API_KEY")
+        or os.environ.get("DOMINO_USER_API_KEY")
+        or get_settings().effective_api_key
+    )
+    return key or None
+
+
 async def domino_download(
     path: str,
     dest_path: str,
     *,
     timeout: float = 300.0,
     base_url: Optional[str] = None,
+    use_api_key: bool = False,
 ) -> None:
     """Stream a file from the Domino API to a local path.
 
@@ -180,10 +191,22 @@ async def domino_download(
 
     An explicit *base_url* can be passed to bypass the default proxy-first
     resolution (useful when the proxy does not support the endpoint).
+
+    When *use_api_key* is True, the request uses ``X-Domino-Api-Key``
+    header instead of the normal Bearer-token-first auth chain.  The v4
+    datasetrw endpoints require this auth method.
     """
     base_url = (base_url or resolve_domino_api_host()).rstrip("/")
     url = f"{base_url}{path}"
-    auth_headers = await get_domino_auth_headers()
+
+    if use_api_key:
+        api_key = _get_api_key()
+        if api_key:
+            auth_headers = {"X-Domino-Api-Key": api_key}
+        else:
+            auth_headers = await get_domino_auth_headers()
+    else:
+        auth_headers = await get_domino_auth_headers()
 
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
 

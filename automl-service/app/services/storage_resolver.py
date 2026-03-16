@@ -211,28 +211,42 @@ class ProjectStorageResolver:
         """Download a single file from a dataset to *dest_path*.
 
         Tries snapshot-based and direct download endpoints in order.
+        The v4 raw endpoint with API key auth is tried first as it is the
+        most reliable for cross-project dataset downloads.
         Returns *dest_path* on success, raises on failure.
         """
         snapshot_id = await self._get_latest_snapshot_id(dataset_id)
         rw_snapshot_id = await self.get_rw_snapshot_id(dataset_id)
 
-        endpoints: list[str] = []
-        # Prefer the RW snapshot raw download endpoint (most reliable)
+        from urllib.parse import quote
+
+        # Each entry is (endpoint_path, use_api_key).
+        # The v4 raw endpoint requires X-Domino-Api-Key auth.
+        endpoints: list[tuple[str, bool]] = []
+
         if rw_snapshot_id:
-            from urllib.parse import quote
             encoded_path = quote(file_path, safe="")
-            endpoints.append(
+            # v4 endpoint — correct path, requires API key auth
+            endpoints.append((
+                f"/v4/datasetrw/snapshot/{rw_snapshot_id}/file/raw"
+                f"?path={encoded_path}&download=true",
+                True,
+            ))
+            # Legacy /api endpoint as fallback (Bearer token auth)
+            endpoints.append((
                 f"/api/datasetrw/snapshot/{rw_snapshot_id}/file/raw"
-                f"?path={encoded_path}&download=true"
-            )
+                f"?path={encoded_path}&download=true",
+                False,
+            ))
         if snapshot_id:
-            endpoints.append(
+            endpoints.append((
                 f"/api/datasetrw/v1/datasets/{dataset_id}"
-                f"/snapshots/{snapshot_id}/files/{file_path}"
-            )
+                f"/snapshots/{snapshot_id}/files/{file_path}",
+                False,
+            ))
         endpoints.extend([
-            f"/api/datasetrw/v1/datasets/{dataset_id}/files/{file_path}",
-            f"/v4/datasetrw/datasets/{dataset_id}/files/{file_path}",
+            (f"/api/datasetrw/v1/datasets/{dataset_id}/files/{file_path}", False),
+            (f"/v4/datasetrw/datasets/{dataset_id}/files/{file_path}", False),
         ])
 
         # Try each endpoint via the default host (proxy), then fall back
@@ -245,13 +259,16 @@ class ProjectStorageResolver:
 
         last_error: Optional[Exception] = None
         for base_url in base_urls:
-            for endpoint in endpoints:
+            for endpoint, use_api_key in endpoints:
                 try:
-                    await domino_download(endpoint, dest_path, base_url=base_url)
+                    await domino_download(
+                        endpoint, dest_path,
+                        base_url=base_url, use_api_key=use_api_key,
+                    )
                     logger.info(
-                        "Downloaded '%s' from dataset %s via %s (host=%s)",
+                        "Downloaded '%s' from dataset %s via %s (host=%s, api_key=%s)",
                         file_path, dataset_id, endpoint,
-                        base_url or "default",
+                        base_url or "default", use_api_key,
                     )
                     return dest_path
                 except Exception as exc:
@@ -509,43 +526,10 @@ class ProjectStorageResolver:
                     dataset_id, snapshot_id, remote_child, local_child
                 )
             else:
-                # Prefer the direct URL from the file listing (works through
-                # the proxy for cross-project datasets) over constructing
-                # download endpoints that the proxy may not route.
-                url = entry.get("url")
-                if url:
-                    await self._download_via_url(url, local_child)
-                else:
-                    await self.download_file(dataset_id, remote_child, local_child)
-
-    async def _download_via_url(self, url: str, dest_path: str) -> None:
-        """Download a file using a direct URL from the file-listing response."""
-        import httpx
-
-        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-        auth_headers = await self._get_auth_headers()
-
-        # The URL may be absolute or relative to the API host.
-        if url.startswith("/"):
-            base = resolve_domino_api_host()
-            full_url = f"{base}{url}"
-        else:
-            full_url = url
-
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            async with client.stream("GET", full_url, headers=auth_headers) as resp:
-                resp.raise_for_status()
-                with open(dest_path, "wb") as f:
-                    async for chunk in resp.aiter_bytes(chunk_size=8192):
-                        f.write(chunk)
-
-        logger.info("Downloaded %s via listing URL", dest_path)
-
-    @staticmethod
-    async def _get_auth_headers() -> dict:
-        """Get auth headers for direct URL downloads."""
-        from app.core.domino_http import get_domino_auth_headers
-        return await get_domino_auth_headers()
+                # Always use download_file which tries the v4 raw endpoint
+                # with API key auth first — the listing URL field is just a
+                # relative path and not useful for direct downloads.
+                await self.download_file(dataset_id, remote_child, local_child)
 
     async def delete_snapshot_files(
         self,
