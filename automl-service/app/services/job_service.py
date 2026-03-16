@@ -218,7 +218,7 @@ def build_job_model(
     project_owner: Optional[str] = None,
 ) -> Job:
     """Build a Job ORM model from request and resolved context."""
-    execution_target = resolve_execution_target(job_request)
+    execution_target = "domino_job"
 
     return Job(
         name=job_name,
@@ -259,9 +259,7 @@ async def _count_active_domino_jobs(db: AsyncSession) -> int:
 
 def resolve_execution_target(job_request: JobCreateRequest) -> str:
     """Resolve training execution target, supporting legacy and explicit flags."""
-    if job_request.execution_target == "domino_job" or job_request.run_as_domino_job:
-        return "domino_job"
-    return "local"
+    return "domino_job"
 
 
 async def create_job_with_context(

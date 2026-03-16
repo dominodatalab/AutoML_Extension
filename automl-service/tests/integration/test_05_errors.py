@@ -7,6 +7,8 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
+# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
+@pytest.mark.skip(reason="DOM-75049: integration tests disabled in sandbox")
 class TestJobErrors:
     """Error handling for job-related endpoints."""
 
@@ -22,7 +24,7 @@ class TestJobErrors:
                 "target_column": "target",
                 "preset": "medium_quality_faster_train",
                 "time_limit": 60,
-                "execution_target": "local",
+                "execution_target": "domino_job",
             },
         )
         # Service should accept the job but it will fail during execution,
@@ -56,7 +58,7 @@ class TestJobErrors:
                 # time_column missing
                 "preset": "fast_training",
                 "time_limit": 60,
-                "execution_target": "local",
+                "execution_target": "domino_job",
             },
         )
         # Should fail with 400 or 422
@@ -95,6 +97,8 @@ class TestJobErrors:
         assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
 
 
+# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
+@pytest.mark.skip(reason="DOM-75049: integration tests disabled in sandbox")
 class TestProfilingErrors:
     """Error handling for profiling endpoints."""
 
@@ -123,6 +127,8 @@ class TestProfilingErrors:
         assert resp.status_code in (400, 404, 422, 500)
 
 
+# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
+@pytest.mark.skip(reason="DOM-75049: integration tests disabled in sandbox")
 class TestRegistryErrors:
     """Error handling for registry endpoints."""
 

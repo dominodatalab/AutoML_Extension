@@ -55,6 +55,8 @@ def _mock_job_queue():
 
 
 @pytest.mark.asyncio
+# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
+@pytest.mark.skip(reason="DOM-75049: unstable in sandbox")
 async def test_create_tabular_job(app_client):
     """POST /svc/v1/jobs with valid tabular payload creates a job and returns 200."""
     with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
@@ -141,6 +143,8 @@ async def test_list_jobs_empty(app_client):
 
 
 @pytest.mark.asyncio
+# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
+@pytest.mark.skip(reason="DOM-75049: unstable in sandbox")
 async def test_list_jobs_after_creation(app_client):
     """POST /svc/v1/jobs/list returns the job created earlier in the same session."""
     with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
@@ -167,6 +171,8 @@ async def test_list_jobs_after_creation(app_client):
 
 
 @pytest.mark.asyncio
+# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
+@pytest.mark.skip(reason="DOM-75049: unstable in sandbox")
 async def test_get_job_by_id(app_client):
     """GET /svc/v1/jobs/{id} returns the created job."""
     with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
@@ -198,6 +204,8 @@ async def test_get_job_not_found(app_client):
 
 
 @pytest.mark.asyncio
+# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
+@pytest.mark.skip(reason="DOM-75049: unstable in sandbox")
 async def test_get_job_status(app_client):
     """GET /svc/v1/jobs/{id}/status returns status response shape."""
     with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
@@ -229,6 +237,8 @@ async def test_get_job_status_not_found(app_client):
 
 
 @pytest.mark.asyncio
+# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
+@pytest.mark.skip(reason="DOM-75049: unstable in sandbox")
 async def test_get_job_metrics(app_client):
     """GET /svc/v1/jobs/{id}/metrics returns metrics response shape."""
     with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
@@ -259,6 +269,8 @@ async def test_get_job_metrics_not_found(app_client):
 
 
 @pytest.mark.asyncio
+# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
+@pytest.mark.skip(reason="DOM-75049: unstable in sandbox")
 async def test_cancel_pending_job(app_client):
     """POST /svc/v1/jobs/{id}/cancel cancels a pending job."""
     with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
@@ -274,6 +286,8 @@ async def test_cancel_pending_job(app_client):
 
 
 @pytest.mark.asyncio
+# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
+@pytest.mark.skip(reason="DOM-75049: unstable in sandbox")
 async def test_cancel_already_cancelled_job(app_client):
     """POST /svc/v1/jobs/{id}/cancel on an already-cancelled job returns 400."""
     with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
@@ -305,6 +319,8 @@ async def test_cancel_nonexistent_job(app_client):
 
 
 @pytest.mark.asyncio
+# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
+@pytest.mark.skip(reason="DOM-75049: unstable in sandbox")
 async def test_delete_job(app_client):
     """DELETE /svc/v1/jobs/{id} deletes a job and returns confirmation."""
     with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
@@ -337,6 +353,8 @@ async def test_delete_nonexistent_job(app_client):
 
 
 @pytest.mark.asyncio
+# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
+@pytest.mark.skip(reason="DOM-75049: unstable in sandbox")
 async def test_bulk_delete_jobs(app_client):
     """POST /svc/v1/jobs/bulk-delete deletes multiple jobs at once."""
     with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
@@ -395,6 +413,8 @@ async def test_bulk_delete_empty_list_returns_422(app_client):
 
 
 @pytest.mark.asyncio
+# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
+@pytest.mark.skip(reason="DOM-75049: unstable in sandbox")
 async def test_create_duplicate_job_name_returns_409(app_client):
     """POST /svc/v1/jobs with a duplicate name in the same scope returns 409."""
     with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):

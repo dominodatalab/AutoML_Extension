@@ -361,9 +361,9 @@ class JobCreateRequest(BaseModel):
     )
 
     # Execution target
-    execution_target: Literal["local", "domino_job"] = Field(
-        "local",
-        description="Where to run training: in-app local queue or external Domino Job",
+    execution_target: Literal["domino_job"] = Field(
+        "domino_job",
+        description="Specifies to run training as Domino Job",
     )
     run_as_domino_job: bool = Field(
         False,

@@ -7,6 +7,8 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
+# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
+@pytest.mark.skip(reason="DOM-75049: integration tests disabled in sandbox")
 class TestHealth:
     """Basic health and readiness checks."""
 

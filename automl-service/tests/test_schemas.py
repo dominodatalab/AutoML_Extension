@@ -36,7 +36,7 @@ class TestJobCreateRequest:
         assert req.target_column == "target"
         assert req.preset == "medium_quality_faster_train"  # default
         assert req.time_limit == 3600  # default
-        assert req.execution_target == "local"  # default
+        assert req.execution_target == "domino_job"  # default
         assert req.auto_register is False
 
     def test_valid_tabular_full(self):

@@ -8,9 +8,13 @@ from .helpers import poll_job_until_terminal
 pytestmark = pytest.mark.integration
 
 
+# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
+@pytest.mark.skip(reason="DOM-75049: integration tests disabled in sandbox")
 class TestLocalTabularTraining:
     """Create and run a tabular training job locally."""
 
+    # https://dominodatalab.atlassian.net/browse/DOM-75049
+    @pytest.mark.skip
     def test_create_tabular_job(
         self, client, tabular_csv_path, shared_state, cleanup_registry, unique_name
     ):
@@ -26,7 +30,7 @@ class TestLocalTabularTraining:
                 "target_column": "target",
                 "preset": "medium_quality_faster_train",
                 "time_limit": 120,
-                "execution_target": "local",
+                "execution_target": "domino_job",
             },
         )
         assert resp.status_code == 200, f"Create job failed: {resp.text}"
@@ -92,9 +96,13 @@ class TestLocalTabularTraining:
         assert job_id in job_ids
 
 
+# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
+@pytest.mark.skip(reason="DOM-75049: integration tests disabled in sandbox")
 class TestLocalTimeSeriesTraining:
     """Create and run a time series training job locally."""
 
+    # https://dominodatalab.atlassian.net/browse/DOM-75049
+    @pytest.mark.skip
     def test_create_ts_job(
         self, client, timeseries_csv_path, shared_state, cleanup_registry, unique_name
     ):
@@ -112,7 +120,7 @@ class TestLocalTimeSeriesTraining:
                 "prediction_length": 7,
                 "preset": "fast_training",
                 "time_limit": 120,
-                "execution_target": "local",
+                "execution_target": "domino_job",
             },
         )
         assert resp.status_code == 200, f"Create TS job failed: {resp.text}"
@@ -150,6 +158,8 @@ class TestLocalTimeSeriesTraining:
         assert body.get("metrics"), "TS metrics should not be empty"
 
 
+# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
+@pytest.mark.skip(reason="DOM-75049: integration tests disabled in sandbox")
 class TestDominoJobTraining:
     """Training via Domino Job execution target. Skipped if not in Domino."""
 

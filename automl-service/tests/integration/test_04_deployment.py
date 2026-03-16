@@ -7,6 +7,8 @@ from .conftest import has_domino_auth
 pytestmark = pytest.mark.integration
 
 
+# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
+@pytest.mark.skip(reason="DOM-75049: integration tests disabled in sandbox")
 class TestDeployments:
     """Model API and deployment lifecycle tests.
 

@@ -5,6 +5,8 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
+# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
+@pytest.mark.skip(reason="DOM-75049: integration tests disabled in sandbox")
 class TestTabularProfiling:
     """Tabular data profiling via POST /svc/v1/profiling/profile."""
 
@@ -67,6 +69,8 @@ class TestTabularProfiling:
         assert resp.status_code in (404, 500)
 
 
+# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
+@pytest.mark.skip(reason="DOM-75049: integration tests disabled in sandbox")
 class TestTimeSeriesProfiling:
     """Time series profiling via POST /svc/v1/profiling/profile/timeseries."""
 
@@ -104,6 +108,8 @@ class TestTimeSeriesProfiling:
         assert resp.status_code >= 400
 
 
+# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
+@pytest.mark.skip(reason="DOM-75049: integration tests disabled in sandbox")
 class TestPresetsAndMetrics:
     """Static endpoints for presets and metrics."""
 

@@ -1,7 +1,7 @@
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 export type ModelType = 'tabular' | 'timeseries'
 export type ProblemType = 'binary' | 'multiclass' | 'regression' | 'quantile'
-export type ExecutionTarget = 'local' | 'domino_job'
+export type ExecutionTarget = 'domino_job'
 export type Preset =
   | 'best_quality'
   | 'high_quality'

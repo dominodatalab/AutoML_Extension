@@ -478,7 +478,7 @@ def make_job():
         file_path: str = "/tmp/test.csv",
         owner: str = "test-user",
         project_name: str = "test-project",
-        execution_target: str = "local",
+        execution_target: str = "domino_job",
         preset: str = "medium_quality_faster_train",
         time_limit: int = 60,
         **kwargs,
