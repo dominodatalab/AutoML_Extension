@@ -236,7 +236,7 @@ function JobDetail() {
           projectName={job.project_name}
           modelType={job.model_type}
           onClose={() => setShowDockerExportDialog(false)}
-          onSuccess={() => setShowDockerExportDialog(false)}
+          onSuccess={() => {}}
         />
       )}
 
