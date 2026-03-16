@@ -82,6 +82,9 @@ async def _ensure_local_model(
     resolver = get_storage_resolver()
     info = await resolver.get_dataset_info(project_id)
     if not info:
+        # Cache is empty after app restart — do a full API lookup
+        info = await resolver.ensure_dataset_exists(project_id)
+    if not info:
         raise HTTPException(
             status_code=400,
             detail=f"Model artifacts not found at: {model_path}",

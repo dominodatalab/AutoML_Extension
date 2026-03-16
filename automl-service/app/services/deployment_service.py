@@ -56,17 +56,29 @@ async def _model_exists_in_dataset(
 
     try:
         resolver = get_storage_resolver()
+        # Use get_dataset_info first (cached), fall back to full resolve
         info = await resolver.get_dataset_info(project_id)
         if not info:
+            # Cache is empty after restart — do a full API lookup
+            try:
+                info = await resolver.ensure_dataset_exists(project_id)
+            except Exception:
+                pass
+        if not info:
+            logger.debug("No dataset info found for project %s", project_id)
             return False
         rw_id = await resolver.get_rw_snapshot_id(info.dataset_id)
         if not rw_id:
+            logger.debug("No RW snapshot for dataset %s", info.dataset_id)
             return False
         files = await resolver.list_snapshot_files(rw_id, path=relative)
-        # Any non-empty listing means the directory exists in the dataset.
+        logger.debug(
+            "Dataset file listing for '%s' in project %s: %d entries",
+            relative, project_id, len(files),
+        )
         return len(files) > 0
     except Exception:
-        logger.debug(
+        logger.warning(
             "Could not verify model path in dataset for project %s",
             project_id,
             exc_info=True,
@@ -143,8 +155,9 @@ async def deploy_from_job(
         raise HTTPException(status_code=400, detail="Model path not found for this job")
     if not os.path.isdir(model_path):
         # The App may not have the target project's dataset mounted.
-        # Verify the model exists in the dataset via the API before rejecting.
-        if not await _model_exists_in_dataset(job.project_id, model_path):
+        # Verify the model exists in the dataset via the API — use the
+        # original stored path (not the remapped one) for prefix matching.
+        if not await _model_exists_in_dataset(job.project_id, job.model_path):
             raise HTTPException(
                 status_code=400,
                 detail=f"Model directory not found: {model_path}",
