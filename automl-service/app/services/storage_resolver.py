@@ -495,7 +495,14 @@ class ProjectStorageResolver:
         remote_path: str,
         local_dir: str,
     ) -> None:
-        """Recursively list and download files from a snapshot directory."""
+        """Recursively list and download files from a snapshot directory.
+
+        Uses the already-resolved *snapshot_id* (the RW snapshot) to
+        download each file directly via the v4 raw endpoint, avoiding
+        the per-file ``get_rw_snapshot_id`` resolution overhead.
+        """
+        from urllib.parse import quote
+
         os.makedirs(local_dir, exist_ok=True)
         entries = await self.list_snapshot_files(snapshot_id, path=remote_path)
 
@@ -526,10 +533,30 @@ class ProjectStorageResolver:
                     dataset_id, snapshot_id, remote_child, local_child
                 )
             else:
-                # Always use download_file which tries the v4 raw endpoint
-                # with API key auth first — the listing URL field is just a
-                # relative path and not useful for direct downloads.
-                await self.download_file(dataset_id, remote_child, local_child)
+                # Download directly via the v4 raw endpoint using the
+                # already-known snapshot_id — no per-file API resolution.
+                encoded = quote(remote_child, safe="")
+                endpoint = (
+                    f"/v4/datasetrw/snapshot/{snapshot_id}/file/raw"
+                    f"?path={encoded}&download=true"
+                )
+                try:
+                    await domino_download(
+                        endpoint, local_child, use_api_key=True,
+                    )
+                    logger.debug(
+                        "Downloaded '%s' via v4 raw endpoint", remote_child,
+                    )
+                except Exception:
+                    # Fall back to the full download_file with endpoint
+                    # cascade (handles edge cases like missing snapshots).
+                    logger.debug(
+                        "v4 raw download failed for '%s', falling back",
+                        remote_child, exc_info=True,
+                    )
+                    await self.download_file(
+                        dataset_id, remote_child, local_child
+                    )
 
     async def delete_snapshot_files(
         self,
