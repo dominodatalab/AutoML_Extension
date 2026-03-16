@@ -306,7 +306,7 @@ class ProjectStorageResolver:
                 exc_info=True,
             )
 
-        # Fallback: list snapshots and find the RW one
+        # Fallback 1: non-versioned snapshots endpoint
         try:
             resp = await domino_request(
                 "GET",
@@ -316,7 +316,10 @@ class ProjectStorageResolver:
             if isinstance(snapshots, list):
                 for snap in snapshots:
                     if snap.get("isReadWrite"):
-                        return str(snap.get("id", ""))
+                        rw_sid = str(snap.get("id", ""))
+                        if rw_sid:
+                            self._backfill_rw_cache(dataset_id, rw_sid)
+                            return rw_sid
         except Exception:
             logger.debug(
                 "Failed to list snapshots for dataset %s",
@@ -324,6 +327,64 @@ class ProjectStorageResolver:
                 exc_info=True,
             )
 
+        # Fallback 2: v1 snapshots endpoint (works through Domino proxy)
+        try:
+            resp = await domino_request(
+                "GET",
+                f"/api/datasetrw/v1/datasets/{dataset_id}/snapshots",
+            )
+            data = resp.json()
+            snapshots = data.get("snapshots") or []
+            for s in snapshots:
+                if "snapshot" in s and isinstance(s["snapshot"], dict):
+                    s = s["snapshot"]
+                if s.get("isReadWrite") or s.get("status") == "active":
+                    rw_sid = str(s.get("id") or s.get("snapshotId") or "")
+                    if rw_sid:
+                        self._backfill_rw_cache(dataset_id, rw_sid)
+                        return rw_sid
+        except Exception:
+            logger.debug(
+                "Failed to list v1 snapshots for dataset %s",
+                dataset_id,
+                exc_info=True,
+            )
+
+        return None
+
+    def _backfill_rw_cache(self, dataset_id: str, rw_sid: str) -> None:
+        """Store a discovered RW snapshot ID in the cache."""
+        for info in self._cache.values():
+            if info.dataset_id == dataset_id:
+                info.rw_snapshot_id = rw_sid
+                return
+
+    async def _resolve_rw_snapshot_v1(self, dataset_id: str) -> Optional[str]:
+        """Try the v1 snapshots endpoint to find the RW snapshot ID."""
+        try:
+            resp = await domino_request(
+                "GET",
+                f"/api/datasetrw/v1/datasets/{dataset_id}/snapshots",
+            )
+            data = resp.json()
+            snapshots = data.get("snapshots") or []
+            for s in snapshots:
+                if "snapshot" in s and isinstance(s["snapshot"], dict):
+                    s = s["snapshot"]
+                if s.get("isReadWrite") or s.get("status") == "active":
+                    rw_sid = str(s.get("id") or s.get("snapshotId") or "")
+                    if rw_sid:
+                        logger.debug(
+                            "Resolved RW snapshot %s for dataset %s via v1 API",
+                            rw_sid, dataset_id,
+                        )
+                        return rw_sid
+        except Exception:
+            logger.debug(
+                "Failed to resolve RW snapshot via v1 for dataset %s",
+                dataset_id,
+                exc_info=True,
+            )
         return None
 
     async def list_snapshot_files(
@@ -639,6 +700,14 @@ class ProjectStorageResolver:
                 ds_id = str(ds.get("datasetId") or ds.get("id") or "")
                 rw_sid = ds.get("readWriteSnapshotId") or None
                 mount = self._probe_mount(name)
+                logger.debug(
+                    "Found dataset '%s' (id=%s) rw_snapshot=%s mount=%s",
+                    name, ds_id, rw_sid, mount,
+                )
+                # If the v2 listing didn't include the RW snapshot ID,
+                # resolve it eagerly via the v1 snapshots endpoint.
+                if not rw_sid and ds_id:
+                    rw_sid = await self._resolve_rw_snapshot_v1(ds_id)
                 info = DatasetInfo(
                     dataset_id=ds_id,
                     name=name,
