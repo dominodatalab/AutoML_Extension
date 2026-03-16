@@ -41,12 +41,15 @@ router = APIRouter()
 _VERIFY_BACKOFF = [1, 2, 3, 4, 5]  # ~15s total — keep short to avoid proxy timeouts
 
 
-async def _verify_snapshot_active(resolver, dataset_id: str) -> bool:
+async def _verify_snapshot_active(
+    resolver,
+    dataset_id: str,
+    file_path: Optional[str] = None,
+) -> bool:
     """Poll dataset snapshot status until it becomes ``active`` (or timeout).
 
-    The Domino Dataset RW API does not expose a file-listing endpoint.
-    Instead we check the latest snapshot's ``status`` field — ``active``
-    means the upload commit is complete and files are available on the mount.
+    When *file_path* is provided, additionally verifies the file is visible
+    in the snapshot via the file-listing API after the snapshot becomes active.
     """
     import asyncio
 
@@ -56,6 +59,25 @@ async def _verify_snapshot_active(resolver, dataset_id: str) -> bool:
             status = await resolver.get_latest_snapshot_status(dataset_id)
             if status == "active":
                 logger.info("Snapshot active for dataset %s", dataset_id)
+                # Optionally verify the specific file exists
+                if file_path:
+                    rw_sid = await resolver.get_rw_snapshot_id(dataset_id)
+                    if rw_sid:
+                        dir_path = "/".join(file_path.split("/")[:-1])
+                        base_name = file_path.split("/")[-1]
+                        entries = await resolver.list_snapshot_files(
+                            rw_sid, path=dir_path,
+                        )
+                        if any(
+                            e.get("fileName") == base_name for e in entries
+                        ):
+                            return True
+                        logger.debug(
+                            "File '%s' not yet visible in snapshot %s",
+                            file_path,
+                            rw_sid,
+                        )
+                        continue  # keep polling
                 return True
             logger.debug("Snapshot status for %s: %s", dataset_id, status)
         except Exception:
@@ -87,13 +109,10 @@ async def list_datasets(
 @router.get("/verify-snapshot")
 async def verify_snapshot(
     dataset_id: str = Query(..., description="Dataset ID to check"),
-    file_path: str = Query("", description="Expected file path (unused, kept for compat)"),
+    file_path: str = Query("", description="Relative file path to verify in the snapshot"),
 ):
-    """Check whether the dataset's latest snapshot is active.
-
-    The Domino Dataset RW API has no file-listing endpoint, so we check
-    the snapshot status instead.  ``active`` means the upload has been
-    committed and files are available on the dataset mount.
+    """Check whether the dataset's latest snapshot is active and optionally
+    verify that a specific file is present in the snapshot.
     """
     from app.services.storage_resolver import get_storage_resolver
 
@@ -104,11 +123,33 @@ async def verify_snapshot(
         raise HTTPException(status_code=502, detail=f"Failed to check snapshot: {exc}") from exc
 
     verified = status == "active"
+    file_exists: Optional[bool] = None
+
+    # If snapshot is active and a file_path was requested, verify via listing
+    if verified and file_path:
+        try:
+            rw_sid = await resolver.get_rw_snapshot_id(dataset_id)
+            if rw_sid:
+                dir_path = "/".join(file_path.split("/")[:-1])
+                base_name = file_path.split("/")[-1]
+                entries = await resolver.list_snapshot_files(rw_sid, path=dir_path)
+                file_exists = any(e.get("fileName") == base_name for e in entries)
+                # Only mark as fully verified if the file is confirmed present
+                verified = file_exists
+        except Exception:
+            logger.debug(
+                "File verification failed for %s in dataset %s",
+                file_path,
+                dataset_id,
+                exc_info=True,
+            )
+
     return {
         "verified": verified,
         "dataset_id": dataset_id,
         "file_path": file_path,
         "snapshot_status": status,
+        "file_exists": file_exists,
     }
 
 
@@ -297,9 +338,9 @@ async def upload_file(
         except Exception:
             logger.warning("Failed to cache upload locally", exc_info=True)
 
-        # Verify the snapshot is active (upload committed) before returning
+        # Verify the snapshot is active and the file is visible
         snapshot_verified = await _verify_snapshot_active(
-            resolver, dataset_info.dataset_id
+            resolver, dataset_info.dataset_id, file_path=dataset_path,
         )
 
         return FileUploadResponse(

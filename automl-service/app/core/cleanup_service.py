@@ -53,15 +53,21 @@ class CleanupService:
         if (
             job.data_source == "upload"
             and job.file_path
-            and os.path.exists(job.file_path)
         ):
             try:
                 ref_count = await crud.count_jobs_with_file_path(db, job.file_path)
                 # ref_count includes the current job (not yet deleted from DB)
                 if ref_count <= 1:
-                    os.remove(job.file_path)
-                    upload_file_deleted = True
-                    logger.info(f"Deleted upload file {job.file_path}")
+                    # Delete from local filesystem if present
+                    if os.path.exists(job.file_path):
+                        os.remove(job.file_path)
+                        upload_file_deleted = True
+                        logger.info(f"Deleted upload file {job.file_path}")
+
+                    # Also delete from the Domino dataset snapshot (best-effort)
+                    await self._delete_file_from_dataset(job, errors)
+                    if not upload_file_deleted:
+                        upload_file_deleted = True
                 else:
                     logger.info(
                         f"Skipped upload file {job.file_path} — "
@@ -209,6 +215,51 @@ class CleanupService:
             "total_logs_deleted": total_logs,
             "errors": all_errors,
         }
+
+    async def _delete_file_from_dataset(self, job: Job, errors: list) -> None:
+        """Best-effort deletion of an uploaded file from the Domino dataset snapshot."""
+        try:
+            from app.services.storage_resolver import get_storage_resolver, DATASET_NAME
+
+            dataset_id = getattr(job, "dataset_id", None)
+            file_path = job.file_path or ""
+
+            if not dataset_id or not file_path:
+                return
+
+            # Derive the relative path within the dataset.
+            # Mount paths end with /{dataset_name}/, so split on that.
+            marker = f"/{DATASET_NAME}/"
+            if marker in file_path:
+                relative_path = file_path.split(marker, 1)[1]
+            else:
+                # Fallback: use just the uploads/... portion
+                parts = file_path.split("/uploads/", 1)
+                if len(parts) == 2:
+                    relative_path = f"uploads/{parts[1]}"
+                else:
+                    logger.debug(
+                        "Cannot derive relative dataset path from %s", file_path
+                    )
+                    return
+
+            resolver = get_storage_resolver()
+            rw_sid = await resolver.get_rw_snapshot_id(dataset_id)
+            if not rw_sid:
+                logger.debug(
+                    "No RW snapshot ID for dataset %s, skipping dataset file deletion",
+                    dataset_id,
+                )
+                return
+
+            await resolver.delete_snapshot_files(rw_sid, [relative_path])
+        except Exception as e:
+            errors.append(f"dataset_file_delete: {e}")
+            logger.warning(
+                "Failed to delete file from dataset snapshot for job %s: %s",
+                job.id,
+                e,
+            )
 
     def _collect_artifact_roots(self) -> tuple[list[str], list[str]]:
         """Return (model_roots, upload_roots) including dataset mount paths."""

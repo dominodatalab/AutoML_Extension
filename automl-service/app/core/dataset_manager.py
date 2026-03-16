@@ -216,7 +216,7 @@ class DominoDatasetManager:
             ]
 
             for item in items:
-                ds = self._api_item_to_dataset_response(item)
+                ds = await self._api_item_to_dataset_response(item)
                 if ds is not None:
                     datasets.append(ds)
 
@@ -227,10 +227,12 @@ class DominoDatasetManager:
 
         return datasets
 
-    def _api_item_to_dataset_response(self, item: dict) -> Optional[DatasetResponse]:
+    async def _api_item_to_dataset_response(self, item: dict) -> Optional[DatasetResponse]:
         """Convert a Domino API dataset object into a DatasetResponse.
 
         Cross-references mounted filesystem paths to resolve real file entries.
+        Falls back to the snapshot file-listing API when the dataset is not
+        mounted locally.
         """
         dataset_id = item.get("datasetId") or item.get("id", "")
         dataset_name = item.get("datasetName") or item.get("name", "")
@@ -265,8 +267,14 @@ class DominoDatasetManager:
                     )
                     total_size += file_size
 
-        # If the dataset isn't mounted locally, still return it so the UI can
-        # show its name (files will be empty until it's mounted).
+        # If not mounted locally, try to list files via the snapshot API.
+        if not files:
+            rw_snapshot_id = item.get("readWriteSnapshotId")
+            if rw_snapshot_id:
+                files, total_size = await self._list_files_via_snapshot_api(
+                    rw_snapshot_id, dataset_name
+                )
+
         return DatasetResponse(
             id=dataset_id,
             name=dataset_name,
@@ -278,6 +286,54 @@ class DominoDatasetManager:
             file_count=len(files) if files else item.get("fileCount", 0),
             files=files,
         )
+
+    async def _list_files_via_snapshot_api(
+        self,
+        snapshot_id: str,
+        dataset_name: str,
+        path: str = "",
+    ) -> tuple[list[DatasetFileResponse], int]:
+        """List supported files from a snapshot via the Domino API.
+
+        Recursively descends into subdirectories. Returns ``(files, total_size)``.
+        """
+        from app.services.storage_resolver import get_storage_resolver
+
+        resolver = get_storage_resolver()
+        files: list[DatasetFileResponse] = []
+        total_size = 0
+
+        try:
+            entries = await resolver.list_snapshot_files(snapshot_id, path=path)
+        except Exception:
+            logger.debug(
+                "Snapshot file listing failed for %s at path '%s'",
+                snapshot_id,
+                path,
+                exc_info=True,
+            )
+            return files, total_size
+
+        for entry in entries:
+            file_name = entry.get("fileName", "")
+            is_dir = entry.get("isDirectory", False)
+            size = entry.get("sizeInBytes", 0) or 0
+
+            if is_dir:
+                subpath = f"{path}/{file_name}" if path else file_name
+                sub_files, sub_size = await self._list_files_via_snapshot_api(
+                    snapshot_id, dataset_name, path=subpath,
+                )
+                files.extend(sub_files)
+                total_size += sub_size
+            elif self._is_supported_file(file_name):
+                rel_path = f"{path}/{file_name}" if path else file_name
+                files.append(
+                    DatasetFileResponse(name=rel_path, path="", size=size)
+                )
+                total_size += size
+
+        return files, total_size
 
     def _is_reserved_mount_entry(self, item_name: str, item_path: str) -> bool:
         """Skip known non-dataset mount entries."""

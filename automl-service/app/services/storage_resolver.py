@@ -63,6 +63,7 @@ class DatasetInfo:
     name: str
     project_id: str
     mount_path: Optional[str] = None
+    rw_snapshot_id: Optional[str] = None
 
 
 @dataclass
@@ -208,8 +209,17 @@ class ProjectStorageResolver:
         Returns *dest_path* on success, raises on failure.
         """
         snapshot_id = await self._get_latest_snapshot_id(dataset_id)
+        rw_snapshot_id = await self.get_rw_snapshot_id(dataset_id)
 
         endpoints: list[str] = []
+        # Prefer the RW snapshot raw download endpoint (most reliable)
+        if rw_snapshot_id:
+            from urllib.parse import quote
+            encoded_path = quote(file_path, safe="")
+            endpoints.append(
+                f"/api/datasetrw/snapshot/{rw_snapshot_id}/file/raw"
+                f"?path={encoded_path}&download=true"
+            )
         if snapshot_id:
             endpoints.append(
                 f"/api/datasetrw/v1/datasets/{dataset_id}"
@@ -264,6 +274,133 @@ class ProjectStorageResolver:
         except Exception:
             logger.debug("Failed to get snapshot status for dataset %s", dataset_id, exc_info=True)
         return None
+
+    async def get_rw_snapshot_id(self, dataset_id: str) -> Optional[str]:
+        """Return the read-write (mutable head) snapshot ID for a dataset.
+
+        Checks the in-memory cache first, then calls the dataset details API.
+        """
+        # Check cache
+        for info in self._cache.values():
+            if info.dataset_id == dataset_id and info.rw_snapshot_id:
+                return info.rw_snapshot_id
+
+        try:
+            resp = await domino_request(
+                "GET",
+                f"/api/datasetrw/datasets/{dataset_id}",
+            )
+            data = resp.json()
+            rw_sid = data.get("readWriteSnapshotId")
+            if rw_sid:
+                # Backfill cache
+                for info in self._cache.values():
+                    if info.dataset_id == dataset_id:
+                        info.rw_snapshot_id = rw_sid
+                        break
+                return rw_sid
+        except Exception:
+            logger.debug(
+                "Failed to get RW snapshot ID for dataset %s",
+                dataset_id,
+                exc_info=True,
+            )
+
+        # Fallback: list snapshots and find the RW one
+        try:
+            resp = await domino_request(
+                "GET",
+                f"/api/datasetrw/snapshots/{dataset_id}",
+            )
+            snapshots = resp.json()
+            if isinstance(snapshots, list):
+                for snap in snapshots:
+                    if snap.get("isReadWrite"):
+                        return str(snap.get("id", ""))
+        except Exception:
+            logger.debug(
+                "Failed to list snapshots for dataset %s",
+                dataset_id,
+                exc_info=True,
+            )
+
+        return None
+
+    async def list_snapshot_files(
+        self,
+        snapshot_id: str,
+        path: str = "",
+    ) -> list[dict]:
+        """List files in a dataset snapshot via the v4 files API.
+
+        Returns a flat list of dicts with keys: ``fileName``, ``isDirectory``,
+        ``sizeInBytes``, ``lastModified``.
+        """
+        try:
+            resp = await domino_request(
+                "GET",
+                f"/v4/datasetrw/files/{snapshot_id}",
+                params={"path": path},
+            )
+            data = resp.json()
+            rows = data.get("rows", [])
+            # Flatten the nested structure
+            result: list[dict] = []
+            for row in rows:
+                name_info = row.get("name", {})
+                size_info = row.get("size", {})
+                result.append({
+                    "fileName": name_info.get("fileName") or name_info.get("label", ""),
+                    "isDirectory": name_info.get("isDirectory", False),
+                    "sizeInBytes": (
+                        size_info.get("sizeInBytes")
+                        or name_info.get("sizeInBytes")
+                        or 0
+                    ),
+                    "lastModified": row.get("lastModified"),
+                })
+            return result
+        except Exception:
+            logger.debug(
+                "Failed to list files for snapshot %s at path '%s'",
+                snapshot_id,
+                path,
+                exc_info=True,
+            )
+            return []
+
+    async def delete_snapshot_files(
+        self,
+        snapshot_id: str,
+        relative_paths: list[str],
+    ) -> bool:
+        """Delete files from a dataset snapshot (best-effort).
+
+        Returns True on success, False on failure.
+        """
+        if not relative_paths:
+            return True
+        try:
+            await domino_request(
+                "DELETE",
+                f"/api/datasetrw/snapshot/{snapshot_id}/files",
+                json={"relativePaths": relative_paths},
+            )
+            logger.info(
+                "Deleted %d file(s) from snapshot %s: %s",
+                len(relative_paths),
+                snapshot_id,
+                relative_paths,
+            )
+            return True
+        except Exception:
+            logger.warning(
+                "Failed to delete files from snapshot %s: %s",
+                snapshot_id,
+                relative_paths,
+                exc_info=True,
+            )
+            return False
 
     async def _get_latest_snapshot_id(self, dataset_id: str) -> Optional[str]:
         """Return the latest snapshot ID for a dataset, or None."""
@@ -453,12 +590,14 @@ class ProjectStorageResolver:
             name = ds.get("datasetName") or ds.get("name") or ""
             if name == DATASET_NAME:
                 ds_id = str(ds.get("datasetId") or ds.get("id") or "")
+                rw_sid = ds.get("readWriteSnapshotId") or None
                 mount = self._probe_mount(name)
                 info = DatasetInfo(
                     dataset_id=ds_id,
                     name=name,
                     project_id=project_id,
                     mount_path=mount,
+                    rw_snapshot_id=rw_sid,
                 )
                 return info
 
