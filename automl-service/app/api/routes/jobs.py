@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, HTTPException
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -113,7 +113,9 @@ async def bulk_cleanup(
 @router.post("/cleanup/orphans")
 async def delete_orphans(db: AsyncSession = Depends(get_db)):
     """Delete orphaned model dirs and upload files with no matching job."""
-    return await delete_orphans_service(db)
+    # For security, disallow direct orphan cleanup via public route.
+    # If enabled in the future, gate behind proper authorization.
+    raise HTTPException(status_code=403, detail="Forbidden: orphan cleanup is disabled")
 
 
 @router.post("/bulk-delete", response_model=BulkDeleteJobsResponse)
