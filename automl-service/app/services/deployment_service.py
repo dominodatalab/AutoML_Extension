@@ -13,10 +13,65 @@ from app.core.utils import remap_shared_path
 from app.db import crud
 from app.db.models import JobStatus
 from app.dependencies import get_db_session
+from app.services.storage_resolver import DATASET_NAME, get_storage_resolver
 
 logger = logging.getLogger(__name__)
 
 STATIC_MODEL_API_SOURCE_FILE = "automl-service/app/serving/model_api_entrypoint.py"
+
+# Known mount prefixes for Domino datasets — used to extract the relative
+# path within the dataset from an absolute filesystem path.
+_MOUNT_PREFIXES = [
+    "/mnt/data/",
+    "/mnt/imported/data/",
+    "/domino/datasets/",
+    "/domino/datasets/local/",
+]
+
+
+async def _model_exists_in_dataset(
+    project_id: Optional[str],
+    model_path: str,
+) -> bool:
+    """Check whether *model_path* exists inside the project's dataset.
+
+    Extracts the relative path (e.g. ``models/job_xxx``) from the absolute
+    mount path and lists files in the dataset snapshot via the Domino API.
+    Returns ``True`` if the directory is present, ``False`` otherwise.
+    """
+    if not project_id:
+        return False
+
+    # Derive the relative path within the dataset.
+    relative: Optional[str] = None
+    dataset_with_slash = DATASET_NAME + "/"
+    for prefix in _MOUNT_PREFIXES:
+        full_prefix = prefix + dataset_with_slash
+        if model_path.startswith(full_prefix):
+            relative = model_path[len(full_prefix):]
+            break
+
+    if relative is None:
+        return False
+
+    try:
+        resolver = get_storage_resolver()
+        info = await resolver.get_dataset_info(project_id)
+        if not info:
+            return False
+        rw_id = await resolver.get_rw_snapshot_id(info.dataset_id)
+        if not rw_id:
+            return False
+        files = await resolver.list_snapshot_files(rw_id, path=relative)
+        # Any non-empty listing means the directory exists in the dataset.
+        return len(files) > 0
+    except Exception:
+        logger.debug(
+            "Could not verify model path in dataset for project %s",
+            project_id,
+            exc_info=True,
+        )
+        return False
 
 
 def _is_valid_python_identifier(name: str) -> bool:
@@ -87,7 +142,21 @@ async def deploy_from_job(
     if not model_path:
         raise HTTPException(status_code=400, detail="Model path not found for this job")
     if not os.path.isdir(model_path):
-        raise HTTPException(status_code=400, detail=f"Model directory not found: {model_path}")
+        # The App may not have the target project's dataset mounted.
+        # Verify the model exists in the dataset via the API before rejecting.
+        if not await _model_exists_in_dataset(job.project_id, model_path):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model directory not found: {model_path}",
+            )
+        # The model lives in the dataset — the Model API container will have
+        # the mount, so use the original (un-remapped) path it was trained with.
+        model_path = job.model_path
+        logger.info(
+            "Model not locally mounted but verified in dataset for project %s; "
+            "proceeding with stored path %s",
+            job.project_id, model_path,
+        )
 
     resolved_function_name = (function_name or "predict").strip() or "predict"
     if not _is_valid_python_identifier(resolved_function_name):
