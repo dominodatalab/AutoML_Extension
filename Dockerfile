@@ -2,12 +2,15 @@
 # AutoGluon-powered environment for Tabular, TimeSeries, and Multimodal ML
 # Compatible with Domino Data Lab compute environments
 
-# FROM python:3.10-slim-bullseye
+#
+# Required Domino Environment Base Image: python:3.10-slim-bullseye
+#
 
 LABEL maintainer="Domino Data Lab"
 LABEL description="AutoGluon AutoML environment for Domino Data Lab"
 LABEL version="1.0.0"
 
+ARG EXTENSION_VERSION=main
 ARG DUSER=ubuntu
 ARG DGROUP=ubuntu
 ARG DEBIAN_FRONTEND=noninteractive
@@ -15,7 +18,6 @@ ARG DEBIAN_FRONTEND=noninteractive
 ENV DOMINO_USER=$DUSER
 ENV DOMINO_GROUP=$DGROUP
 ENV MLFLOW_VERSION=3.2.0
-ENV DOMINO_PYTHON_SDK_VERSION=2.0.0
 
 # Set Python environment variables
 ENV PYTHONUNBUFFERED=1 \
@@ -37,11 +39,12 @@ RUN apt-get update && \
         gcc \
     # Requirements for Domino executions
         curl \
+        procps \
     # Requirements for node installation
         ca-certificates \
     # For troubleshooting
         sqlite3 \
-    # Requirement for dominodatalab installation
+    # Requirement for extension FE deps installation
         git
 
 #
@@ -54,6 +57,27 @@ RUN if ! id 12574 >/dev/null 2>&1; then \
 
 RUN chown -R ${DOMINO_USER}:${DOMINO_GROUP} "/home/${DOMINO_USER}"
 
+WORKDIR /home/${DOMINO_USER}
+
+# TODO refactor the pip installations to also use this
+RUN git clone https://github.com/niole/AutoML_Extension.git --depth 1 --branch $EXTENSION_VERSION
+
+WORKDIR /home/${DOMINO_USER}/AutoML_Extension
+
+#
+# Install frontend dependencies
+#
+
+# Install nodejs 20
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+ && apt-get install -y nodejs
+
+# Install npm packages and build frontend
+RUN cd automl-ui && npm i && npm run build
+
+WORKDIR /
+
+#
 # Install backend/job dependencies
 #
 
@@ -70,7 +94,7 @@ RUN pip install mlflow==$MLFLOW_VERSION
 # ============================================
 # App dependencies
 # ============================================
-RUN pip install aiosqlite==0.22.1
+RUN pip install aiosqlite==0.22.1 aiofiles
 
 # ============================================
 # PyTorch Installation (CPU Version)
@@ -216,19 +240,6 @@ RUN pip install \
     "httpx>=0.27.0" \
     "feedparser>=6.0.10" \
     "pdfplumber>=0.10.0"
-
-# ============================================
-# Domino SDK, install last
-# ============================================
-RUN pip install "dominodatalab[agents] @ git+https://github.com/dominodatalab/python-domino.git@release-$DOMINO_PYTHON_SDK_VERSION"
-
-#
-# Install frontend dependencies
-#
-
-# Install nodejs 20
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
- && apt-get install -y nodejs
 
 # Cleanup after apt package installs
 RUN rm -rf /var/lib/apt/lists/*

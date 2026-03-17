@@ -7,7 +7,7 @@
 #   ./app.sh --backend    # Backend only (API server)
 #   ./app.sh --frontend   # Frontend only (Vite dev server for development)
 #   ./app.sh --dev        # Dev mode: backend + Vite dev server with HMR
-
+#   ./app.sh --prod       # Uses all pre-installed deps from environment
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -129,16 +129,19 @@ ensure_node() {
     export PATH="${NODE_DIR}/bin:$PATH"
 }
 
-install_lightweight_deps() {
-    pip install -q --no-deps aiosqlite aiofiles pydantic-settings python-multipart httpx 2>/dev/null || true
-}
-
 build_frontend() {
     echo "Building frontend..."
     cd "${SCRIPT_DIR}/automl-ui"
     echo "Node.js: $(node --version), npm: $(npm --version)"
-    npm install --silent
-    npm run build
+    if [ "$1" != "prod" ]
+    then
+        npm install --silent
+        npm run build
+    else
+        echo "Using frontend assets built in the Domino Environment. This should only run in Domino"
+        cp -r $HOME/AutoML_Extension/automl-ui/dist dist
+        cp -r $HOME/AutoML_Extension/automl-ui/node_modules node_modules
+    fi
 
     # Generate runtime config (empty API_URL = same origin)
     cat > dist/config.js << 'JSEOF'
@@ -158,7 +161,6 @@ start_backend() {
     fi
 
     cd "$service_dir"
-    install_lightweight_deps
 
     if [ "${RELOAD:-true}" = "true" ]; then
         echo "Starting backend (dev mode with reload) on port $port..."
@@ -179,7 +181,6 @@ start_backend_background() {
     fi
 
     cd "$service_dir"
-    install_lightweight_deps
 
     if [ "${RELOAD:-true}" = "true" ]; then
         uvicorn app.main:app --host 127.0.0.1 --port "$port" --reload --log-level warning &
@@ -253,6 +254,28 @@ case "$MODE" in
 
         trap "kill $BACKEND_PID 2>/dev/null; exit 0" SIGTERM SIGINT
         npm run dev -- --host 0.0.0.0 --port "$FRONTEND_PORT"
+        ;;
+
+    --prod)
+        print_header "Prod Mode"
+        ensure_dirs
+
+        # Build frontend
+        build_frontend "prod"
+
+        # Start backend serving both API and static files
+        export STATIC_DIR="${SCRIPT_DIR}/automl-ui/dist"
+        if [ -d "/mnt/code/automl-ui/dist" ]; then
+            export STATIC_DIR="/mnt/code/automl-ui/dist"
+        fi
+
+        echo ""
+        echo "Starting AutoML Studio on http://0.0.0.0:$PORT"
+        echo "  API:      /svc/v1/*"
+        echo "  Frontend: / (served from $STATIC_DIR)"
+        echo ""
+        export RELOAD="false"
+        start_backend "$PORT"
         ;;
 
     --all|*)
