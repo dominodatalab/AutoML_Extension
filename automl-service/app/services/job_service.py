@@ -22,6 +22,7 @@ from app.api.schemas.job import (
 )
 from app.config import get_settings
 from app.core.dataset_mounts import resolve_dataset_mount_paths
+from app.core.leaderboard_utils import normalize_leaderboard_payload, normalize_leaderboard_rows
 from app.db.models import Job, JobStatus, ModelType, ProblemType
 from app.db import crud
 from app.services.job_links import attach_external_links
@@ -1001,8 +1002,11 @@ async def reconcile_jobs_for_storage_cleanup(db: AsyncSession) -> dict:
 
 def normalize_job_leaderboard(job: Job) -> Job:
     """Normalize legacy leaderboard payloads for API compatibility."""
-    if job.leaderboard and isinstance(job.leaderboard, dict) and "models" in job.leaderboard:
-        job.leaderboard = job.leaderboard["models"]
+    normalized = normalize_leaderboard_payload(job.leaderboard)
+    if isinstance(normalized, dict) and "models" in normalized:
+        job.leaderboard = normalized["models"]
+    else:
+        job.leaderboard = normalized
     return job
 
 
@@ -1019,9 +1023,9 @@ def extract_metrics_leaderboard(job: Job) -> Optional[list[dict]]:
     if not job.leaderboard:
         return None
     if isinstance(job.leaderboard, dict):
-        return job.leaderboard.get("models", [])
+        return normalize_leaderboard_rows(job.leaderboard.get("models", []))
     if isinstance(job.leaderboard, list):
-        return job.leaderboard
+        return normalize_leaderboard_rows(job.leaderboard)
     return None
 
 

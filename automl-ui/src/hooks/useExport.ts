@@ -10,7 +10,8 @@ export interface LearningCurvesResponse {
   models?: Array<{
     model: string
     score_val: number
-    fit_time: number
+    fit_time?: number
+    fit_time_marginal?: number
     pred_time_val?: number
   }>
   fit_summary?: string

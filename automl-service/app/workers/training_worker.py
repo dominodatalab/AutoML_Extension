@@ -65,6 +65,33 @@ def parse_advanced_config(config_dict: Dict[str, Any]) -> AdvancedConfig:
     return AdvancedConfig.model_validate(config_dict)
 
 
+def _ensure_feature_importance_diagnostics(
+    diagnostics_data: Optional[Dict[str, Any]],
+    training_result: Dict[str, Any],
+    model_path: Optional[str],
+    model_type: str,
+) -> tuple[Optional[Dict[str, Any]], Optional[list[dict[str, Any]]]]:
+    """Ensure diagnostics include feature importance when training computed it."""
+    resolved_diagnostics = diagnostics_data or {}
+    stored_result = resolved_diagnostics.get("get_feature_importance") or {}
+    stored_features = stored_result.get("features")
+    if stored_features:
+        return resolved_diagnostics, stored_features
+
+    trainer_features = training_result.get("feature_importance")
+    if trainer_features:
+        resolved_diagnostics["get_feature_importance"] = {
+            "model_path": model_path,
+            "model_type": model_type,
+            "method": stored_result.get("method", "trainer"),
+            "features": trainer_features,
+            "error": None,
+        }
+        return resolved_diagnostics, trainer_features
+
+    return diagnostics_data, None
+
+
 async def _resolve_training_data_path(
     job: Any,
     dataset_manager: DominoDatasetManager,
@@ -395,12 +422,15 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                     model_type=job.model_type.value,
                     data_path=data_path,
                 )
-                # Extract feature importance for MLflow logging below
-                fi_result = diagnostics_data.get("get_feature_importance", {})
-                if fi_result.get("features"):
-                    feature_importance = fi_result["features"]
             except Exception as e:
                 logger.warning(f"Could not pre-compute diagnostics: {e}")
+
+            diagnostics_data, feature_importance = _ensure_feature_importance_diagnostics(
+                diagnostics_data=diagnostics_data,
+                training_result=result,
+                model_path=result.get("model_path"),
+                model_type=job.model_type.value,
+            )
 
             # Get the predictor for hyperparameter extraction
             predictor = None

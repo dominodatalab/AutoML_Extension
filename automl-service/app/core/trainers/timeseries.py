@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
+from app.core.leaderboard_utils import normalize_leaderboard_rows
 from .base import BaseTrainer, AdvancedConfig
 from .callbacks import TrainingProgressCallback
 
@@ -254,7 +255,7 @@ class TimeSeriesTrainer(BaseTrainer):
         }
 
         # Return leaderboard as list (schema expects List[Dict])
-        leaderboard_list = leaderboard.to_dict(orient="records")
+        leaderboard_list = normalize_leaderboard_rows(leaderboard.to_dict(orient="records")) or []
 
         if progress:
             progress.on_progress(100, "Training completed successfully")

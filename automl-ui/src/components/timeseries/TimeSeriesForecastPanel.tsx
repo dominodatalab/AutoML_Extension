@@ -13,9 +13,9 @@ interface TimeSeriesForecastPanelProps {
 }
 
 interface ForecastResult {
-  predictions: Record<string, number[]>
+  predictions: Record<string, Array<number | null>>
   timestamps?: string[]
-  quantiles?: Record<string, Record<string, number[]>>
+  quantiles?: Record<string, Array<number | null>>
   chart?: string
   error?: string
 }
@@ -202,7 +202,7 @@ export function TimeSeriesForecastPanel({ job }: TimeSeriesForecastPanelProps) {
                             )}
                             {Object.entries(result.predictions).map(([key, values]) => (
                               <td key={key} className="px-4 py-2 text-right text-sm ">
-                                {values[i]?.toFixed(4) || '-'}
+                                {values[i] != null ? values[i].toFixed(4) : '-'}
                               </td>
                             ))}
                           </tr>
@@ -227,11 +227,11 @@ export function TimeSeriesForecastPanel({ job }: TimeSeriesForecastPanelProps) {
                     <div key={quantile} className="bg-domino-bg-tertiary rounded-lg p-4">
                       <p className="text-sm font-medium mb-2">{quantile} Quantile</p>
                       <div className="space-y-1">
-                        {Object.entries(values).slice(0, 5).map(([step, val]) => (
-                          <div key={step} className="flex justify-between text-sm">
-                            <span className="text-domino-text-muted">{step}</span>
+                        {values.slice(0, 5).map((value, index) => (
+                          <div key={`${quantile}-${index}`} className="flex justify-between text-sm">
+                            <span className="text-domino-text-muted">t+{index + 1}</span>
                             <span className="">
-                              {Array.isArray(val) ? val[0]?.toFixed(2) : String(val)}
+                              {value != null ? value.toFixed(2) : '-'}
                             </span>
                           </div>
                         ))}

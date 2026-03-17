@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import numpy as np
 
+from app.core.leaderboard_utils import normalize_leaderboard_rows
 from app.core.model_loader import load_predictor, load_dataframe
 
 logger = logging.getLogger(__name__)
@@ -118,7 +119,7 @@ class ModelDiagnostics:
                             else:
                                 model_data[col] = val
                         models.append(model_data)
-                    result["models"] = models
+                    result["models"] = normalize_leaderboard_rows(models) or []
                     result["best_model"] = predictor.model_best
                     result["eval_metric"] = predictor.eval_metric.name if hasattr(predictor.eval_metric, 'name') else str(predictor.eval_metric)
 
@@ -139,7 +140,7 @@ class ModelDiagnostics:
                             else:
                                 model_data[col] = val
                         models.append(model_data)
-                    result["models"] = models
+                    result["models"] = normalize_leaderboard_rows(models) or []
 
         except Exception as e:
             logger.error(f"Error getting leaderboard: {e}")
@@ -491,7 +492,7 @@ class ModelDiagnostics:
                             "pred_time_val": float(row.get('pred_time_val', 0)) if pd.notna(row.get('pred_time_val')) else 0
                         }
                         models.append(model_data)
-                    result["models"] = models
+                    result["models"] = normalize_leaderboard_rows(models) or []
 
             elif model_type == "timeseries":
                 predictor = load_predictor(model_path, model_type)
@@ -510,7 +511,7 @@ class ModelDiagnostics:
                             else:
                                 model_data[col] = str(val)
                         models.append(model_data)
-                    result["models"] = models
+                    result["models"] = normalize_leaderboard_rows(models) or []
 
         except Exception as e:
             logger.error(f"Error getting learning curves: {e}")

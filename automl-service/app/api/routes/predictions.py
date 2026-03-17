@@ -8,8 +8,10 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.leaderboard_utils import normalize_leaderboard_payload
 from app.core.prediction_service import get_prediction_service
 from app.core.model_diagnostics import get_model_diagnostics
+from app.core.utils import ensure_local_file
 from app.db import crud
 from app.dependencies import get_db
 from app.api.utils import get_job_paths
@@ -40,15 +42,36 @@ async def _run_diagnostics(
         raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
 
     stored = getattr(job, "diagnostics_data", None) or {}
-    if diagnostics_method in stored:
-        logger.debug("Serving %s for job %s from stored diagnostics", diagnostics_method, job_id)
-        return stored[diagnostics_method]
+    stored_result = stored.get(diagnostics_method)
+    if stored_result is not None:
+        if diagnostics_method in {"get_leaderboard", "get_learning_curves"}:
+            stored_result = normalize_leaderboard_payload(stored_result)
+
+        # Recompute feature importance when the stored payload contains only
+        # an error/empty result. This gives completed jobs a second chance to
+        # display importance if the live model/data are still available.
+        if diagnostics_method != "get_feature_importance":
+            logger.debug("Serving %s for job %s from stored diagnostics", diagnostics_method, job_id)
+            return stored_result
+
+        if stored_result.get("features") or not stored_result.get("error"):
+            logger.debug("Serving %s for job %s from stored diagnostics", diagnostics_method, job_id)
+            return stored_result
+
+        logger.warning(
+            "Stored feature importance for job %s had error '%s'; attempting live recompute",
+            job_id,
+            stored_result.get("error"),
+        )
 
     # Fall back to live computation (model must be on disk)
     model_path, model_type, file_path, _ = await get_job_paths(db, job_id)
 
     actual_model_type = model_type_override or model_type
     actual_data_path = data_path_override or file_path
+
+    if actual_data_path:
+        actual_data_path = await ensure_local_file(actual_data_path, getattr(job, "project_id", None))
 
     if require_data_path and not actual_data_path:
         raise HTTPException(status_code=400, detail="No data path available for this job")
@@ -85,10 +108,14 @@ class PredictResponse(BaseModel):
     model_id: str
     model_type: str
     num_rows: int
-    predictions: List[Any]
+    predictions: Any
     probabilities: Optional[List[Dict[str, float]]] = None
     problem_type: Optional[str] = None
     label: Optional[str] = None
+    prediction_length: Optional[int] = None
+    timestamps: Optional[List[str]] = None
+    quantiles: Optional[Dict[str, List[Optional[float]]]] = None
+    error: Optional[str] = None
 
 
 class BatchPredictRequest(BaseModel):

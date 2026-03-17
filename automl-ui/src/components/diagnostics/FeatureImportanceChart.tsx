@@ -36,6 +36,7 @@ export function FeatureImportanceChart({
   error = null,
   maxFeatures = 20
 }: FeatureImportanceChartProps) {
+  const effectiveError = error || (data?.features?.length ? null : data?.error) || null
   const chartData = useMemo(() => {
     if (!data?.features) return []
     return [...data.features]
@@ -45,7 +46,12 @@ export function FeatureImportanceChart({
         feature: String(f.feature).length > 25 ? String(f.feature).substring(0, 22) + '...' : String(f.feature),
         fullName: String(f.feature),
         importance: safeNumber(f.importance),
-        stddev: f.std ? safeNumber(f.std) : undefined
+        stddev:
+          f.std !== undefined
+            ? safeNumber(f.std)
+            : f.stddev !== undefined
+              ? safeNumber(f.stddev)
+              : undefined
       }))
       .reverse() // Reverse for horizontal bar chart (highest at top)
   }, [data, maxFeatures])
@@ -60,11 +66,11 @@ export function FeatureImportanceChart({
     )
   }
 
-  if (error) {
+  if (effectiveError) {
     return (
       <Card>
         <div className="text-center py-8">
-          <p className="text-domino-accent-red">{error}</p>
+          <p className="text-domino-accent-red">{effectiveError}</p>
         </div>
       </Card>
     )

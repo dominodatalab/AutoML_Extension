@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.core.leaderboard_utils import normalize_leaderboard_payload
 from app.core.model_export import get_model_exporter
 from app.core.model_diagnostics import get_model_diagnostics
 from app.core.dataset_manager import DominoDatasetManager
@@ -361,7 +362,7 @@ async def get_learning_curves(
 
     stored = getattr(job, "diagnostics_data", None) or {}
     if "get_learning_curves" in stored:
-        return LearningCurvesResponse(**stored["get_learning_curves"])
+        return LearningCurvesResponse(**normalize_leaderboard_payload(stored["get_learning_curves"]))
 
     # Fall back to live computation
     model_path, model_type, _, _ = await get_job_paths(db, request.job_id)

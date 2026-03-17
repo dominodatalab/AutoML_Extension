@@ -9,6 +9,7 @@ import pandas as pd
 
 from app.config import get_settings
 from app.core.model_loader import load_predictor
+from app.core.utils import remap_shared_path
 
 logger = logging.getLogger(__name__)
 
@@ -27,13 +28,21 @@ class PredictionService:
         locations so that models stored on per-project dataset mounts are
         found correctly.
         """
+        # Stored model paths may come from a different Domino mount root than
+        # the current app runtime (for example /mnt/data vs /domino/datasets).
+        remapped_model_id = remap_shared_path(model_id)
+
         # If model_id is already an absolute path that exists, use it directly
         candidate = Path(model_id)
         if candidate.is_absolute() and candidate.is_dir():
             return candidate
 
+        remapped_candidate = Path(remapped_model_id)
+        if remapped_candidate.is_absolute() and remapped_candidate.is_dir():
+            return remapped_candidate
+
         # Check default settings path
-        default = Path(self.settings.models_path) / model_id
+        default = Path(self.settings.models_path) / remapped_model_id
         if default.is_dir():
             return default
 
@@ -42,7 +51,7 @@ class PredictionService:
 
         for template in _MOUNT_TEMPLATES:
             mount = template.format(name=DATASET_NAME)
-            mount_candidate = Path(mount) / "models" / model_id
+            mount_candidate = Path(mount) / "models" / remapped_model_id
             if mount_candidate.is_dir():
                 return mount_candidate
 
@@ -58,6 +67,90 @@ class PredictionService:
         predictor = load_predictor(str(model_path), model_type)
         self._loaded_models[model_id] = predictor
         return predictor
+
+    @staticmethod
+    def _coerce_optional_float(value: Any) -> Optional[float]:
+        """Convert forecast values to plain floats while preserving missing values."""
+        if pd.isna(value):
+            return None
+        return float(value)
+
+    @staticmethod
+    def _format_series_label(series_name: Any, series_count: int) -> str:
+        """Return a friendly label for a forecast series."""
+        label = str(series_name)
+        if series_count == 1 and label in {"default", "None", "nan"}:
+            return "Forecast"
+        return label
+
+    def _format_forecast_predictions(self, predictions: Any) -> Dict[str, Any]:
+        """Shape AutoGluon forecast output for the frontend forecast panel."""
+        if not hasattr(predictions, "reset_index"):
+            values = predictions.tolist() if hasattr(predictions, "tolist") else list(predictions)
+            return {
+                "predictions": {
+                    "Forecast": [self._coerce_optional_float(value) for value in values]
+                },
+                "num_rows": len(values),
+            }
+
+        forecast_df = predictions.reset_index()
+        numeric_columns = [
+            column
+            for column in forecast_df.columns
+            if column not in {"item_id", "timestamp", "index"}
+            and not str(column).startswith("level_")
+            and pd.api.types.is_numeric_dtype(forecast_df[column])
+        ]
+
+        if not numeric_columns:
+            return {"predictions": {}, "num_rows": 0}
+
+        point_column = "mean" if "mean" in numeric_columns else numeric_columns[0]
+        quantile_columns = [column for column in numeric_columns if column != point_column]
+        series_column = "item_id" if "item_id" in forecast_df.columns else None
+        timestamp_column = "timestamp" if "timestamp" in forecast_df.columns else None
+        series_count = (
+            int(forecast_df[series_column].nunique(dropna=False))
+            if series_column
+            else 1
+        )
+
+        predictions_by_series: Dict[str, List[Optional[float]]] = {}
+        timestamps: Optional[List[str]] = None
+        quantiles: Optional[Dict[str, List[Optional[float]]]] = None
+
+        grouped = (
+            forecast_df.groupby(series_column, sort=False)
+            if series_column
+            else [("Forecast", forecast_df)]
+        )
+
+        for series_name, group in grouped:
+            if timestamp_column:
+                group = group.sort_values(timestamp_column)
+                if timestamps is None:
+                    timestamps = [str(value) for value in group[timestamp_column].tolist()]
+
+            label = self._format_series_label(series_name, series_count)
+            predictions_by_series[label] = [
+                self._coerce_optional_float(value) for value in group[point_column].tolist()
+            ]
+
+            if quantile_columns and series_count == 1:
+                quantiles = {
+                    str(column): [
+                        self._coerce_optional_float(value) for value in group[column].tolist()
+                    ]
+                    for column in quantile_columns
+                }
+
+        return {
+            "predictions": predictions_by_series,
+            "timestamps": timestamps,
+            "quantiles": quantiles,
+            "num_rows": len(forecast_df),
+        }
 
     def predict(
         self,
@@ -172,6 +265,7 @@ class PredictionService:
             "model_id": model_id,
             "model_type": "timeseries",
             "num_rows": 0,
+            "predictions": {},
         }
 
         try:
@@ -182,19 +276,13 @@ class PredictionService:
             # For time series, predict returns future forecasts
             # We need to get the known data from training to generate forecasts
             predictions = predictor.predict(prediction_length=prediction_length)
-
-            if hasattr(predictions, 'to_dict'):
-                result["predictions"] = predictions.to_dict(orient="records")
-            else:
-                result["predictions"] = predictions.tolist() if hasattr(predictions, 'tolist') else list(predictions)
-
-            result["num_rows"] = len(predictions) if hasattr(predictions, '__len__') else 0
+            result.update(self._format_forecast_predictions(predictions))
             result["prediction_length"] = prediction_length
 
         except Exception as e:
             logger.error(f"Forecast error: {e}")
             # Return empty predictions on error
-            result["predictions"] = []
+            result["predictions"] = {}
             result["error"] = str(e)
 
         return result
