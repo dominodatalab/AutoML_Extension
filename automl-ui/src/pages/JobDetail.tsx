@@ -74,8 +74,15 @@ function JobDetail() {
   // Handle loading state - use defaults when job not yet loaded
   const jobStatus = job?.status || 'running'
   const validPolledProgress = progressJobId === jobId ? polledProgress : null
-  const currentStatus = statusData?.status || validPolledProgress?.status || jobStatus
   const currentDominoStatus = statusData?.domino_job_status || job?.domino_job_status
+  // When the job object itself has a terminal status, trust it over
+  // potentially-stale statusData (useJobStatus polls slower than
+  // useJobProgress, and gets disabled once job.status becomes terminal,
+  // freezing statusData at whatever it last fetched).
+  const jobTerminal = ['completed', 'failed', 'cancelled'].includes(jobStatus)
+  const currentStatus = jobTerminal
+    ? jobStatus
+    : statusData?.status || validPolledProgress?.status || jobStatus
   const isJobTerminal = ['completed', 'failed', 'cancelled'].includes(currentStatus)
   const rawProgress = validPolledProgress?.progress ?? job?.progress ?? 0
 
@@ -140,8 +147,8 @@ function JobDetail() {
         dominoEnabled={dominoEnabled}
       />
 
-      {/* Progress bar for running jobs */}
-      {['pending', 'running'].includes(currentStatus) && activeTab === 'overview' && (
+      {/* Progress bar for active and failed jobs */}
+      {['pending', 'running', 'failed', 'cancelled'].includes(currentStatus) && activeTab === 'overview' && (
         <div className="mb-6">
           <SimpleProgressBar
             progress={currentProgress}
