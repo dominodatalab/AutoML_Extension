@@ -233,21 +233,32 @@ class DominoDatasetManager:
         Always lists files via the snapshot API (which reflects the current
         RW snapshot) so that file deletions in Domino are visible immediately.
         The local mount path is used to resolve real file paths when the file
-        exists on disk, enabling direct reads during training/preview.
+        exists on disk *and* the dataset belongs to the current App project,
+        enabling direct reads during training/preview.
         """
         dataset_id = item.get("datasetId") or item.get("id", "")
         dataset_name = item.get("datasetName") or item.get("name", "")
         if not dataset_name:
             return None
 
-        # Find the mount path for this dataset (used to resolve real file
-        # paths, but NOT used as the source of truth for file listing).
+        # Only resolve local mount paths when the dataset belongs to the
+        # same project as this App.  Cross-project datasets with the same
+        # name (e.g. "automl-extension" in both App and target projects)
+        # would otherwise resolve to the App project's mount, serving the
+        # wrong files for preview and training.
+        dataset_project_id = item.get("projectId") or item.get("ownerProjectId") or ""
+        app_project_id = os.environ.get("DOMINO_PROJECT_ID", "")
+        is_local_dataset = bool(
+            app_project_id and dataset_project_id and dataset_project_id == app_project_id
+        )
+
         dataset_path: Optional[str] = None
-        for mount_root in self._resolve_dataset_mount_paths():
-            candidate = os.path.join(mount_root, dataset_name)
-            if os.path.exists(candidate):
-                dataset_path = candidate
-                break
+        if is_local_dataset:
+            for mount_root in self._resolve_dataset_mount_paths():
+                candidate = os.path.join(mount_root, dataset_name)
+                if os.path.exists(candidate):
+                    dataset_path = candidate
+                    break
 
         # Always list files from the snapshot API — mounted filesystems use
         # read-only snapshots that go stale when files are deleted in Domino.
@@ -261,8 +272,8 @@ class DominoDatasetManager:
             api_files, total_size = await self._list_files_via_snapshot_api(
                 rw_snapshot_id, dataset_name, dataset_id=dataset_id,
             )
-            # If the dataset is mounted locally, upgrade file paths from
-            # synthetic to real mount paths where the file exists on disk.
+            # If the dataset is mounted locally (same project), upgrade file
+            # paths from synthetic to real mount paths where the file exists.
             for f in api_files:
                 if dataset_path:
                     local_path = os.path.join(dataset_path, f.name)
