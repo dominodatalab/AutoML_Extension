@@ -432,6 +432,7 @@ class DominoJobLauncher:
                     "id_column": id_column,
                     "rolling_window": rolling_window,
                     "database_url": self._remap_db_url_for_target(self.settings.database_url, project_id),
+                    "project_id": project_id,
                 },
             )
             response = await self._job_start(

@@ -30,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--id-column", default=None)
     parser.add_argument("--rolling-window", type=int, default=None)
     parser.add_argument("--database-url", default=None, help="Override DATABASE_URL for cross-project jobs")
+    parser.add_argument("--project-id", default=None, help="Target project ID for dataset file resolution")
     return parser.parse_args()
 
 
@@ -39,7 +40,7 @@ async def _run(args) -> None:
     from app.core.eda_job_store import get_eda_job_store
     from app.core.data_profiler import get_data_profiler
     from app.core.ts_profiler import get_ts_profiler
-    from app.core.utils import remap_shared_path
+    from app.core.utils import remap_shared_path, ensure_local_file
     from app.db.database import create_tables
 
     # Ensure tables exist (the job may be first to use this DB path)
@@ -47,6 +48,9 @@ async def _run(args) -> None:
 
     store = get_eda_job_store()
     file_path = remap_shared_path(args.file_path)
+    # Download on demand if the file isn't on the local mount (e.g. stale
+    # read-only snapshot or cross-project dataset).
+    file_path = await ensure_local_file(file_path, args.project_id)
 
     async with get_db_session() as db:
         await store.update_request(db, args.request_id, status="running")

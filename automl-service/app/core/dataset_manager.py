@@ -276,8 +276,15 @@ class DominoDatasetManager:
                 files.append(f)
 
         # Fall back to mounted filesystem only when the snapshot API returned
-        # nothing (e.g. no RW snapshot ID or API unreachable).
+        # nothing (e.g. no RW snapshot ID or API unreachable).  Warn because
+        # mounted datasets use read-only snapshots that can be stale.
         if not files and dataset_path and os.path.isdir(dataset_path):
+            logger.warning(
+                "Snapshot API returned no files for dataset %s (%s); "
+                "falling back to mounted filesystem which may be stale",
+                dataset_name,
+                dataset_id,
+            )
             for root, _, filenames in os.walk(dataset_path):
                 for filename in filenames:
                     if not self._is_supported_file(filename):
