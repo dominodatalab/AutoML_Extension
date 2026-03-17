@@ -38,6 +38,7 @@ RUN apt-get update && \
         gcc \
     # Requirements for Domino executions
         curl \
+        procps \
     # Requirements for node installation
         ca-certificates \
     # For troubleshooting
