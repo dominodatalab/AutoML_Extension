@@ -10,7 +10,7 @@ import { Dataset, DatasetFile, FileUploadResponse } from '../../types/dataset'
 
 function Step1DataSource() {
   const { dataSource, setDataSource } = useWizard()
-  const { data: datasetsData, isLoading: loadingDatasets, error: datasetsError } = useDatasets()
+  const { data: datasetsData, isLoading: loadingDatasets, error: datasetsError, refetch: refetchDatasets } = useDatasets()
   const uploadMutation = useUploadFile()
   const addNotification = useStore((state) => state.addNotification)
   const [sourceType, setSourceType] = useState<'upload' | 'domino_dataset'>(
@@ -141,7 +141,10 @@ function Step1DataSource() {
         </button>
 
         <button
-          onClick={() => setSourceType('domino_dataset')}
+          onClick={() => {
+            setSourceType('domino_dataset')
+            refetchDatasets()
+          }}
           className={clsx(
             'flex-1 p-4 border transition-colors text-left',
             sourceType === 'domino_dataset'
