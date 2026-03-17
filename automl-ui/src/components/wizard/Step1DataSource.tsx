@@ -292,7 +292,7 @@ function Step1DataSource() {
                       .filter(f => f.name.endsWith('.csv') || f.name.endsWith('.parquet') || f.name.endsWith('.pq'))
                       .map((file) => (
                         <button
-                          key={file.path}
+                          key={`${dataset.id}:${file.name}`}
                           onClick={() => handleSelectFile(dataset, file)}
                           className={clsx(
                             'w-full p-3 rounded-lg border transition-colors text-left flex items-center gap-3',

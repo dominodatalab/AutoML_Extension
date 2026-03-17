@@ -116,23 +116,36 @@ async def ensure_local_file(file_path: str, project_id: Optional[str] = None) ->
     if not m or not project_id:
         return file_path  # can't resolve — return original, will fail downstream
 
+    dataset_name = m.group("dataset_name")
     relative_path = m.group("relative")
 
     from app.config import get_settings
     from app.services.storage_resolver import get_storage_resolver
 
     resolver = get_storage_resolver()
+
+    # Resolve the dataset_id — first try the automl-extension dataset,
+    # then look up by name across all project datasets.
+    dataset_id: Optional[str] = None
     info = await resolver.get_dataset_info(project_id)
-    if not info:
-        # Try resolve_or_create to ensure the dataset record exists
-        try:
-            info = await resolver._resolve_or_create(project_id)
-        except Exception:
-            logger.warning("Cannot resolve dataset for project %s", project_id)
-            return file_path
+    if info and info.name == dataset_name:
+        dataset_id = info.dataset_id
+    else:
+        # Dataset is not the automl-extension one — look it up by name
+        # via the dataset manager (which queries the Domino API).
+        dataset_id = await _resolve_dataset_id_by_name(
+            project_id, dataset_name
+        )
+
+    if not dataset_id:
+        logger.warning(
+            "Cannot resolve dataset '%s' in project %s",
+            dataset_name, project_id,
+        )
+        return file_path
 
     cache_key = hashlib.sha256(
-        f"{info.dataset_id}:{relative_path}".encode()
+        f"{dataset_id}:{relative_path}".encode()
     ).hexdigest()[:16]
 
     settings = get_settings()
@@ -142,20 +155,45 @@ async def ensure_local_file(file_path: str, project_id: Optional[str] = None) ->
         logger.debug("Using cached download: %s", dest_path)
         return dest_path
 
-    # Domino Dataset RW API has no file read/download endpoints.
-    # Files should have been cached locally during upload.
-    # If we reach here, the cache is missing — try download as last resort.
     logger.info(
-        "File %s not found locally or in cache; attempting download from dataset %s",
-        file_path, info.dataset_id,
+        "File %s not found locally or in cache; attempting download from dataset %s (%s)",
+        file_path, dataset_name, dataset_id,
     )
     try:
-        await resolver.download_file(info.dataset_id, relative_path, dest_path)
+        await resolver.download_file(dataset_id, relative_path, dest_path)
         return dest_path
     except Exception:
         logger.warning(
-            "Download failed (Domino has no file read API). "
-            "File %s must be re-uploaded or accessed via dataset mount.",
-            file_path,
+            "Download failed for '%s' from dataset %s (%s). "
+            "File must be re-uploaded or the dataset mounted to this app.",
+            relative_path, dataset_name, dataset_id,
         )
         return file_path
+
+
+async def _resolve_dataset_id_by_name(
+    project_id: str, dataset_name: str
+) -> Optional[str]:
+    """Look up a dataset ID by name within a project via the Domino API."""
+    from app.core.domino_http import domino_request
+
+    try:
+        resp = await domino_request(
+            "GET",
+            "/api/datasetrw/v2/datasets",
+            params={"projectIdsToInclude": project_id},
+        )
+        body = resp.json()
+        items = body if isinstance(body, list) else body.get("items", body.get("datasets", []))
+        for item in items:
+            # v2 wraps as {"dataset": {...}}
+            ds = item.get("dataset", item) if isinstance(item, dict) and "dataset" in item else item
+            name = ds.get("datasetName") or ds.get("name") or ""
+            if name == dataset_name:
+                return str(ds.get("datasetId") or ds.get("id") or "")
+    except Exception:
+        logger.debug(
+            "Failed to resolve dataset '%s' in project %s",
+            dataset_name, project_id, exc_info=True,
+        )
+    return None

@@ -110,7 +110,8 @@ export function TimeSeriesConfigPanel({
             className="h-[32px] w-full px-2 text-sm border border-domino-border rounded-[2px]"
           />
         </div>
-        <div className="flex items-end">
+        <div>
+          <label className="block text-xs text-domino-text-muted mb-1">&nbsp;</label>
           <button
             onClick={handleRun}
             disabled={!timeColumn || !targetColumn || loading}

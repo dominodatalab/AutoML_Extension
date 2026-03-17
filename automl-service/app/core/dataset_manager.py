@@ -275,7 +275,7 @@ class DominoDatasetManager:
                 rw_snapshot_id = await get_storage_resolver().get_rw_snapshot_id(dataset_id)
             if rw_snapshot_id:
                 files, total_size = await self._list_files_via_snapshot_api(
-                    rw_snapshot_id, dataset_name
+                    rw_snapshot_id, dataset_name, dataset_id=dataset_id,
                 )
 
         return DatasetResponse(
@@ -295,6 +295,7 @@ class DominoDatasetManager:
         snapshot_id: str,
         dataset_name: str,
         path: str = "",
+        dataset_id: str = "",
     ) -> tuple[list[DatasetFileResponse], int]:
         """List supported files from a snapshot via the Domino API.
 
@@ -326,13 +327,22 @@ class DominoDatasetManager:
                 subpath = f"{path}/{file_name}" if path else file_name
                 sub_files, sub_size = await self._list_files_via_snapshot_api(
                     snapshot_id, dataset_name, path=subpath,
+                    dataset_id=dataset_id,
                 )
                 files.extend(sub_files)
                 total_size += sub_size
             elif self._is_supported_file(file_name):
                 rel_path = f"{path}/{file_name}" if path else file_name
+                # Construct a synthetic mount path so ensure_local_file()
+                # can parse the dataset name and download on demand.
+                synthetic_path = f"/domino/datasets/local/{dataset_name}/{rel_path}"
                 files.append(
-                    DatasetFileResponse(name=rel_path, path="", size=size)
+                    DatasetFileResponse(
+                        name=rel_path,
+                        path=synthetic_path,
+                        size=size,
+                        mounted=False,
+                    )
                 )
                 total_size += size
 

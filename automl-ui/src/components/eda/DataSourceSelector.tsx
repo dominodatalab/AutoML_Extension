@@ -194,7 +194,7 @@ export function DataSourceSelector({
                       .filter(f => f.name.endsWith('.csv') || f.name.endsWith('.parquet') || f.name.endsWith('.pq'))
                       .map((file) => (
                         <button
-                          key={file.path}
+                          key={`${dataset.id}:${file.name}`}
                           onClick={() => onSelectFile(file)}
                           className="w-full p-3 rounded-lg border border-domino-border hover:border-domino-text-muted transition-colors text-left flex items-center gap-3"
                         >

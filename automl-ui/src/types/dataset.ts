@@ -2,6 +2,7 @@ export interface DatasetFile {
   name: string
   size: number
   path: string
+  mounted?: boolean
 }
 
 export interface Dataset {
