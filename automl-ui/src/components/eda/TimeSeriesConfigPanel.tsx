@@ -68,8 +68,10 @@ export function TimeSeriesConfigPanel({
 
   const needsSampling = totalRows > Number(sampleSize || 100000)
 
+  const sameColumnError = timeColumn && targetColumn && timeColumn === targetColumn
+
   const handleRun = () => {
-    if (!timeColumn || !targetColumn) return
+    if (!timeColumn || !targetColumn || sameColumnError) return
     onRunAnalysis(timeColumn, targetColumn, idColumn, Number(sampleSize) || 100000, samplingStrategy, rollingWindow)
   }
 
@@ -119,7 +121,7 @@ export function TimeSeriesConfigPanel({
           <div className="flex items-center gap-2">
             <button
               onClick={handleRun}
-              disabled={!timeColumn || !targetColumn || loading}
+              disabled={!timeColumn || !targetColumn || !!sameColumnError || loading}
               className="h-[32px] px-4 text-sm bg-domino-accent-purple text-white rounded-[2px] hover:bg-domino-accent-purple-hover disabled:opacity-50 whitespace-nowrap"
             >
               {loading ? 'Analyzing...' : 'Run Analysis'}
@@ -139,6 +141,12 @@ export function TimeSeriesConfigPanel({
           </div>
         </div>
       </div>
+
+      {sameColumnError && (
+        <p className="text-xs text-domino-accent-red">
+          Time column and target column must be different.
+        </p>
+      )}
 
       {needsSampling && (
         <div className="flex items-center gap-4 pt-2 border-t border-domino-border flex-wrap">

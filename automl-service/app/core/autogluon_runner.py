@@ -54,6 +54,7 @@ class AutoGluonRunner:
         eval_metric: Optional[str] = None,
         advanced_config: Optional[AdvancedConfig] = None,
         timeseries_config: Optional[Dict[str, Any]] = None,
+        feature_columns: Optional[list[str]] = None,
         log_callback: Optional[Callable] = None,
         models_path: Optional[str] = None,
         temp_path: Optional[str] = None,
@@ -90,6 +91,15 @@ class AutoGluonRunner:
             # Log to MLflow
             self._log_training_start(job_id, model_type, df, advanced_config)
 
+            # Filter to feature columns for tabular training
+            if feature_columns and model_type == ModelType.TABULAR:
+                keep_cols = list({target_column} | set(feature_columns))
+                missing = [c for c in keep_cols if c not in df.columns]
+                if missing:
+                    raise ValueError(f"Feature columns not found in data: {missing}")
+                df = df[keep_cols]
+                logger.info(f"Filtered to {len(keep_cols)} columns (including target)")
+
             # Delegate to appropriate trainer
             if model_type == ModelType.TABULAR:
                 result = await self.tabular_trainer.train(
@@ -116,6 +126,7 @@ class AutoGluonRunner:
                     eval_metric=eval_metric,
                     advanced_config=advanced_config,
                     timeseries_config=timeseries_config,
+                    feature_columns=feature_columns,
                     progress=progress,
                 )
             else:

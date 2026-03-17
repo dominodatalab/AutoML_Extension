@@ -271,12 +271,16 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
 
             await progress_reporter.on_progress_update(10, "Loading data")
 
-            # Parse timeseries config
+            # Parse timeseries config and feature columns
             timeseries_config = None
+            feature_columns = None
             if job.autogluon_config:
                 if "timeseries" in job.autogluon_config:
                     timeseries_config = job.autogluon_config["timeseries"]
                     logger.info(f"[TRAINING] Parsed timeseries config: {timeseries_config}")
+                if "feature_columns" in job.autogluon_config:
+                    feature_columns = job.autogluon_config["feature_columns"]
+                    logger.info(f"[TRAINING] Using feature columns: {feature_columns}")
 
             # Resolve project-scoped storage for model output
             models_path = None
@@ -312,6 +316,7 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                 eval_metric=job.eval_metric,
                 advanced_config=adv_config,
                 timeseries_config=timeseries_config,
+                feature_columns=feature_columns,
                 models_path=models_path,
                 temp_path=temp_path,
             )

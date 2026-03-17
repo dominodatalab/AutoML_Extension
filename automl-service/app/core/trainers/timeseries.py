@@ -1,7 +1,7 @@
 """Time series prediction trainer."""
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -27,6 +27,7 @@ class TimeSeriesTrainer(BaseTrainer):
         eval_metric: Optional[str] = None,
         advanced_config: Optional[AdvancedConfig] = None,
         timeseries_config: Optional[Dict[str, Any]] = None,
+        feature_columns: Optional[List[str]] = None,
         progress: Optional[TrainingProgressCallback] = None,
     ) -> Dict[str, Any]:
         """Run time series prediction training."""
@@ -41,11 +42,50 @@ class TimeSeriesTrainer(BaseTrainer):
         if not prediction_length:
             raise ValueError("prediction_length is required for timeseries models")
 
+        # Filter to selected feature columns if specified
+        if feature_columns:
+            required = {target_column, time_column}
+            if id_column:
+                required.add(id_column)
+            keep_cols = list(required | set(feature_columns))
+            missing = [c for c in keep_cols if c not in df.columns]
+            if missing:
+                raise ValueError(f"Feature columns not found in data: {missing}")
+            df = df[keep_cols]
+            logger.info(f"Filtered to {len(keep_cols)} columns (including required columns)")
+
+        # Ensure time column is datetime and sort by it to prevent data leakage
+        df = df.copy()
+        if not pd.api.types.is_datetime64_any_dtype(df[time_column]):
+            df[time_column] = pd.to_datetime(df[time_column], errors="coerce")
+        df = df.sort_values(time_column).reset_index(drop=True)
+
+        # Validate prediction_length is reasonable relative to data size
+        min_rows_per_series = len(df)
+        if id_column and id_column in df.columns:
+            min_rows_per_series = df.groupby(id_column).size().min()
+        if prediction_length >= min_rows_per_series:
+            raise ValueError(
+                f"prediction_length ({prediction_length}) must be less than the "
+                f"shortest series length ({min_rows_per_series}). "
+                f"Reduce prediction_length or provide more data."
+            )
+
         # Add a synthetic item_id for single-series data when no id_column provided
         if not id_column:
-            df = df.copy()
             df["item_id"] = "default"
             id_column = "item_id"
+
+        # Validate multi-series data: check for duplicate timestamps within each series
+        dup_check = df.groupby(id_column)[time_column].apply(lambda s: s.duplicated().sum())
+        series_with_dups = dup_check[dup_check > 0]
+        if len(series_with_dups) > 0:
+            dup_ids = list(series_with_dups.index[:5])
+            logger.warning(
+                f"Duplicate timestamps found in {len(series_with_dups)} series "
+                f"(e.g. {dup_ids}). Keeping last occurrence."
+            )
+            df = df.drop_duplicates(subset=[id_column, time_column], keep="last")
 
         # Convert to TimeSeriesDataFrame
         ts_df = TimeSeriesDataFrame.from_data_frame(
@@ -63,20 +103,29 @@ class TimeSeriesTrainer(BaseTrainer):
             except Exception:
                 pass
             if not detected_freq:
-                # Infer from median time delta
+                # Infer from median time delta per series to avoid cross-series artifacts
                 try:
-                    timestamps = ts_df.reset_index()["timestamp"].sort_values()
-                    median_delta = timestamps.diff().median()
+                    reset_df = ts_df.reset_index()
+                    first_id = reset_df[id_column].iloc[0] if id_column in reset_df.columns else None
+                    if first_id is not None:
+                        series_ts = reset_df[reset_df[id_column] == first_id]["timestamp"].sort_values()
+                    else:
+                        series_ts = reset_df["timestamp"].sort_values()
+                    median_delta = series_ts.diff().median()
                     if median_delta <= pd.Timedelta(hours=1):
                         detected_freq = "h"
                     elif median_delta <= pd.Timedelta(days=1):
                         detected_freq = "D"
-                    elif median_delta <= pd.Timedelta(days=7):
-                        detected_freq = "W"
-                    elif median_delta <= pd.Timedelta(days=31):
-                        detected_freq = "MS"
-                    else:
+                    elif median_delta <= pd.Timedelta(days=3):
                         detected_freq = "D"
+                    elif median_delta <= pd.Timedelta(days=8):
+                        detected_freq = "W"
+                    elif median_delta <= pd.Timedelta(days=35):
+                        detected_freq = "MS"
+                    elif median_delta <= pd.Timedelta(days=100):
+                        detected_freq = "QS"
+                    else:
+                        detected_freq = "YS"
                     logger.info(f"Auto-detected frequency from median delta ({median_delta}): {detected_freq}")
                 except Exception:
                     detected_freq = "D"
@@ -137,13 +186,28 @@ class TimeSeriesTrainer(BaseTrainer):
 
         # Apply timeseries-specific config to fit
         if timeseries_config:
+            reserved_cols = {target_column, time_column, id_column}
+
             # Known covariates
             if timeseries_config.get("known_covariates_names"):
-                fit_kwargs["known_covariates_names"] = timeseries_config["known_covariates_names"]
+                cov_names = timeseries_config["known_covariates_names"]
+                available_cols = set(ts_df.columns)
+                invalid = [c for c in cov_names if c not in available_cols]
+                if invalid:
+                    raise ValueError(f"known_covariates_names columns not found in data: {invalid}")
+                conflict = [c for c in cov_names if c in reserved_cols]
+                if conflict:
+                    raise ValueError(f"known_covariates_names cannot include target/time/id columns: {conflict}")
+                fit_kwargs["known_covariates_names"] = cov_names
 
             # Static features
             if timeseries_config.get("static_features_names"):
-                fit_kwargs["static_features_names"] = timeseries_config["static_features_names"]
+                sf_names = timeseries_config["static_features_names"]
+                available_cols = set(ts_df.columns)
+                invalid = [c for c in sf_names if c not in available_cols]
+                if invalid:
+                    raise ValueError(f"static_features_names columns not found in data: {invalid}")
+                fit_kwargs["static_features_names"] = sf_names
 
             # Target scaler
             if timeseries_config.get("target_scaler"):

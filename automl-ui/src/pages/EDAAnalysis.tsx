@@ -170,6 +170,10 @@ function EDAAnalysis() {
     setTransforms([])
     setProfileData(null)
     setTsProfileData(null)
+    setTimeColumn('')
+    setTargetColumn('')
+    setIdColumn('')
+    setRollingWindow('')
   }
 
   const formatSize = (bytes: number): string => {

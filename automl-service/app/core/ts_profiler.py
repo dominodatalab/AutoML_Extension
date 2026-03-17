@@ -36,8 +36,14 @@ class TimeSeriesProfiler:
             df = pd.read_csv(file_path, parse_dates=[time_column])
         elif file_path.endswith((".parquet", ".pq")):
             df = pd.read_parquet(file_path)
+            # Parquet preserves dtypes but datetime columns may be stored as objects
+            if not pd.api.types.is_datetime64_any_dtype(df[time_column]):
+                df[time_column] = pd.to_datetime(df[time_column], errors="coerce")
         elif file_path.endswith(".json"):
             df = pd.read_json(file_path)
+            # JSON doesn't preserve datetime types
+            if not pd.api.types.is_datetime64_any_dtype(df[time_column]):
+                df[time_column] = pd.to_datetime(df[time_column], errors="coerce")
         elif file_path.endswith((".xlsx", ".xls")):
             df = pd.read_excel(file_path, parse_dates=[time_column])
         else:
@@ -295,11 +301,15 @@ class TimeSeriesProfiler:
                     series, model="additive", period=period, extrapolate_trend="freq"
                 )
 
-            # Downsample for visualization (max 500 points)
-            step = max(1, len(series) // 500)
-            trend_vals = decomposition.trend.iloc[::step].dropna()
-            seasonal_vals = decomposition.seasonal.iloc[::step].dropna()
-            residual_vals = decomposition.resid.iloc[::step].dropna()
+            # Downsample for visualization (max 500 points).
+            # Drop NaN first, then downsample, so timestamps and values stay aligned.
+            trend_clean = decomposition.trend.dropna()
+            seasonal_clean = decomposition.seasonal.dropna()
+            residual_clean = decomposition.resid.dropna()
+            step = max(1, len(trend_clean) // 500)
+            trend_vals = trend_clean.iloc[::step]
+            seasonal_vals = seasonal_clean.iloc[::step]
+            residual_vals = residual_clean.iloc[::step]
 
             # Seasonal strength
             var_resid = np.var(decomposition.resid.dropna())
@@ -363,9 +373,12 @@ class TimeSeriesProfiler:
                 acf_vals = acf(series.values, nlags=nlags, fft=True)
                 # Find first significant peak after lag 1
                 for i in range(2, len(acf_vals)):
-                    if i > 1 and acf_vals[i] > acf_vals[i - 1] and acf_vals[i] > acf_vals[i + 1] if i + 1 < len(acf_vals) else False:
-                        if acf_vals[i] > 0.1:
-                            return i
+                    is_peak = (
+                        acf_vals[i] > acf_vals[i - 1]
+                        and (acf_vals[i] > acf_vals[i + 1] if i + 1 < len(acf_vals) else True)
+                    )
+                    if is_peak and acf_vals[i] > 0.1:
+                        return i
             except Exception:
                 pass
 
@@ -388,14 +401,17 @@ class TimeSeriesProfiler:
             acf_values, acf_ci = acf(series.values, nlags=nlags, alpha=0.05, fft=True)
             pacf_values, pacf_ci = pacf(series.values, nlags=nlags, alpha=0.05)
 
-            # Confidence interval (approximate: 1.96/sqrt(n))
-            ci = 1.96 / np.sqrt(len(series))
+            # Use statsmodels confidence intervals to determine significant lags.
+            # acf_ci is shape (nlags+1, 2) with lower/upper bounds per lag.
+            # A lag is significant if the ACF value falls outside the CI bounds.
+            significant_lags = []
+            for i in range(1, len(acf_values)):
+                lower, upper = acf_ci[i]
+                if acf_values[i] < lower or acf_values[i] > upper:
+                    significant_lags.append(i)
 
-            # Find significant lags
-            significant_lags = [
-                i for i in range(1, len(acf_values))
-                if abs(acf_values[i]) > ci
-            ]
+            # Report the approximate CI width for frontend visualization
+            ci = 1.96 / np.sqrt(len(series))
 
             return {
                 "acf": [round(float(v), 4) for v in acf_values],
@@ -409,10 +425,17 @@ class TimeSeriesProfiler:
             return None
 
     def _target_statistics(self, df: pd.DataFrame, target_column: str) -> Dict[str, Any]:
-        """Compute basic statistics for the target column."""
+        """Compute basic statistics for the target column.
+
+        Always returns all expected fields so the frontend TargetStatistics
+        interface is satisfied even when data is empty.
+        """
         col = df[target_column].dropna()
         if len(col) == 0:
-            return {}
+            return {
+                "mean": 0, "std": 0, "cv": 0,
+                "min": 0, "max": 0, "skewness": 0, "kurtosis": 0,
+            }
 
         mean = float(col.mean())
         std = float(col.std()) if len(col) > 1 else 0.0
