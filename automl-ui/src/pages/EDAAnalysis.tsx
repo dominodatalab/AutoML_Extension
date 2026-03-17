@@ -117,6 +117,9 @@ function EDAAnalysis() {
     addNotification,
   })
 
+  // Auto-profile only when a new file is selected, not when the execution
+  // target changes — switching between Local and Domino Job requires an
+  // explicit click on the "Analyze" button.
   useEffect(() => {
     if (!selectedFilePath) return
     if (edaExecutionTarget === 'local') {
@@ -125,7 +128,8 @@ function EDAAnalysis() {
       return
     }
     void startAsyncTabularProfiling(selectedFilePath, sampleSize, samplingStrategy, stratifyColumn || undefined)
-  }, [selectedFilePath, edaExecutionTarget, profileFile, resetAsyncState, startAsyncTabularProfiling])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFilePath])
 
   // Once snapshot is verified, set file path to trigger profiling
   useEffect(() => {
@@ -233,6 +237,16 @@ function EDAAnalysis() {
       sampling_strategy: strategy,
       rolling_window: Number(rw) || undefined,
     })
+  }
+
+  const handleAnalyze = () => {
+    if (!selectedFilePath) return
+    if (edaExecutionTarget === 'local') {
+      resetAsyncState()
+      void profileFile(selectedFilePath, sampleSize, samplingStrategy, stratifyColumn || undefined)
+    } else {
+      void startAsyncTabularProfiling(selectedFilePath, sampleSize, samplingStrategy, stratifyColumn || undefined)
+    }
   }
 
   const handleReanalyze = (strategy: string, size: number, stratifyCol: string) => {
@@ -404,12 +418,19 @@ function EDAAnalysis() {
           <option value="local">Local (In App)</option>
           {dominoJobs && <option value="domino_job">Domino Job</option>}
         </select>
+        <button
+          onClick={handleAnalyze}
+          disabled={!selectedFilePath || profilingLoading || ['starting', 'pending', 'running'].includes(asyncProfileStatus)}
+          className="h-[32px] px-[15px] text-sm font-normal rounded-[2px] text-white bg-domino-accent-purple hover:bg-domino-accent-purple-hover disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+        >
+          Analyze
+        </button>
       </div>
 
       {edaExecutionTarget === 'domino_job' && asyncProfileStatus !== 'idle' && (
-        <div className="border border-domino-border bg-domino-bg-tertiary p-3 text-sm text-domino-text-secondary">
+        <div className={`border p-3 text-sm ${asyncProfileStatus === 'completed' ? 'border-domino-accent-green/30 bg-domino-accent-green/5 text-domino-accent-green' : 'border-domino-border bg-domino-bg-tertiary text-domino-text-secondary'}`}>
           <p>
-            Async profiling status: <span className="font-medium capitalize">{asyncProfileStatus}</span>
+            <span className="font-medium capitalize">{asyncProfileStatus === 'completed' ? 'Completed' : asyncProfileStatus}</span>
             {asyncDominoJobId ? ` | Domino Job ID: ${asyncDominoJobId}` : ''}
           </p>
           {asyncProfileError && (

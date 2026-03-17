@@ -352,10 +352,19 @@ class DominoDatasetManager:
             )
             return files, total_size
 
+        # The v4 files API may return full paths (e.g. "uploads/file.csv")
+        # or just basenames ("file.csv").  Normalise to avoid duplicating
+        # the directory prefix when we prepend ``path``.
+        prefix_slash = (path + "/") if path else ""
+
         for entry in entries:
             file_name = entry.get("fileName", "")
             is_dir = entry.get("isDirectory", False)
             size = entry.get("sizeInBytes", 0) or 0
+
+            # Strip the directory prefix if the API already included it.
+            if prefix_slash and file_name.startswith(prefix_slash):
+                file_name = file_name[len(prefix_slash):]
 
             if is_dir:
                 subpath = f"{path}/{file_name}" if path else file_name
