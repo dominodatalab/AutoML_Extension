@@ -3,14 +3,13 @@ import { useDropzone } from 'react-dropzone'
 import { CloudArrowUpIcon, CircleStackIcon, CheckCircleIcon, DocumentIcon } from '@heroicons/react/24/outline'
 import clsx from 'clsx'
 import { useWizard } from '../../hooks/useWizard'
-import { useDatasets, useUploadFile, useDatasetPreview, useSnapshotVerification } from '../../hooks/useDatasets'
+import { useDataset, useDatasets, useUploadFile, useDatasetPreview, useSnapshotVerification } from '../../hooks/useDatasets'
 import { useStore } from '../../store'
 import Spinner from '../common/Spinner'
 import { Dataset, DatasetFile, FileUploadResponse } from '../../types/dataset'
 
 function Step1DataSource() {
   const { dataSource, setDataSource } = useWizard()
-  const { data: datasetsData, isLoading: loadingDatasets, error: datasetsError, refetch: refetchDatasets } = useDatasets()
   const uploadMutation = useUploadFile()
   const addNotification = useStore((state) => state.addNotification)
   const [sourceType, setSourceType] = useState<'upload' | 'domino_dataset'>(
@@ -19,9 +18,18 @@ function Step1DataSource() {
   const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null)
   const [uploadResult, setUploadResult] = useState<FileUploadResponse | null>(null)
   const { isVerifying, isVerified, error: verifyError } = useSnapshotVerification(uploadResult)
+  const shouldLoadDatasets = sourceType === 'domino_dataset'
+  const { data: datasetsData, isLoading: loadingDatasets, error: datasetsError } = useDatasets({
+    enabled: shouldLoadDatasets,
+    includeFiles: false,
+  })
+  const { data: selectedDatasetDetails, isLoading: loadingSelectedDataset } = useDataset(
+    selectedDataset?.id || ''
+  )
 
   const datasets = datasetsData?.datasets || []
   const datasetLoadError = datasetsError instanceof Error ? datasetsError.message : null
+  const selectedDatasetFiles = selectedDatasetDetails?.files || selectedDataset?.files || []
 
   // Fetch preview/schema only for Domino datasets (uploaded files already have columns from upload response)
   const previewFilePath = dataSource?.type === 'domino_dataset' && dataSource?.filePath ? dataSource.filePath : ''
@@ -141,10 +149,7 @@ function Step1DataSource() {
         </button>
 
         <button
-          onClick={() => {
-            setSourceType('domino_dataset')
-            refetchDatasets()
-          }}
+          onClick={() => setSourceType('domino_dataset')}
           className={clsx(
             'flex-1 p-4 border transition-colors text-left',
             sourceType === 'domino_dataset'
@@ -289,9 +294,15 @@ function Step1DataSource() {
                   )}
                 </button>
 
-                {selectedDataset?.id === dataset.id && dataset.files.length > 0 && (
+                {selectedDataset?.id === dataset.id && loadingSelectedDataset && selectedDatasetFiles.length === 0 && (
+                  <div className="ml-8 py-3">
+                    <Spinner size="sm" />
+                  </div>
+                )}
+
+                {selectedDataset?.id === dataset.id && selectedDatasetFiles.length > 0 && (
                   <div className="ml-8 space-y-1">
-                    {dataset.files
+                    {selectedDatasetFiles
                       .filter(f => f.name.endsWith('.csv') || f.name.endsWith('.parquet') || f.name.endsWith('.pq'))
                       .map((file) => (
                         <button

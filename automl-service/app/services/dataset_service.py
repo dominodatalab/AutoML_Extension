@@ -109,6 +109,7 @@ def filter_local_datasets(
 async def list_datasets_response(
     dataset_manager: DominoDatasetManager,
     project_id: Optional[str] = None,
+    include_files: bool = True,
 ) -> DatasetListResponse:
     """List available datasets in API response shape.
 
@@ -116,7 +117,10 @@ async def list_datasets_response(
     only datasets that belong to the given project. Falls back to the
     legacy filesystem-scan approach otherwise.
     """
-    datasets = await dataset_manager.list_datasets(project_id=project_id)
+    datasets = await dataset_manager.list_datasets(
+        project_id=project_id,
+        include_files=include_files,
+    )
 
     # When datasets came from the API (project-scoped), no extra local
     # filtering is needed. Only apply the mount-path filter for the
@@ -139,9 +143,10 @@ async def list_datasets_response(
 async def get_dataset_or_404(
     dataset_manager: DominoDatasetManager,
     dataset_id: str,
+    include_files: bool = True,
 ) -> DatasetResponse:
     """Get dataset details or raise a 404."""
-    dataset = await dataset_manager.get_dataset(dataset_id)
+    dataset = await dataset_manager.get_dataset(dataset_id, include_files=include_files)
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
     return dataset

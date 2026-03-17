@@ -2,9 +2,10 @@
 
 import os
 
-from fastapi import Body, FastAPI, File, Request, UploadFile
+from fastapi import Body, FastAPI, File, Query, Request, UploadFile
 from app.services.dataset_service import (
     build_compat_dataset_preview_payload,
+    get_dataset_or_404,
     get_dataset_manager,
     list_datasets_response,
     save_uploaded_file,
@@ -15,13 +16,20 @@ def register_custom_dataset_routes(app: FastAPI) -> None:
     """Register custom /svc* dataset routes."""
 
     @app.get("/svcdatasets")
-    async def svc_list_datasets(request: Request):
+    async def svc_list_datasets(
+        request: Request,
+        include_files: bool = Query(True, description="Include file entries for each dataset"),
+    ):
         project_id = (
             request.headers.get("X-Project-Id")
             or os.environ.get("DOMINO_PROJECT_ID")
             or None
         )
-        return await list_datasets_response(get_dataset_manager(), project_id=project_id)
+        return await list_datasets_response(
+            get_dataset_manager(),
+            project_id=project_id,
+            include_files=include_files,
+        )
 
     @app.post("/svcdatasetpreview")
     async def svc_dataset_preview(request: Request, body: dict = Body(default={})):
@@ -37,6 +45,15 @@ def register_custom_dataset_routes(app: FastAPI) -> None:
             )
             body = {**body, "file_path": await ensure_local_file(file_path, project_id)}
         return await build_compat_dataset_preview_payload(get_dataset_manager(), body)
+
+    @app.get("/svcdataset")
+    async def svc_get_dataset(dataset_id: str):
+        dataset = await get_dataset_or_404(
+            get_dataset_manager(),
+            dataset_id,
+            include_files=True,
+        )
+        return dataset.model_dump() if hasattr(dataset, "model_dump") else dataset
 
     @app.post("/svcupload")
     async def svc_upload_file(request: Request, file: UploadFile = File(...)):

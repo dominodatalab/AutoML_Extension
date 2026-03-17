@@ -1,6 +1,6 @@
 import { useCallback, useState, useEffect, useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { useDatasets, useUploadFile, useDatasetPreview, useSnapshotVerification } from '../hooks/useDatasets'
+import { useDataset, useDatasets, useUploadFile, useDatasetPreview, useSnapshotVerification } from '../hooks/useDatasets'
 import { useEdaAsyncProfiling } from '../hooks/useEdaAsyncProfiling'
 import { useProfiling } from '../hooks/useProfiling'
 import { useStore } from '../store'
@@ -17,7 +17,6 @@ import { TimeSeriesConfigPanel } from '../components/eda/TimeSeriesConfigPanel'
 function EDAAnalysis() {
   const { dominoJobs } = useCapabilities()
   const [searchParams] = useSearchParams()
-  const { data: datasetsData, isLoading: loadingDatasets, error: datasetsError } = useDatasets()
   const uploadMutation = useUploadFile()
   const addNotification = useStore((state) => state.addNotification)
   const {
@@ -53,9 +52,20 @@ function EDAAnalysis() {
   const [idColumn, setIdColumn] = useState('')
   const [rollingWindow, setRollingWindow] = useState('')
   const [querySelectionApplied, setQuerySelectionApplied] = useState(false)
+  const shouldLoadDatasets = sourceType === 'dataset'
+    || !!searchParams.get('dataset_id')
+    || ['domino_dataset', 'mounted'].includes(searchParams.get('data_source') || '')
+  const { data: datasetsData, isLoading: loadingDatasets, error: datasetsError } = useDatasets({
+    enabled: shouldLoadDatasets,
+    includeFiles: false,
+  })
+  const { data: selectedDatasetDetails, isLoading: loadingSelectedDatasetFiles } = useDataset(
+    selectedDataset?.id || ''
+  )
 
   const datasets = datasetsData?.datasets || []
   const datasetLoadError = datasetsError instanceof Error ? datasetsError.message : null
+  const selectedDatasetFiles = selectedDatasetDetails?.files || selectedDataset?.files || []
 
   useEffect(() => {
     if (querySelectionApplied) return
@@ -352,6 +362,8 @@ function EDAAnalysis() {
           loadingDatasets={loadingDatasets}
           datasetsError={datasetLoadError}
           selectedDataset={selectedDataset}
+          selectedDatasetFiles={selectedDatasetFiles}
+          loadingSelectedDatasetFiles={loadingSelectedDatasetFiles}
           uploadIsPending={uploadMutation.isPending}
           onDrop={onDrop}
           onSelectDataset={handleSelectDataset}

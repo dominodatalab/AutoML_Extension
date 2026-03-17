@@ -16,6 +16,8 @@ interface DataSourceSelectorProps {
   loadingDatasets: boolean
   datasetsError?: string | null
   selectedDataset: Dataset | null
+  selectedDatasetFiles?: DatasetFile[]
+  loadingSelectedDatasetFiles?: boolean
   uploadIsPending: boolean
   onDrop: (acceptedFiles: File[]) => void
   onSelectDataset: (dataset: Dataset) => void
@@ -34,6 +36,8 @@ export function DataSourceSelector({
   loadingDatasets,
   datasetsError,
   selectedDataset,
+  selectedDatasetFiles = [],
+  loadingSelectedDatasetFiles = false,
   uploadIsPending,
   onDrop,
   onSelectDataset,
@@ -188,9 +192,15 @@ export function DataSourceSelector({
                   )}
                 </button>
 
-                {selectedDataset?.id === dataset.id && dataset.files.length > 0 && (
+                {selectedDataset?.id === dataset.id && loadingSelectedDatasetFiles && selectedDatasetFiles.length === 0 && (
+                  <div className="ml-8 py-3">
+                    <Spinner size="sm" />
+                  </div>
+                )}
+
+                {selectedDataset?.id === dataset.id && selectedDatasetFiles.length > 0 && (
                   <div className="ml-8 space-y-1">
-                    {dataset.files
+                    {selectedDatasetFiles
                       .filter(f => f.name.endsWith('.csv') || f.name.endsWith('.parquet') || f.name.endsWith('.pq'))
                       .map((file) => (
                         <button

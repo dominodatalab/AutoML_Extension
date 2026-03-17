@@ -14,11 +14,19 @@ import httpx
 import pytest
 
 from app.core.domino_http import (
+    _reset_domino_http_state,
     domino_download,
     domino_request,
     get_domino_auth_headers,
     resolve_domino_api_host,
 )
+
+
+@pytest.fixture(autouse=True)
+async def reset_domino_http_state():
+    await _reset_domino_http_state()
+    yield
+    await _reset_domino_http_state()
 
 
 # ---------------------------------------------------------------------------
@@ -62,12 +70,12 @@ class TestGetDominoAuthHeaders:
     async def test_returns_api_key_when_sidecar_down(self, monkeypatch):
         monkeypatch.setenv("DOMINO_API_KEY", "test-key-123")
         # Mock the sidecar call to fail so we fall through to API key
-        with patch("app.core.domino_http.httpx.AsyncClient") as MockClient:
-            instance = AsyncMock()
-            instance.get = AsyncMock(side_effect=ConnectionError("no sidecar"))
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = instance
+        instance = AsyncMock()
+        instance.get = AsyncMock(side_effect=ConnectionError("no sidecar"))
+        with patch(
+            "app.core.domino_http._get_shared_request_client",
+            new=AsyncMock(return_value=instance),
+        ):
             headers = await get_domino_auth_headers()
         assert headers.get("X-Domino-Api-Key") == "test-key-123"
 
@@ -85,6 +93,29 @@ class TestGetDominoAuthHeaders:
             assert isinstance(headers, dict)
         finally:
             cfg._settings_instance = old
+
+    @pytest.mark.asyncio
+    async def test_reuses_cached_auth_headers_within_ttl(self, monkeypatch):
+        monkeypatch.delenv("DOMINO_API_KEY", raising=False)
+        monkeypatch.delenv("DOMINO_USER_API_KEY", raising=False)
+
+        response = MagicMock()
+        response.status_code = 200
+        response.text = "token-123"
+
+        instance = AsyncMock()
+        instance.get = AsyncMock(return_value=response)
+
+        with patch(
+            "app.core.domino_http._get_shared_request_client",
+            new=AsyncMock(return_value=instance),
+        ):
+            headers_one = await get_domino_auth_headers()
+            headers_two = await get_domino_auth_headers()
+
+        assert headers_one == {"Authorization": "Bearer token-123"}
+        assert headers_two == {"Authorization": "Bearer token-123"}
+        assert instance.get.await_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +186,39 @@ class TestDominoRequest:
         # call_count includes auth header fetches triggering extra client creates,
         # but the mock_request captures the actual API calls
         assert call_count >= 3
+
+    @pytest.mark.asyncio
+    async def test_reuses_shared_client_across_requests(self, monkeypatch):
+        monkeypatch.setenv("DOMINO_API_PROXY", "https://api.test.com")
+
+        client_instances = []
+
+        class FakeClient:
+            is_closed = False
+
+            def __init__(self, **kwargs):
+                client_instances.append(self)
+
+            async def request(self, method, url, **kwargs):
+                resp = MagicMock(spec=httpx.Response)
+                resp.status_code = 200
+                resp.raise_for_status = MagicMock()
+                return resp
+
+            async def get(self, url, **kwargs):
+                resp = MagicMock(spec=httpx.Response)
+                resp.status_code = 200
+                resp.text = "token-123"
+                return resp
+
+            async def aclose(self):
+                self.is_closed = True
+
+        with patch("app.core.domino_http.httpx.AsyncClient", FakeClient):
+            await domino_request("GET", "/api/first", max_retries=0)
+            await domino_request("GET", "/api/second", max_retries=0)
+
+        assert len(client_instances) == 1
 
 
 # ---------------------------------------------------------------------------

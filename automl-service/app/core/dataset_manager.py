@@ -2,6 +2,7 @@
 
 import logging
 import os
+import time
 from typing import Any, Optional
 
 import httpx
@@ -27,6 +28,7 @@ class DominoDatasetManager:
     def __init__(self):
         self.settings = get_settings()
         self._http_client: Optional[httpx.AsyncClient] = None
+        self._dataset_item_cache: dict[str, dict[str, Any]] = {}
 
     @property
     def api_headers(self) -> dict:
@@ -139,7 +141,11 @@ class DominoDatasetManager:
 
         return response.json() if response.text else {}
 
-    async def list_datasets(self, project_id: Optional[str] = None) -> list[DatasetResponse]:
+    async def list_datasets(
+        self,
+        project_id: Optional[str] = None,
+        include_files: bool = True,
+    ) -> list[DatasetResponse]:
         """List datasets, preferring the Domino API when a project ID is available.
 
         When *project_id* is supplied and the Domino environment is configured,
@@ -152,7 +158,10 @@ class DominoDatasetManager:
         """
         if project_id and self.settings.is_domino_environment:
             try:
-                datasets = await self._list_datasets_via_api(project_id)
+                datasets = await self._list_datasets_via_api(
+                    project_id,
+                    include_files=include_files,
+                )
                 if datasets is not None:
                     logger.info(
                         "Listed %s datasets for project %s via Domino API",
@@ -176,7 +185,11 @@ class DominoDatasetManager:
         )
         return datasets
 
-    async def _list_datasets_via_api(self, project_id: str) -> Optional[list[DatasetResponse]]:
+    async def _list_datasets_via_api(
+        self,
+        project_id: str,
+        include_files: bool = True,
+    ) -> Optional[list[DatasetResponse]]:
         """List datasets for a project using the Domino Dataset RW v2 API.
 
         Returns None when the API is unreachable so the caller can fall back.
@@ -216,7 +229,13 @@ class DominoDatasetManager:
             ]
 
             for item in items:
-                ds = await self._api_item_to_dataset_response(item)
+                dataset_id = str(item.get("datasetId") or item.get("id") or "")
+                if dataset_id:
+                    self._dataset_item_cache[dataset_id] = dict(item)
+                ds = await self._api_item_to_dataset_response(
+                    item,
+                    include_files=include_files,
+                )
                 if ds is not None:
                     datasets.append(ds)
 
@@ -227,7 +246,11 @@ class DominoDatasetManager:
 
         return datasets
 
-    async def _api_item_to_dataset_response(self, item: dict) -> Optional[DatasetResponse]:
+    async def _api_item_to_dataset_response(
+        self,
+        item: dict,
+        include_files: bool = True,
+    ) -> Optional[DatasetResponse]:
         """Convert a Domino API dataset object into a DatasetResponse.
 
         Always lists files via the snapshot API (which reflects the current
@@ -253,64 +276,65 @@ class DominoDatasetManager:
         )
 
         dataset_path: Optional[str] = None
-        if is_local_dataset:
+        if include_files and is_local_dataset:
             for mount_root in self._resolve_dataset_mount_paths():
                 candidate = os.path.join(mount_root, dataset_name)
                 if os.path.exists(candidate):
                     dataset_path = candidate
                     break
 
-        # Always list files from the snapshot API — mounted filesystems use
-        # read-only snapshots that go stale when files are deleted in Domino.
         files: list[DatasetFileResponse] = []
         total_size = 0
-        rw_snapshot_id = item.get("readWriteSnapshotId")
-        if not rw_snapshot_id and dataset_id:
-            from app.services.storage_resolver import get_storage_resolver
-            rw_snapshot_id = await get_storage_resolver().get_rw_snapshot_id(dataset_id)
-        if rw_snapshot_id:
-            api_files, total_size = await self._list_files_via_snapshot_api(
-                rw_snapshot_id, dataset_name, dataset_id=dataset_id,
-            )
-            # If the dataset is mounted locally (same project), upgrade file
-            # paths from synthetic to real mount paths where the file exists.
-            for f in api_files:
-                if dataset_path:
-                    local_path = os.path.join(dataset_path, f.name)
-                    if os.path.exists(local_path):
-                        f.path = local_path
-                        f.mounted = True
-                        try:
-                            f.size = os.stat(local_path).st_size
-                        except OSError:
-                            pass
-                files.append(f)
+        if include_files:
+            # Always list files from the snapshot API — mounted filesystems use
+            # read-only snapshots that go stale when files are deleted in Domino.
+            rw_snapshot_id = item.get("readWriteSnapshotId")
+            if not rw_snapshot_id and dataset_id:
+                from app.services.storage_resolver import get_storage_resolver
+                rw_snapshot_id = await get_storage_resolver().get_rw_snapshot_id(dataset_id)
+            if rw_snapshot_id:
+                api_files, total_size = await self._list_files_via_snapshot_api(
+                    rw_snapshot_id, dataset_name, dataset_id=dataset_id,
+                )
+                # If the dataset is mounted locally (same project), upgrade file
+                # paths from synthetic to real mount paths where the file exists.
+                for f in api_files:
+                    if dataset_path:
+                        local_path = os.path.join(dataset_path, f.name)
+                        if os.path.exists(local_path):
+                            f.path = local_path
+                            f.mounted = True
+                            try:
+                                f.size = os.stat(local_path).st_size
+                            except OSError:
+                                pass
+                    files.append(f)
 
-        # Fall back to mounted filesystem only when the snapshot API returned
-        # nothing (e.g. no RW snapshot ID or API unreachable).  Warn because
-        # mounted datasets use read-only snapshots that can be stale.
-        if not files and dataset_path and os.path.isdir(dataset_path):
-            logger.warning(
-                "Snapshot API returned no files for dataset %s (%s); "
-                "falling back to mounted filesystem which may be stale",
-                dataset_name,
-                dataset_id,
-            )
-            for root, _, filenames in os.walk(dataset_path):
-                for filename in filenames:
-                    if not self._is_supported_file(filename):
-                        continue
-                    file_path = os.path.join(root, filename)
-                    rel_path = os.path.relpath(file_path, dataset_path)
-                    try:
-                        file_stat = os.stat(file_path)
-                        file_size = file_stat.st_size
-                    except OSError:
-                        file_size = 0
-                    files.append(
-                        DatasetFileResponse(name=rel_path, path=file_path, size=file_size)
-                    )
-                    total_size += file_size
+            # Fall back to mounted filesystem only when the snapshot API returned
+            # nothing (e.g. no RW snapshot ID or API unreachable). Warn because
+            # mounted datasets use read-only snapshots that can be stale.
+            if not files and dataset_path and os.path.isdir(dataset_path):
+                logger.warning(
+                    "Snapshot API returned no files for dataset %s (%s); "
+                    "falling back to mounted filesystem which may be stale",
+                    dataset_name,
+                    dataset_id,
+                )
+                for root, _, filenames in os.walk(dataset_path):
+                    for filename in filenames:
+                        if not self._is_supported_file(filename):
+                            continue
+                        file_path = os.path.join(root, filename)
+                        rel_path = os.path.relpath(file_path, dataset_path)
+                        try:
+                            file_stat = os.stat(file_path)
+                            file_size = file_stat.st_size
+                        except OSError:
+                            file_size = 0
+                        files.append(
+                            DatasetFileResponse(name=rel_path, path=file_path, size=file_size)
+                        )
+                        total_size += file_size
 
         return DatasetResponse(
             id=dataset_id,
@@ -467,6 +491,14 @@ class DominoDatasetManager:
         logger.info("Found %s mounted datasets in %s", len(datasets), dataset_mount_path)
         return datasets
 
+    def _get_mounted_dataset(self, dataset_name: str) -> Optional[DatasetResponse]:
+        """Resolve a mounted dataset by name from the configured mount roots."""
+        for dataset_mount_path in self._resolve_dataset_mount_paths():
+            for dataset in self._list_mounted_dataset_entries(dataset_mount_path):
+                if dataset.id == f"domino:{dataset_name}":
+                    return dataset
+        return None
+
     async def _list_local_datasets(self) -> list[DatasetResponse]:
         """List datasets from all mounted dataset roots."""
         merged: dict[str, DatasetResponse] = {}
@@ -476,8 +508,13 @@ class DominoDatasetManager:
                 merged.setdefault(dataset.id, dataset)
         return list(merged.values())
 
-    async def get_dataset(self, dataset_id: str) -> Optional[DatasetResponse]:
+    async def get_dataset(
+        self,
+        dataset_id: str,
+        include_files: bool = True,
+    ) -> Optional[DatasetResponse]:
         """Get dataset details using REST API."""
+        started_at = time.perf_counter()
         if dataset_id.startswith("local:"):
             # Local dataset
             file_name = dataset_id.replace("local:", "")
@@ -496,28 +533,34 @@ class DominoDatasetManager:
                 )
             return None
 
+        if dataset_id.startswith("domino:"):
+            return self._get_mounted_dataset(dataset_id.replace("domino:", ""))
+
         # Domino dataset - use REST API
         if self.settings.is_domino_environment:
             try:
-                result = await self._api_request("GET", f"/api/datasetrw/v1/datasets/{dataset_id}")
-                dataset_name = result.get("datasetName", result.get("name", ""))
-                dataset_path = ""
-                for mount_path in self._resolve_dataset_mount_paths():
-                    candidate = os.path.join(mount_path, dataset_name)
-                    if os.path.exists(candidate):
-                        dataset_path = candidate
-                        break
-                return DatasetResponse(
-                    id=result.get("datasetId", result.get("id", dataset_id)),
-                    name=dataset_name,
-                    path=dataset_path or None,
-                    description=result.get("description", ""),
-                    size_bytes=result.get("sizeInBytes", result.get("size", 0)),
-                    created_at=result.get("createdAt"),
-                    updated_at=result.get("lastUpdatedAt", result.get("updatedAt")),
-                    file_count=result.get("fileCount", 0),
-                    files=self._normalize_dataset_files(result.get("files", []), dataset_path=dataset_path or None),
+                result = self._dataset_item_cache.get(dataset_id)
+                cache_hit = result is not None
+                if result is None:
+                    result = await self._api_request("GET", f"/api/datasetrw/v1/datasets/{dataset_id}")
+                    cached_id = str(result.get("datasetId", result.get("id", dataset_id)))
+                    if cached_id:
+                        self._dataset_item_cache[cached_id] = dict(result)
+                dataset = await self._api_item_to_dataset_response(
+                    result,
+                    include_files=include_files,
                 )
+                if dataset is not None:
+                    elapsed_ms = (time.perf_counter() - started_at) * 1000
+                    logger.debug(
+                        "Loaded dataset %s include_files=%s cache_hit=%s files=%s elapsed=%.1fms",
+                        dataset_id,
+                        include_files,
+                        cache_hit,
+                        len(dataset.files),
+                        elapsed_ms,
+                    )
+                    return dataset
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 404:
                     return None

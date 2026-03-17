@@ -3,10 +3,19 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import { getDatasets, getDataset, getDatasetPreview, getDatasetSchema, uploadFile, verifySnapshot } from '../api/datasets'
 import type { FileUploadResponse } from '../types/dataset'
 
-export function useDatasets() {
+interface UseDatasetsOptions {
+  enabled?: boolean
+  includeFiles?: boolean
+}
+
+export function useDatasets(options: UseDatasetsOptions = {}) {
+  const includeFiles = options.includeFiles ?? true
   return useQuery({
-    queryKey: ['datasets'],
-    queryFn: getDatasets,
+    queryKey: ['datasets', includeFiles],
+    queryFn: () => getDatasets({ includeFiles }),
+    enabled: options.enabled ?? true,
+    staleTime: includeFiles ? 60_000 : 30_000,
+    gcTime: 5 * 60 * 1000,
   })
 }
 
@@ -15,6 +24,8 @@ export function useDataset(datasetId: string) {
     queryKey: ['dataset', datasetId],
     queryFn: () => getDataset(datasetId),
     enabled: !!datasetId,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   })
 }
 

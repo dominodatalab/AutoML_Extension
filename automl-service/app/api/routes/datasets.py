@@ -81,11 +81,16 @@ def _resolve_project_id(request: Request) -> Optional[str]:
 @handle_errors("Failed to list datasets", detail_prefix="Failed to list datasets")
 async def list_datasets(
     request: Request,
+    include_files: bool = Query(True, description="Include file entries for each dataset"),
     dataset_manager=Depends(get_dataset_manager),
 ):
     """List available datasets scoped to the current project."""
     project_id = _resolve_project_id(request)
-    return await list_datasets_response(dataset_manager, project_id=project_id)
+    return await list_datasets_response(
+        dataset_manager,
+        project_id=project_id,
+        include_files=include_files,
+    )
 
 
 @router.get("/verify-snapshot")
@@ -120,10 +125,15 @@ async def verify_snapshot(
 @handle_errors("Failed to get dataset", detail_prefix="Failed to get dataset")
 async def get_dataset(
     dataset_id: str,
+    include_files: bool = Query(True, description="Include file entries for the dataset"),
     dataset_manager=Depends(get_dataset_manager),
 ):
     """Get dataset details."""
-    return await get_dataset_or_404(dataset_manager, dataset_id)
+    return await get_dataset_or_404(
+        dataset_manager,
+        dataset_id,
+        include_files=include_files,
+    )
 
 
 @router.get("/{dataset_id}/preview", response_model=DatasetPreviewResponse)
