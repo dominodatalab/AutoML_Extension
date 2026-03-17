@@ -38,7 +38,7 @@ from app.services.dataset_service import (
 
 router = APIRouter()
 
-_VERIFY_BACKOFF = [1, 2, 3, 4, 5]  # ~15s total — keep short to avoid proxy timeouts
+_VERIFY_BACKOFF = [1, 2, 3, 5, 5, 5, 5]  # ~26s total — keep under proxy timeout (~30s)
 
 
 async def _verify_snapshot_active(

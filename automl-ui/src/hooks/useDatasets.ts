@@ -40,8 +40,8 @@ export function useUploadFile() {
   })
 }
 
-const VERIFY_INTERVAL_MS = 3000
-const VERIFY_MAX_ATTEMPTS = 20
+const VERIFY_INTERVAL_MS = 4000
+const VERIFY_MAX_ATTEMPTS = 40
 
 export function useSnapshotVerification(uploadResult: FileUploadResponse | null) {
   const [isVerifying, setIsVerifying] = useState(false)

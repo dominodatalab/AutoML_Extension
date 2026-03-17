@@ -6,6 +6,7 @@ import { useProfiling } from '../hooks/useProfiling'
 import { useStore } from '../store'
 import { Dataset, DatasetFile, FileUploadResponse } from '../types/dataset'
 import type { TransformConfig } from '../types/eda'
+import type { ColumnProfile } from '../types/profiling'
 import { generateEDANotebook } from '../utils/notebookGenerator'
 import { getFileName } from '../utils/path'
 import { useCapabilities } from '../hooks/useCapabilities'
@@ -177,12 +178,36 @@ function EDAAnalysis() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   }
 
+  // Build lightweight column profiles from preview data when full profile isn't ready yet
+  const effectiveColumns: ColumnProfile[] | null = useMemo(() => {
+    if (profile?.columns) return profile.columns
+    if (preview?.columns && preview?.dtypes) {
+      return preview.columns.map((name) => {
+        const dtype = preview.dtypes?.[name] || 'object'
+        const isDt = dtype.includes('datetime')
+        const isNum = dtype.startsWith('int') || dtype.startsWith('float')
+        return {
+          name,
+          dtype,
+          missing_count: 0,
+          missing_percentage: 0,
+          unique_count: 0,
+          unique_percentage: 0,
+          semantic_type: isDt ? 'datetime' : isNum ? 'numeric' : 'category',
+        } as ColumnProfile
+      })
+    }
+    return null
+  }, [profile, preview])
+
+  const effectiveTotalRows = profile?.summary?.total_rows ?? preview?.total_rows ?? 0
+
   const hasDatetimeColumns = useMemo(() => {
-    if (!profile?.columns) return false
-    return profile.columns.some(
+    if (!effectiveColumns) return false
+    return effectiveColumns.some(
       (c) => c.semantic_type === 'datetime' || c.dtype.includes('datetime')
     )
-  }, [profile])
+  }, [effectiveColumns])
 
   const handleRunTSAnalysis = (tc: string, tgt: string, id: string, size: number, strategy: string, rw: string) => {
     if (!selectedFilePath) return
@@ -381,10 +406,10 @@ function EDAAnalysis() {
       )}
 
       {/* Time Series Config Panel */}
-      {edaMode === 'timeseries' && profile?.columns && (
+      {edaMode === 'timeseries' && effectiveColumns && (
         <TimeSeriesConfigPanel
-          columns={profile.columns}
-          totalRows={profile.summary.total_rows}
+          columns={effectiveColumns}
+          totalRows={effectiveTotalRows}
           onRunAnalysis={handleRunTSAnalysis}
           loading={effectiveTsLoading}
           timeColumn={timeColumn}
