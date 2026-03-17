@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -192,7 +193,7 @@ def create_app() -> FastAPI:
                     await websocket.send_json({
                         "type": "initial",
                         "job_id": job_id,
-                        **(progress.dict() if hasattr(progress, 'dict') else progress)
+                        **jsonable_encoder(progress)
                     })
                 except Exception as e:
                     await websocket.send_json({

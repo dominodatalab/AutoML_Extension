@@ -5,10 +5,7 @@ import logging
 import mimetypes
 import os
 import uuid
-from io import BytesIO
 from typing import Optional
-
-import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +32,7 @@ from app.services.dataset_service import (
     preview_file_response,
     save_uploaded_file,
 )
+from app.core.tabular_data import read_upload_metadata
 
 router = APIRouter()
 
@@ -243,14 +241,7 @@ async def upload_file(
 
         # Extract metadata from the in-memory buffer
         try:
-            if file_ext == ".csv":
-                header_df = pd.read_csv(BytesIO(content), nrows=0)
-                row_count = max(content.count(b"\n") - 1, 0)
-            else:
-                pq_df = pd.read_parquet(BytesIO(content))
-                header_df = pq_df
-                row_count = len(pq_df)
-            columns = list(header_df.columns)
+            columns, row_count = read_upload_metadata(content, file_ext)
         except Exception as exc:
             raise HTTPException(
                 status_code=400, detail=f"Failed to read file: {exc}"

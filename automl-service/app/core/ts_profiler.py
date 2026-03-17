@@ -17,6 +17,66 @@ class TimeSeriesProfiler:
     def __init__(self):
         pass
 
+    def _load_timeseries_dataframe(
+        self,
+        file_path: str,
+        time_column: str,
+        target_column: str,
+        id_column: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """Load only the columns required for time-series analysis."""
+        required_columns = [time_column, target_column]
+        if id_column:
+            required_columns.append(id_column)
+
+        if file_path.endswith(".csv"):
+            return pd.read_csv(
+                file_path,
+                usecols=required_columns,
+                parse_dates=[time_column],
+            )
+
+        if file_path.endswith((".parquet", ".pq")):
+            df = pd.read_parquet(file_path, columns=required_columns)
+        elif file_path.endswith(".json"):
+            df = pd.read_json(file_path)
+            df = df[required_columns]
+        elif file_path.endswith((".xlsx", ".xls")):
+            df = pd.read_excel(file_path, usecols=required_columns, parse_dates=[time_column])
+        else:
+            raise ValueError(f"Unsupported file format: {file_path}")
+
+        if not pd.api.types.is_datetime64_any_dtype(df[time_column]):
+            df[time_column] = pd.to_datetime(df[time_column], errors="coerce")
+        return df
+
+    def _sample_timeseries_dataframe(
+        self,
+        df: pd.DataFrame,
+        time_column: str,
+        sample_size: int,
+        strategy: str,
+    ) -> tuple[pd.DataFrame, str]:
+        """Apply sampling while minimizing full-frame sorting where possible."""
+        if strategy == "full" or len(df) <= sample_size:
+            return df.sort_values(time_column).reset_index(drop=True), strategy
+
+        if strategy == "recent":
+            sampled = df.nlargest(sample_size, time_column)
+            return sampled.sort_values(time_column).reset_index(drop=True), "recent"
+
+        if strategy == "oldest":
+            sampled = df.nsmallest(sample_size, time_column)
+            return sampled.sort_values(time_column).reset_index(drop=True), "oldest"
+
+        if strategy == "uniform":
+            sorted_df = df.sort_values(time_column).reset_index(drop=True)
+            step = max(1, len(sorted_df) // sample_size)
+            return sorted_df.iloc[::step].head(sample_size).reset_index(drop=True), "uniform"
+
+        sampled = df.nlargest(sample_size, time_column)
+        return sampled.sort_values(time_column).reset_index(drop=True), "recent"
+
     def profile_timeseries_file(
         self,
         file_path: str,
@@ -31,23 +91,12 @@ class TimeSeriesProfiler:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
-        # Load data
-        if file_path.endswith(".csv"):
-            df = pd.read_csv(file_path, parse_dates=[time_column])
-        elif file_path.endswith((".parquet", ".pq")):
-            df = pd.read_parquet(file_path)
-            # Parquet preserves dtypes but datetime columns may be stored as objects
-            if not pd.api.types.is_datetime64_any_dtype(df[time_column]):
-                df[time_column] = pd.to_datetime(df[time_column], errors="coerce")
-        elif file_path.endswith(".json"):
-            df = pd.read_json(file_path)
-            # JSON doesn't preserve datetime types
-            if not pd.api.types.is_datetime64_any_dtype(df[time_column]):
-                df[time_column] = pd.to_datetime(df[time_column], errors="coerce")
-        elif file_path.endswith((".xlsx", ".xls")):
-            df = pd.read_excel(file_path, parse_dates=[time_column])
-        else:
-            raise ValueError(f"Unsupported file format: {file_path}")
+        df = self._load_timeseries_dataframe(
+            file_path=file_path,
+            time_column=time_column,
+            target_column=target_column,
+            id_column=id_column,
+        )
 
         # Ensure time column is datetime
         if not pd.api.types.is_datetime64_any_dtype(df[time_column]):
@@ -59,14 +108,16 @@ class TimeSeriesProfiler:
 
         total_rows = len(df)
 
-        # Sort by time
-        df = df.sort_values(time_column).reset_index(drop=True)
-
         # Gap detection uses all timestamps before sampling
         all_timestamps = df[time_column].dropna()
 
         # Apply sampling
-        df, used_strategy = self._apply_sampling(df, sample_size, sampling_strategy)
+        df, used_strategy = self._sample_timeseries_dataframe(
+            df,
+            time_column,
+            sample_size,
+            sampling_strategy,
+        )
 
         result: Dict[str, Any] = {}
         result["temporal_summary"] = self._temporal_summary(
@@ -401,13 +452,12 @@ class TimeSeriesProfiler:
             acf_values, acf_ci = acf(series.values, nlags=nlags, alpha=0.05, fft=True)
             pacf_values, pacf_ci = pacf(series.values, nlags=nlags, alpha=0.05)
 
-            # Use statsmodels confidence intervals to determine significant lags.
-            # acf_ci is shape (nlags+1, 2) with lower/upper bounds per lag.
-            # A lag is significant if the ACF value falls outside the CI bounds.
+            # statsmodels returns confidence intervals around the ACF estimate.
+            # A lag is significant when that interval excludes zero.
             significant_lags = []
             for i in range(1, len(acf_values)):
                 lower, upper = acf_ci[i]
-                if acf_values[i] < lower or acf_values[i] > upper:
+                if lower > 0 or upper < 0:
                     significant_lags.append(i)
 
             # Report the approximate CI width for frontend visualization

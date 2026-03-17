@@ -4,6 +4,7 @@ from fastapi import Body, FastAPI, Request
 
 from app.api.schemas.job import (
     JobCreateRequest,
+    JobListItemResponse,
     JobListRequest,
     JobListResponse,
     JobResponse,
@@ -14,6 +15,7 @@ from app.services.job_service import (
     create_job_with_context,
     find_orphans_checked,
     delete_orphans as delete_orphans_service,
+    build_job_list_item_response,
     list_jobs_filtered,
     preview_cleanup as preview_cleanup_service,
     register_model_for_job,
@@ -28,7 +30,7 @@ async def _list_jobs_response(
     async with get_db_session() as db:
         jobs = await list_jobs_filtered(db=db, list_request=list_request, request=request)
     return JobListResponse(
-        jobs=[JobResponse.model_validate(j) for j in jobs],
+        jobs=[JobListItemResponse.model_validate(build_job_list_item_response(j)) for j in jobs],
         total=len(jobs),
         skip=list_request.skip,
         limit=list_request.limit,

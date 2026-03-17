@@ -7,8 +7,6 @@ import uuid
 from functools import lru_cache
 from typing import Any, Optional, Sequence
 
-import numpy as np
-import pandas as pd
 from fastapi import HTTPException, UploadFile
 
 from app.api.schemas.dataset import (
@@ -21,6 +19,10 @@ from app.api.schemas.dataset import (
 from app.config import get_settings
 from app.core.dataset_mounts import resolve_dataset_mount_paths
 from app.core.dataset_manager import DominoDatasetManager
+from app.core.tabular_data import (
+    get_tabular_metadata,
+    read_tabular_preview,
+)
 
 ALLOWED_UPLOAD_EXTENSIONS = (".csv", ".parquet", ".pq")
 DEFAULT_PREVIEW_LIMIT = 100
@@ -208,34 +210,27 @@ def build_preview_payload(
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
 
-    file_ext = os.path.splitext(file_path)[1].lower()
+    try:
+        preview = read_tabular_preview(
+            file_path,
+            limit=limit,
+            offset=offset,
+            include_dtypes=include_dtypes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Unsupported file format") from exc
 
-    if file_ext == ".csv":
-        with open(file_path, "r") as f:
-            total_rows = max(sum(1 for _ in f) - 1, 0)
-        if offset > 0:
-            df = pd.read_csv(file_path, skiprows=range(1, offset + 1), nrows=limit)
-        else:
-            df = pd.read_csv(file_path, nrows=limit)
-    elif file_ext in [".parquet", ".pq"]:
-        df_full = pd.read_parquet(file_path)
-        total_rows = len(df_full)
-        df = df_full.iloc[offset : offset + limit]
-    else:
-        raise HTTPException(status_code=400, detail="Unsupported file format")
-
-    safe_df = df.replace({np.nan: None, np.inf: None, -np.inf: None})
     payload: dict[str, Any] = {
         "dataset_id": file_path,
         "file_path": file_path,
         "file_name": os.path.basename(file_path),
-        "columns": list(df.columns),
-        "rows": safe_df.to_dict(orient="records"),
-        "total_rows": total_rows,
-        "preview_rows": len(df),
+        "columns": preview["columns"],
+        "rows": preview["rows"],
+        "total_rows": preview["total_rows"],
+        "preview_rows": preview["preview_rows"],
     }
     if include_dtypes:
-        payload["dtypes"] = {col: str(dtype) for col, dtype in df.dtypes.items()}
+        payload["dtypes"] = preview.get("dtypes", {})
 
     return payload
 
@@ -335,15 +330,9 @@ async def save_uploaded_file(
         raise HTTPException(status_code=500, detail=f"Failed to save file: {exc}") from exc
 
     try:
-        if file_ext == ".csv":
-            header_df = pd.read_csv(file_path, nrows=0)
-            with open(file_path, "r") as f:
-                row_count = max(sum(1 for _ in f) - 1, 0)
-        else:
-            header_df = pd.read_parquet(file_path)
-            row_count = len(header_df)
-
-        columns = list(header_df.columns)
+        metadata = get_tabular_metadata(file_path)
+        columns = metadata.columns
+        row_count = metadata.total_rows
         file_size = os.path.getsize(file_path)
     except Exception as exc:
         os.remove(file_path)

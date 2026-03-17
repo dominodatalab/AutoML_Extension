@@ -15,13 +15,11 @@ function getDuration(job: Job): string {
 }
 
 function getBestModel(job: Job): string {
-  if (!job.leaderboard || job.leaderboard.length === 0) return '\u2014'
-  return job.leaderboard[0].model
+  return job.best_model_name || '\u2014'
 }
 
 function getBestScore(job: Job): string {
-  if (!job.leaderboard || job.leaderboard.length === 0) return '\u2014'
-  return job.leaderboard[0].score_val.toFixed(4)
+  return typeof job.best_model_score === 'number' ? job.best_model_score.toFixed(4) : '\u2014'
 }
 
 function getExecutionTarget(job: Job): string {

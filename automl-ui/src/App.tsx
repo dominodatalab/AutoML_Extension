@@ -1,13 +1,15 @@
-import { useEffect } from 'react'
+import { Suspense, lazy, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useSearchParams } from 'react-router-dom'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import Layout from './components/layout/Layout'
-import Dashboard from './pages/Dashboard'
-import NewJob from './pages/NewJob'
-import JobDetail from './pages/JobDetail'
-import EDAAnalysis from './pages/EDAAnalysis'
+import Spinner from './components/common/Spinner'
 import { getBasePath } from './utils/basePath'
 import { setProjectId } from './api'
+
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const NewJob = lazy(() => import('./pages/NewJob'))
+const JobDetail = lazy(() => import('./pages/JobDetail'))
+const EDAAnalysis = lazy(() => import('./pages/EDAAnalysis'))
 
 /**
  * Sync projectId from both query string and hash fragment into the API
@@ -66,18 +68,28 @@ function App() {
     <ErrorBoundary>
       <BrowserRouter basename={basename}>
         <ProjectIdSync />
-        <Routes>
-          <Route path="/" element={<Layout />}>
-            <Route index element={<Navigate to="/dashboard" replace />} />
-            <Route path="dashboard" element={<Dashboard />} />
-            <Route path="eda" element={<EDAAnalysis />} />
-            <Route path="jobs/new" element={<NewJob />} />
-            <Route path="jobs/:jobId" element={<JobDetail />} />
-          </Route>
-          <Route path="*" element={<NoRouteMatch />} />
-        </Routes>
+        <Suspense fallback={<RouteLoadingFallback />}>
+          <Routes>
+            <Route path="/" element={<Layout />}>
+              <Route index element={<Navigate to="/dashboard" replace />} />
+              <Route path="dashboard" element={<Dashboard />} />
+              <Route path="eda" element={<EDAAnalysis />} />
+              <Route path="jobs/new" element={<NewJob />} />
+              <Route path="jobs/:jobId" element={<JobDetail />} />
+            </Route>
+            <Route path="*" element={<NoRouteMatch />} />
+          </Routes>
+        </Suspense>
       </BrowserRouter>
     </ErrorBoundary>
+  )
+}
+
+function RouteLoadingFallback() {
+  return (
+    <div className="flex items-center justify-center min-h-[60vh]">
+      <Spinner size="lg" />
+    </div>
   )
 }
 

@@ -127,20 +127,6 @@ function EDAAnalysis() {
     addNotification,
   })
 
-  // Auto-profile only when a new file is selected, not when the execution
-  // target changes — switching between Local and Domino Job requires an
-  // explicit click on the "Analyze" button.
-  useEffect(() => {
-    if (!selectedFilePath) return
-    if (edaExecutionTarget === 'local') {
-      resetAsyncState()
-      void profileFile(selectedFilePath)
-      return
-    }
-    void startAsyncTabularProfiling(selectedFilePath, sampleSize, samplingStrategy, stratifyColumn || undefined)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedFilePath])
-
   // Once snapshot is verified, set file path to trigger profiling
   useEffect(() => {
     if (isVerified && uploadResult) {
@@ -175,6 +161,8 @@ function EDAAnalysis() {
     setSelectedFilePath(file.path)
     setSelectedFileName(file.name)
     setTransforms([])
+    setProfileData(null)
+    setTsProfileData(null)
   }
 
   const handleChangeFile = () => {

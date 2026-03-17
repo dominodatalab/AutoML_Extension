@@ -1,5 +1,6 @@
 """Data profiling endpoints."""
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
@@ -101,7 +102,8 @@ async def profile_data(request: ProfileRequest, http_request: Request):
     profiler = get_data_profiler()
 
     try:
-        profile = profiler.profile_file(
+        profile = await asyncio.to_thread(
+            profiler.profile_file,
             file_path=resolved_path,
             sample_size=request.sample_size,
             sampling_strategy=request.sampling_strategy,
@@ -130,14 +132,22 @@ async def suggest_target_column(request: ProfileRequest, http_request: Request):
     profiler = get_data_profiler()
 
     try:
-        profile = profiler.profile_file(
-            file_path=resolved_path,
-            sample_size=request.sample_size,
-            sampling_strategy=request.sampling_strategy,
-            stratify_column=request.stratify_column,
-        )
+        if request.sampling_strategy == "full":
+            profile = await asyncio.to_thread(
+                profiler.profile_file,
+                file_path=resolved_path,
+                sample_size=request.sample_size,
+                sampling_strategy=request.sampling_strategy,
+                stratify_column=request.stratify_column,
+            )
+        else:
+            profile = await asyncio.to_thread(
+                profiler.profile_sample_file,
+                file_path=resolved_path,
+                sample_size=request.sample_size,
+            )
 
-        suggestions = profiler.suggest_target_column(profile)
+        suggestions = await asyncio.to_thread(profiler.suggest_target_column, profile)
 
         return TargetSuggestionsResponse(
             suggestions=[TargetSuggestion(**s) for s in suggestions]
@@ -156,7 +166,11 @@ async def quick_profile(file_path: str, http_request: Request):
 
     profiler = get_data_profiler()
 
-    profile = profiler.profile_file(resolved_path, sample_size=1000)
+    profile = await asyncio.to_thread(
+        profiler.quick_profile_file,
+        resolved_path,
+        1000,
+    )
 
     # Return simplified summary
     return {
@@ -178,28 +192,6 @@ async def quick_profile(file_path: str, http_request: Request):
             if r["type"] == "target"
         ][:3]
     }
-
-
-@router.post("/profile/column/{column_name}")
-@handle_errors("Column profile error")
-async def profile_column(file_path: str, column_name: str, http_request: Request):
-    """Get detailed profile for a specific column."""
-    project_id = http_request.headers.get("X-Project-Id")
-    resolved_path = await ensure_local_file(file_path, project_id)
-
-    profiler = get_data_profiler()
-
-    try:
-        profile = profiler.profile_file(resolved_path, sample_size=10000)
-
-        for col in profile["columns"]:
-            if col["name"] == column_name:
-                return col
-
-        raise HTTPException(status_code=404, detail=f"Column not found: {column_name}")
-
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
 
 
 @router.get("/profile/metrics")
@@ -416,7 +408,8 @@ async def profile_timeseries(request: TimeSeriesProfileRequest, http_request: Re
     profiler = get_ts_profiler()
 
     try:
-        result = profiler.profile_timeseries_file(
+        result = await asyncio.to_thread(
+            profiler.profile_timeseries_file,
             file_path=resolved_path,
             time_column=request.time_column,
             target_column=request.target_column,

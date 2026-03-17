@@ -38,7 +38,7 @@ def _make_endpoint(mod, fn, cls=None, keys=None, use_db=False, db_first=False, m
         elif k is not None:
             # Pattern 3/5: key-extraction
             if needs_request:
-                # Function takes (*args, http_request: Request) — e.g. quick_profile, profile_column
+                # Function takes (*args, http_request: Request) — e.g. quick_profile
                 async def endpoint(request: Request, body: dict = Body(default={})):
                     func = lazy_import(m, f)
                     args = [body.get(*key) for key in k]
@@ -155,7 +155,6 @@ def register_pattern_routes(app: FastAPI) -> None:
     # Pattern 3r: POST body.get(keys) + Request -> func(*args, http_request)
     post_keys_with_http = [
         ("/svcprofilequick", "app.api.routes.profiling", "quick_profile", [("file_path",)]),
-        ("/svcprofilecolumn", "app.api.routes.profiling", "profile_column", [("file_path",), ("column_name",)]),
     ]
 
     for path, mod, fn, keys in post_keys_with_http:

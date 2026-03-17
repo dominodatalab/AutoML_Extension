@@ -6,7 +6,6 @@ import time
 from typing import Any, Optional
 
 import httpx
-import pandas as pd
 
 from app.config import get_settings
 from app.api.schemas.dataset import (
@@ -17,6 +16,7 @@ from app.api.schemas.dataset import (
 )
 from app.core.dataset_mounts import resolve_dataset_mount_paths
 from app.core.domino_http import domino_request
+from app.core.tabular_data import read_tabular_preview, read_tabular_schema
 
 logger = logging.getLogger(__name__)
 SUPPORTED_DATA_EXTENSIONS = (".csv", ".parquet", ".pq")
@@ -672,24 +672,15 @@ class DominoDatasetManager:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
-        # Read file
-        if file_path.endswith(".csv"):
-            df = pd.read_csv(file_path)
-        elif file_path.endswith((".parquet", ".pq")):
-            df = pd.read_parquet(file_path)
-        else:
-            raise ValueError(f"Unsupported file format: {file_path}")
-
-        total_rows = len(df)
-        preview_df = df.head(rows)
+        preview = read_tabular_preview(file_path, limit=rows, offset=0, include_dtypes=False)
 
         return DatasetPreviewResponse(
             dataset_id=dataset_id,
             file_name=os.path.basename(file_path),
-            columns=list(df.columns),
-            rows=preview_df.to_dict(orient="records"),
-            total_rows=total_rows,
-            preview_rows=len(preview_df),
+            columns=preview["columns"],
+            rows=preview["rows"],
+            total_rows=preview["total_rows"],
+            preview_rows=preview["preview_rows"],
         )
 
     async def get_schema(
@@ -703,22 +694,11 @@ class DominoDatasetManager:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
-        # Read file
-        if file_path.endswith(".csv"):
-            df = pd.read_csv(file_path)
-        elif file_path.endswith((".parquet", ".pq")):
-            df = pd.read_parquet(file_path)
-        else:
-            raise ValueError(f"Unsupported file format: {file_path}")
-
-        columns = [
-            {"name": col, "dtype": str(df[col].dtype)}
-            for col in df.columns
-        ]
+        schema = read_tabular_schema(file_path)
 
         return DatasetSchemaResponse(
             dataset_id=dataset_id,
             file_name=os.path.basename(file_path),
-            columns=columns,
-            row_count=len(df),
+            columns=schema["columns"],
+            row_count=schema["row_count"],
         )

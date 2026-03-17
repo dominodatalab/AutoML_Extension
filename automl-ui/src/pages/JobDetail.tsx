@@ -1,53 +1,59 @@
-import { useEffect, useState } from 'react'
+import { Suspense, lazy, useEffect, useRef, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { format } from 'date-fns'
-import { useJob, useJobStatus, useJobLogs, useCancelJob, useDeleteJob } from '../hooks/useJobs'
+import { useJob, useJobLogs, useCancelJob, useDeleteJob } from '../hooks/useJobs'
 import { SimpleProgressBar } from '../components/training/SimpleProgressBar'
-import { ModelDiagnosticsPanel } from '../components/diagnostics/ModelDiagnosticsPanel'
-import { LearningCurvesPanel } from '../components/diagnostics/LearningCurvesPanel'
 import { DeployModelApiDialog } from '../components/deployment/DeployModelApiDialog'
 import { ExportDockerDialog } from '../components/export/ExportDockerDialog'
-import { ModelExportPanel } from '../components/export/ModelExportPanel'
-import { InteractiveLeaderboard } from '../components/leaderboard/InteractiveLeaderboard'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
-import { useJobProgress } from '../hooks/useJobProgress'
 import { JobHeader } from '../components/job/JobHeader'
 import { JobTabNavigation } from '../components/job/JobTabNavigation'
 import { JobOverviewTab } from '../components/job/JobOverviewTab'
-import { DominoIntegrationsTab } from '../components/job/DominoIntegrationsTab'
 import { useCapabilities } from '../hooks/useCapabilities'
+import { useJobLiveUpdates } from '../hooks/useJobLiveUpdates'
 import type { DetailTab } from '../components/job/JobTabNavigation'
+
+const ModelDiagnosticsPanel = lazy(() => import('../components/diagnostics/ModelDiagnosticsPanel').then((module) => ({ default: module.ModelDiagnosticsPanel })))
+const LearningCurvesPanel = lazy(() => import('../components/diagnostics/LearningCurvesPanel').then((module) => ({ default: module.LearningCurvesPanel })))
+const ModelExportPanel = lazy(() => import('../components/export/ModelExportPanel').then((module) => ({ default: module.ModelExportPanel })))
+const InteractiveLeaderboard = lazy(() => import('../components/leaderboard/InteractiveLeaderboard').then((module) => ({ default: module.InteractiveLeaderboard })))
+const DominoIntegrationsTab = lazy(() => import('../components/job/DominoIntegrationsTab').then((module) => ({ default: module.DominoIntegrationsTab })))
 
 function JobDetail() {
   const { jobId } = useParams<{ jobId: string }>()
   const { data: job, isLoading, refetch } = useJob(jobId!)
-  const { data: statusData } = useJobStatus(jobId!, !!job && ['pending', 'running'].includes(job.status))
-  const { data: logs } = useJobLogs(jobId!, 100)
+  const [activeTab, setActiveTab] = useState<DetailTab>('overview')
+  const { data: logs } = useJobLogs(jobId!, 100, activeTab === 'logs')
   const cancelMutation = useCancelJob()
 
   const { dominoEnabled } = useCapabilities()
-  const isTraining = !!job && ['pending', 'running'].includes(job.status)
-  const { polledProgress, progressJobId, simulatedProgress } = useJobProgress(jobId, job, isTraining, refetch)
+  const liveUpdatesEnabled = !!jobId && (!job || ['pending', 'running'].includes(job.status))
+  const { liveUpdate } = useJobLiveUpdates(jobId, {
+    enabled: liveUpdatesEnabled,
+    onTerminal: () => {
+      void refetch()
+    },
+  })
+  const liveStatus = liveUpdate?.status
+  const currentStatus = liveStatus || job?.status || 'running'
+  const isTraining = ['pending', 'running'].includes(currentStatus)
 
-  const [activeTab, setActiveTab] = useState<DetailTab>('overview')
   const [showDeployApiDialog, setShowDeployApiDialog] = useState(false)
   const [showDockerExportDialog, setShowDockerExportDialog] = useState(false)
   const [showDeployDropdown, setShowDeployDropdown] = useState(false)
   const [showActionsDropdown, setShowActionsDropdown] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+  const [simulatedProgress, setSimulatedProgress] = useState(0)
+  const simulationStartRef = useRef<number | null>(null)
 
   const navigate = useNavigate()
   const deleteJobMutation = useDeleteJob()
 
   useEffect(() => {
-    if (!job || !statusData?.status) {
-      return
-    }
-    if (statusData.status !== job.status) {
-      refetch()
-    }
-  }, [job?.status, statusData?.status, refetch])
+    setSimulatedProgress(0)
+    simulationStartRef.current = null
+  }, [jobId])
 
   const handleDeleteJob = async () => {
     try {
@@ -70,20 +76,57 @@ function JobDetail() {
     )
   }
 
-  // Handle loading state - use defaults when job not yet loaded
-  const jobStatus = job?.status || 'running'
-  const validPolledProgress = progressJobId === jobId ? polledProgress : null
-  const currentDominoStatus = statusData?.domino_job_status || job?.domino_job_status
-  // When the job object itself has a terminal status, trust it over
-  // potentially-stale statusData (useJobStatus polls slower than
-  // useJobProgress, and gets disabled once job.status becomes terminal,
-  // freezing statusData at whatever it last fetched).
-  const jobTerminal = ['completed', 'failed', 'cancelled'].includes(jobStatus)
-  const currentStatus = jobTerminal
-    ? jobStatus
-    : statusData?.status || validPolledProgress?.status || jobStatus
+  const currentDominoStatus = liveUpdate?.domino_job_status || job?.domino_job_status
   const isJobTerminal = ['completed', 'failed', 'cancelled'].includes(currentStatus)
-  const rawProgress = validPolledProgress?.progress ?? job?.progress ?? 0
+  const rawProgress = liveUpdate?.progress ?? job?.progress ?? 0
+
+  useEffect(() => {
+    if (!job || !isTraining) {
+      return
+    }
+
+    const startTime = job.started_at
+      ? new Date(job.started_at).getTime()
+      : Date.now()
+
+    if (!simulationStartRef.current) {
+      simulationStartRef.current = startTime
+      setSimulatedProgress(Math.max(1, rawProgress))
+    }
+
+    const timeLimit = job.time_limit || 3600
+
+    const updateProgress = () => {
+      const now = Date.now()
+      const elapsed = (now - (simulationStartRef.current || now)) / 1000
+      const timeRatio = Math.min(elapsed / timeLimit, 1)
+      const derivedProgress = timeRatio < 0.5
+        ? Math.floor((timeRatio / 0.5) * 70)
+        : Math.floor(70 + ((timeRatio - 0.5) / 0.5) * 25)
+      setSimulatedProgress((prev) => Math.max(prev, rawProgress, Math.max(1, Math.min(derivedProgress, 95))))
+    }
+
+    updateProgress()
+    const interval = setInterval(updateProgress, 1000)
+    return () => clearInterval(interval)
+  }, [job?.id, job?.started_at, job?.time_limit, isTraining, rawProgress])
+
+  useEffect(() => {
+    if (!isJobTerminal) {
+      return
+    }
+    if (currentStatus === 'completed') {
+      const interval = setInterval(() => {
+        setSimulatedProgress((prev) => (prev >= 100 ? 100 : Math.min(prev + 5, 100)))
+      }, 50)
+      const timeout = setTimeout(() => clearInterval(interval), 1000)
+      return () => {
+        clearInterval(interval)
+        clearTimeout(timeout)
+      }
+    }
+    setSimulatedProgress(rawProgress)
+  }, [currentStatus, isJobTerminal, rawProgress])
 
   // Use simulated progress for smooth time-based animation
   const currentProgress = isJobTerminal
@@ -167,23 +210,33 @@ function JobDetail() {
       )}
 
       {activeTab === 'leaderboard' && currentStatus === 'completed' && job && (
-        <InteractiveLeaderboard leaderboard={job.leaderboard || []} />
+        <Suspense fallback={<TabLoadingFallback />}>
+          <InteractiveLeaderboard leaderboard={job.leaderboard || []} />
+        </Suspense>
       )}
 
       {activeTab === 'diagnostics' && currentStatus === 'completed' && job && (
-        <ModelDiagnosticsPanel job={job} />
+        <Suspense fallback={<TabLoadingFallback />}>
+          <ModelDiagnosticsPanel job={job} />
+        </Suspense>
       )}
 
       {activeTab === 'learning' && currentStatus === 'completed' && job && (
-        <LearningCurvesPanel jobId={job.id} modelType={job.model_type} />
+        <Suspense fallback={<TabLoadingFallback />}>
+          <LearningCurvesPanel jobId={job.id} modelType={job.model_type} />
+        </Suspense>
       )}
 
       {activeTab === 'export' && currentStatus === 'completed' && job && (
-        <ModelExportPanel jobId={job.id} jobName={job.name} projectName={job.project_name} modelType={job.model_type} problemType={job.problem_type} />
+        <Suspense fallback={<TabLoadingFallback />}>
+          <ModelExportPanel jobId={job.id} jobName={job.name} projectName={job.project_name} modelType={job.model_type} problemType={job.problem_type} />
+        </Suspense>
       )}
 
       {activeTab === 'domino' && currentStatus === 'completed' && job && (
-        <DominoIntegrationsTab job={job} />
+        <Suspense fallback={<TabLoadingFallback />}>
+          <DominoIntegrationsTab job={job} />
+        </Suspense>
       )}
 
       {activeTab === 'logs' && (
@@ -270,6 +323,14 @@ function JobDetail() {
           isLoading={cancelMutation.isPending}
         />
       )}
+    </div>
+  )
+}
+
+function TabLoadingFallback() {
+  return (
+    <div className="border border-domino-border rounded p-6 text-sm text-domino-text-secondary">
+      Loading tab...
     </div>
   )
 }

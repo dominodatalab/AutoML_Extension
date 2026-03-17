@@ -9,6 +9,12 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 
+from app.core.tabular_data import (
+    estimate_tabular_memory_mb,
+    get_tabular_metadata,
+    read_tabular_sample,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,6 +48,88 @@ class DataProfiler:
             raise ValueError(f"Unsupported file format: {file_path}")
 
         return self.profile_dataframe(df, sample_size, sampling_strategy, stratify_column)
+
+    def quick_profile_file(
+        self,
+        file_path: str,
+        sample_size: int = 1000,
+    ) -> Dict[str, Any]:
+        """Return lightweight metadata and heuristic suggestions for a data file."""
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        sample_df = read_tabular_sample(file_path, sample_rows=sample_size)
+        try:
+            metadata = get_tabular_metadata(file_path)
+            total_rows = metadata.total_rows
+            total_columns = len(metadata.columns)
+            memory_mb = round(estimate_tabular_memory_mb(file_path, sample_rows=sample_size), 2)
+        except ValueError:
+            total_rows = len(sample_df)
+            total_columns = len(sample_df.columns)
+            memory_mb = round(sample_df.memory_usage(deep=True).sum() / (1024 * 1024), 2)
+
+        column_types = {
+            column_name: self._infer_semantic_type(sample_df[column_name])
+            for column_name in sample_df.columns
+        }
+        missing_columns = [
+            column_name
+            for column_name in sample_df.columns
+            if sample_df[column_name].isna().any()
+        ]
+
+        potential_targets: list[str] = []
+        for column_name in sample_df.columns:
+            normalized_name = column_name.lower()
+            if normalized_name in {"target", "label", "class", "y"} or normalized_name.endswith("_target"):
+                potential_targets.append(column_name)
+                continue
+            unique_ratio = sample_df[column_name].nunique(dropna=True) / max(len(sample_df), 1)
+            if unique_ratio < 0.2:
+                potential_targets.append(column_name)
+
+        return {
+            "rows": total_rows,
+            "columns": total_columns,
+            "memory_mb": memory_mb,
+            "column_types": column_types,
+            "missing_columns": missing_columns,
+            "potential_targets": potential_targets[:3],
+        }
+
+    def profile_sample_file(
+        self,
+        file_path: str,
+        sample_size: int = 50000,
+    ) -> Dict[str, Any]:
+        """Profile a lightweight file sample for low-latency suggestion workflows."""
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        sample_df = read_tabular_sample(file_path, sample_rows=sample_size)
+        profile = self.profile_dataframe(
+            sample_df,
+            sample_size=len(sample_df),
+            sampling_strategy="full",
+        )
+
+        try:
+            metadata = get_tabular_metadata(file_path)
+            total_rows = metadata.total_rows
+            memory_usage_mb = estimate_tabular_memory_mb(file_path, sample_rows=sample_size)
+        except ValueError:
+            total_rows = len(sample_df)
+            memory_usage_mb = sample_df.memory_usage(deep=True).sum() / (1024 * 1024)
+
+        profile["summary"].update({
+            "total_rows": total_rows,
+            "sampled": total_rows > len(sample_df),
+            "sample_size": len(sample_df),
+            "sampling_strategy": "head" if total_rows > len(sample_df) else "full",
+            "memory_usage_mb": memory_usage_mb,
+        })
+        return profile
 
     def profile_dataframe(
         self,
