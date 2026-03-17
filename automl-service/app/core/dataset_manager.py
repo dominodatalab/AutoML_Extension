@@ -336,10 +336,18 @@ class DominoDatasetManager:
         Recursively descends into subdirectories. Returns ``(files, total_size)``.
         """
         from app.services.storage_resolver import get_storage_resolver
+        from app.core.domino_project_type import detect_project_type, DominoProjectType
 
         resolver = get_storage_resolver()
         files: list[DatasetFileResponse] = []
         total_size = 0
+
+        # Use the detected project type so synthetic paths in logs, errors,
+        # and CLI args reflect the actual mount layout of the runtime.
+        if detect_project_type() == DominoProjectType.GIT:
+            synthetic_root = "/mnt/data"
+        else:
+            synthetic_root = "/domino/datasets/local"
 
         try:
             entries = await resolver.list_snapshot_files(snapshot_id, path=path)
@@ -376,9 +384,7 @@ class DominoDatasetManager:
                 total_size += sub_size
             elif self._is_supported_file(file_name):
                 rel_path = f"{path}/{file_name}" if path else file_name
-                # Construct a synthetic mount path so ensure_local_file()
-                # can parse the dataset name and download on demand.
-                synthetic_path = f"/domino/datasets/local/{dataset_name}/{rel_path}"
+                synthetic_path = f"{synthetic_root}/{dataset_name}/{rel_path}"
                 files.append(
                     DatasetFileResponse(
                         name=rel_path,
