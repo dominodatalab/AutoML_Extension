@@ -97,6 +97,18 @@ def remap_shared_path(path: str) -> str:
     return path
 
 
+def extract_dataset_relative_path(file_path: Optional[str]) -> Optional[str]:
+    """Return the relative path inside a Domino dataset mount, if present."""
+    if not file_path:
+        return None
+
+    match = _DATASET_MOUNT_RE.match(file_path)
+    if not match:
+        return None
+
+    return match.group("relative")
+
+
 async def ensure_local_file(file_path: str, project_id: Optional[str] = None) -> str:
     """Return a local path to *file_path*, downloading from the dataset API if needed.
 

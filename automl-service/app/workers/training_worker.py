@@ -18,7 +18,12 @@ from app.core.dataset_manager import DominoDatasetManager
 from app.core.domino_registry import get_domino_registry
 from app.core.model_diagnostics import get_model_diagnostics
 from app.core.model_loader import load_predictor, load_dataframe
-from app.core.utils import ensure_local_file, remap_shared_path, utc_now
+from app.core.utils import (
+    ensure_local_file,
+    extract_dataset_relative_path,
+    remap_shared_path,
+    utc_now,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +63,46 @@ def parse_advanced_config(config_dict: Dict[str, Any]) -> AdvancedConfig:
         return AdvancedConfig()
 
     return AdvancedConfig.model_validate(config_dict)
+
+
+async def _resolve_training_data_path(
+    job: Any,
+    dataset_manager: DominoDatasetManager,
+) -> tuple[str, str]:
+    """Resolve the exact data file to train against for a job."""
+    project_id = getattr(job, "project_id", None)
+
+    if job.data_source != "domino_dataset":
+        data_path = remap_shared_path(job.file_path)
+        data_path = await ensure_local_file(data_path, project_id)
+        return data_path, f"Using uploaded file: {data_path}"
+
+    selected_file_path = getattr(job, "file_path", None)
+    selected_relative_path = extract_dataset_relative_path(selected_file_path)
+
+    if selected_file_path:
+        preferred_path = remap_shared_path(selected_file_path)
+        local_preferred_path = await ensure_local_file(preferred_path, project_id)
+        if os.path.exists(local_preferred_path):
+            return local_preferred_path, f"Using Domino dataset file: {local_preferred_path}"
+
+        logger.warning(
+            "Selected dataset file path was unavailable for job %s; "
+            "falling back to dataset_id lookup (dataset_id=%s, file_path=%s)",
+            getattr(job, "id", "unknown"),
+            job.dataset_id,
+            selected_file_path,
+        )
+
+    data_path = await dataset_manager.get_dataset_file_path(
+        job.dataset_id,
+        file_name=selected_relative_path,
+    )
+    data_path = await ensure_local_file(data_path, project_id)
+
+    if selected_relative_path:
+        return data_path, f"Using Domino dataset file: {selected_relative_path}"
+    return data_path, f"Using Domino dataset: {job.dataset_id}"
 
 
 class TrainingProgressReporter:
@@ -175,20 +220,11 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
             logger.info(f"[TRAINING DEBUG] Job file_path: {job.file_path}")
             logger.info(f"[TRAINING DEBUG] Job dataset_id: {job.dataset_id}")
 
-            if job.data_source == "domino_dataset":
-                try:
-                    data_path = await dataset_manager.get_dataset_file_path(job.dataset_id)
-                    await crud.add_job_log(db, job_id, f"Using Domino dataset: {job.dataset_id}")
-                except FileNotFoundError:
-                    # Cross-project dataset not mounted in this job — fall
-                    # back to file_path so ensure_local_file can download it.
-                    data_path = remap_shared_path(job.file_path)
-                    await crud.add_job_log(db, job_id, f"Dataset not mounted locally, using file path: {data_path}")
-            else:
-                data_path = remap_shared_path(job.file_path)
-                await crud.add_job_log(db, job_id, f"Using uploaded file: {data_path}")
-
-            data_path = await ensure_local_file(data_path, getattr(job, 'project_id', None))
+            data_path, data_path_log = await _resolve_training_data_path(
+                job,
+                dataset_manager,
+            )
+            await crud.add_job_log(db, job_id, data_path_log)
 
             logger.info(f"[TRAINING DEBUG] Resolved data_path: {data_path}")
             await crud.add_job_log(db, job_id, f"[DEBUG] Data path resolved to: {data_path}", "INFO")

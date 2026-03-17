@@ -547,11 +547,20 @@ class DominoDatasetManager:
                     if os.path.exists(candidate):
                         return candidate
                 if os.path.isfile(dataset_path):
-                    return dataset_path
+                    if not file_name or os.path.basename(dataset_path) == file_name:
+                        return dataset_path
+                    continue
                 if os.path.isdir(dataset_path):
+                    if file_name:
+                        continue
                     first_supported = self._first_supported_file(dataset_path)
                     if first_supported:
                         return first_supported
+            if file_name:
+                raise FileNotFoundError(
+                    f"File '{file_name}' not found in dataset: {dataset_id} "
+                    f"across mount roots {self._resolve_dataset_mount_paths()}"
+                )
             raise FileNotFoundError(
                 f"No data files found in dataset: {dataset_id} across mount roots {self._resolve_dataset_mount_paths()}"
             )
@@ -583,8 +592,12 @@ class DominoDatasetManager:
                     if os.path.exists(named_file_path):
                         return named_file_path
                 if os.path.isfile(dataset_path) and self._is_supported_file(dataset_path):
-                    return dataset_path
+                    if not file_name or os.path.basename(dataset_path) == file_name:
+                        return dataset_path
+                    continue
                 if os.path.isdir(dataset_path):
+                    if file_name:
+                        continue
                     first_supported = self._first_supported_file(dataset_path)
                     if first_supported:
                         return first_supported
@@ -595,9 +608,13 @@ class DominoDatasetManager:
                 if file_entry.path and os.path.exists(file_entry.path):
                     return file_entry.path
 
-            if dataset.path:
+            if dataset.path and not file_name:
                 return dataset.path
 
+        if file_name:
+            raise FileNotFoundError(
+                f"File '{file_name}' not found in dataset: {dataset_id}"
+            )
         raise FileNotFoundError(f"Dataset not found: {dataset_id}")
 
     async def preview_dataset(
