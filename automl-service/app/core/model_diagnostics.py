@@ -18,6 +18,33 @@ from app.core.model_loader import load_predictor, load_dataframe
 logger = logging.getLogger(__name__)
 
 
+def _importance_frame_to_features(importance: pd.DataFrame) -> list[dict[str, Any]]:
+    """Convert an AutoGluon feature-importance frame into UI-ready rows."""
+    if importance is None or len(importance) == 0:
+        return []
+
+    features: list[dict[str, Any]] = []
+    for idx, row in importance.iterrows():
+        feature = {
+            "feature": str(idx),
+            "importance": float(row.get("importance", row.iloc[0])) if isinstance(row, pd.Series) else float(row),
+        }
+
+        if isinstance(row, pd.Series):
+            if "stddev" in row and pd.notna(row.get("stddev")):
+                feature["stddev"] = float(row["stddev"])
+            elif "stdev" in row and pd.notna(row.get("stdev")):
+                feature["stddev"] = float(row["stdev"])
+
+            if "p_value" in row and pd.notna(row.get("p_value")):
+                feature["p_value"] = float(row["p_value"])
+
+        features.append(feature)
+
+    features.sort(key=lambda x: abs(x["importance"]), reverse=True)
+    return features
+
+
 class ModelDiagnostics:
     """Service for model diagnostics, feature importance, and data extraction.
 
@@ -58,28 +85,15 @@ class ModelDiagnostics:
                     importance = predictor.feature_importance(silent=True)
 
                 if importance is not None and len(importance) > 0:
-                    # Convert to list of dicts for UI charting
-                    features = []
-                    for idx, row in importance.iterrows():
-                        features.append({
-                            "feature": str(idx),
-                            "importance": float(row.get('importance', row.iloc[0])) if isinstance(row, pd.Series) else float(row),
-                            "stddev": float(row.get('stddev', 0)) if isinstance(row, pd.Series) and 'stddev' in row else 0,
-                            "p_value": float(row.get('p_value', 0)) if isinstance(row, pd.Series) and 'p_value' in row else None
-                        })
-
-                    # Sort by importance (highest first)
-                    features.sort(key=lambda x: abs(x["importance"]), reverse=True)
-                    result["features"] = features
+                    result["features"] = _importance_frame_to_features(importance)
 
             elif model_type == "timeseries":
                 predictor = load_predictor(model_path, model_type)
 
                 try:
                     importance = predictor.feature_importance()
-                    if importance is not None:
-                        features = [{"feature": str(k), "importance": float(v)} for k, v in importance.items()]
-                        result["features"] = features
+                    if isinstance(importance, pd.DataFrame):
+                        result["features"] = _importance_frame_to_features(importance)
                 except Exception as e:
                     logger.warning(f"Could not get timeseries feature importance: {e}")
 

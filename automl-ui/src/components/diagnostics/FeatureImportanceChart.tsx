@@ -37,6 +37,9 @@ export function FeatureImportanceChart({
   maxFeatures = 20
 }: FeatureImportanceChartProps) {
   const effectiveError = error || (data?.features?.length ? null : data?.error) || null
+  const emptyMessage = data?.model_type === 'timeseries'
+    ? 'No time series feature importance available. This usually means the model was trained without known covariates or static features beyond the target/time/id columns.'
+    : 'No feature importance data available'
   const chartData = useMemo(() => {
     if (!data?.features) return []
     return [...data.features]
@@ -80,7 +83,7 @@ export function FeatureImportanceChart({
     return (
       <Card>
         <div className="text-center py-8 text-domino-text-muted">
-          No feature importance data available
+          {emptyMessage}
         </div>
       </Card>
     )

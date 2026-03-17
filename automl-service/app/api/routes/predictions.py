@@ -54,12 +54,12 @@ async def _run_diagnostics(
             logger.debug("Serving %s for job %s from stored diagnostics", diagnostics_method, job_id)
             return stored_result
 
-        if stored_result.get("features") or not stored_result.get("error"):
+        if stored_result.get("features"):
             logger.debug("Serving %s for job %s from stored diagnostics", diagnostics_method, job_id)
             return stored_result
 
         logger.warning(
-            "Stored feature importance for job %s had error '%s'; attempting live recompute",
+            "Stored feature importance for job %s was empty or had error '%s'; attempting live recompute",
             job_id,
             stored_result.get("error"),
         )
