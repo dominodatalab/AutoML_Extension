@@ -230,16 +230,18 @@ class DominoDatasetManager:
     async def _api_item_to_dataset_response(self, item: dict) -> Optional[DatasetResponse]:
         """Convert a Domino API dataset object into a DatasetResponse.
 
-        Cross-references mounted filesystem paths to resolve real file entries.
-        Falls back to the snapshot file-listing API when the dataset is not
-        mounted locally.
+        Always lists files via the snapshot API (which reflects the current
+        RW snapshot) so that file deletions in Domino are visible immediately.
+        The local mount path is used to resolve real file paths when the file
+        exists on disk, enabling direct reads during training/preview.
         """
         dataset_id = item.get("datasetId") or item.get("id", "")
         dataset_name = item.get("datasetName") or item.get("name", "")
         if not dataset_name:
             return None
 
-        # Find the mount path for this dataset.
+        # Find the mount path for this dataset (used to resolve real file
+        # paths, but NOT used as the source of truth for file listing).
         dataset_path: Optional[str] = None
         for mount_root in self._resolve_dataset_mount_paths():
             candidate = os.path.join(mount_root, dataset_name)
@@ -247,10 +249,35 @@ class DominoDatasetManager:
                 dataset_path = candidate
                 break
 
-        # Enumerate files from the mounted directory when available.
+        # Always list files from the snapshot API — mounted filesystems use
+        # read-only snapshots that go stale when files are deleted in Domino.
         files: list[DatasetFileResponse] = []
         total_size = 0
-        if dataset_path and os.path.isdir(dataset_path):
+        rw_snapshot_id = item.get("readWriteSnapshotId")
+        if not rw_snapshot_id and dataset_id:
+            from app.services.storage_resolver import get_storage_resolver
+            rw_snapshot_id = await get_storage_resolver().get_rw_snapshot_id(dataset_id)
+        if rw_snapshot_id:
+            api_files, total_size = await self._list_files_via_snapshot_api(
+                rw_snapshot_id, dataset_name, dataset_id=dataset_id,
+            )
+            # If the dataset is mounted locally, upgrade file paths from
+            # synthetic to real mount paths where the file exists on disk.
+            for f in api_files:
+                if dataset_path:
+                    local_path = os.path.join(dataset_path, f.name)
+                    if os.path.exists(local_path):
+                        f.path = local_path
+                        f.mounted = True
+                        try:
+                            f.size = os.stat(local_path).st_size
+                        except OSError:
+                            pass
+                files.append(f)
+
+        # Fall back to mounted filesystem only when the snapshot API returned
+        # nothing (e.g. no RW snapshot ID or API unreachable).
+        if not files and dataset_path and os.path.isdir(dataset_path):
             for root, _, filenames in os.walk(dataset_path):
                 for filename in filenames:
                     if not self._is_supported_file(filename):
@@ -266,17 +293,6 @@ class DominoDatasetManager:
                         DatasetFileResponse(name=rel_path, path=file_path, size=file_size)
                     )
                     total_size += file_size
-
-        # If not mounted locally, try to list files via the snapshot API.
-        if not files:
-            rw_snapshot_id = item.get("readWriteSnapshotId")
-            if not rw_snapshot_id and dataset_id:
-                from app.services.storage_resolver import get_storage_resolver
-                rw_snapshot_id = await get_storage_resolver().get_rw_snapshot_id(dataset_id)
-            if rw_snapshot_id:
-                files, total_size = await self._list_files_via_snapshot_api(
-                    rw_snapshot_id, dataset_name, dataset_id=dataset_id,
-                )
 
         return DatasetResponse(
             id=dataset_id,
