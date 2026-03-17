@@ -83,6 +83,9 @@ class ProjectStorageResolver:
 
     # project_id → DatasetInfo
     _cache: dict[str, DatasetInfo] = field(default_factory=dict)
+    # dataset_id → rw_snapshot_id (dedicated cache so lookups don't
+    # depend on the dataset having been resolved via ensure_dataset_exists)
+    _rw_cache: dict[str, str] = field(default_factory=dict)
 
     # ------------------------------------------------------------------
     # Public API
@@ -200,6 +203,7 @@ class ProjectStorageResolver:
         """Delete a dataset via the v1 API and remove it from the cache."""
         await domino_request("DELETE", f"/api/datasetrw/v1/datasets/{dataset_id}")
         self._cache = {k: v for k, v in self._cache.items() if v.dataset_id != dataset_id}
+        self._rw_cache.pop(dataset_id, None)
         logger.info("Deleted dataset %s", dataset_id)
 
     async def download_file(
@@ -315,9 +319,14 @@ class ProjectStorageResolver:
 
         Checks the in-memory cache first, then calls the dataset details API.
         """
-        # Check cache
+        # Fast path: dedicated RW cache
+        if dataset_id in self._rw_cache:
+            return self._rw_cache[dataset_id]
+
+        # Check project cache
         for info in self._cache.values():
             if info.dataset_id == dataset_id and info.rw_snapshot_id:
+                self._rw_cache[dataset_id] = info.rw_snapshot_id
                 return info.rw_snapshot_id
 
         try:
@@ -328,7 +337,8 @@ class ProjectStorageResolver:
             data = resp.json()
             rw_sid = data.get("readWriteSnapshotId")
             if rw_sid:
-                # Backfill cache
+                # Backfill both caches
+                self._rw_cache[dataset_id] = rw_sid
                 for info in self._cache.values():
                     if info.dataset_id == dataset_id:
                         info.rw_snapshot_id = rw_sid
@@ -388,7 +398,8 @@ class ProjectStorageResolver:
         return None
 
     def _backfill_rw_cache(self, dataset_id: str, rw_sid: str) -> None:
-        """Store a discovered RW snapshot ID in the cache."""
+        """Store a discovered RW snapshot ID in both caches."""
+        self._rw_cache[dataset_id] = rw_sid
         for info in self._cache.values():
             if info.dataset_id == dataset_id:
                 info.rw_snapshot_id = rw_sid
