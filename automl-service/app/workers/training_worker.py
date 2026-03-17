@@ -176,8 +176,14 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
             logger.info(f"[TRAINING DEBUG] Job dataset_id: {job.dataset_id}")
 
             if job.data_source == "domino_dataset":
-                data_path = await dataset_manager.get_dataset_file_path(job.dataset_id)
-                await crud.add_job_log(db, job_id, f"Using Domino dataset: {job.dataset_id}")
+                try:
+                    data_path = await dataset_manager.get_dataset_file_path(job.dataset_id)
+                    await crud.add_job_log(db, job_id, f"Using Domino dataset: {job.dataset_id}")
+                except FileNotFoundError:
+                    # Cross-project dataset not mounted in this job — fall
+                    # back to file_path so ensure_local_file can download it.
+                    data_path = remap_shared_path(job.file_path)
+                    await crud.add_job_log(db, job_id, f"Dataset not mounted locally, using file path: {data_path}")
             else:
                 data_path = remap_shared_path(job.file_path)
                 await crud.add_job_log(db, job_id, f"Using uploaded file: {data_path}")
