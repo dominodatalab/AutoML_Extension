@@ -305,6 +305,15 @@ function EDAAnalysis() {
     ? (edaMode === 'timeseries' ? asyncProfileError : null)
     : tsError
 
+  // Notify user when time series analysis completes
+  const [prevTsLoading, setPrevTsLoading] = useState(false)
+  useEffect(() => {
+    if (prevTsLoading && !effectiveTsLoading && tsProfile && !effectiveTsError) {
+      addNotification('Time series analysis complete', 'success')
+    }
+    setPrevTsLoading(effectiveTsLoading)
+  }, [effectiveTsLoading, tsProfile, effectiveTsError])
+
   // If no file selected, show file selection UI
   if (!selectedFilePath) {
     return (
@@ -420,6 +429,8 @@ function EDAAnalysis() {
           onIdColumnChange={setIdColumn}
           rollingWindow={rollingWindow}
           onRollingWindowChange={setRollingWindow}
+          analysisComplete={!!tsProfile}
+          error={effectiveTsError}
         />
       )}
 

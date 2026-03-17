@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { ExclamationTriangleIcon } from '@heroicons/react/24/outline'
+import { ExclamationTriangleIcon, CheckCircleIcon } from '@heroicons/react/24/outline'
 import Dropdown from '../common/Dropdown'
 import type { ColumnProfile } from '../../types/profiling'
 
@@ -16,6 +16,8 @@ interface TimeSeriesConfigPanelProps {
   onIdColumnChange: (col: string) => void
   rollingWindow: string
   onRollingWindowChange: (val: string) => void
+  analysisComplete?: boolean
+  error?: string | null
 }
 
 export function TimeSeriesConfigPanel({
@@ -31,6 +33,8 @@ export function TimeSeriesConfigPanel({
   onIdColumnChange,
   rollingWindow,
   onRollingWindowChange,
+  analysisComplete,
+  error,
 }: TimeSeriesConfigPanelProps) {
   const [sampleSize, setSampleSize] = useState('100000')
   const [samplingStrategy, setSamplingStrategy] = useState('recent')
@@ -112,13 +116,27 @@ export function TimeSeriesConfigPanel({
         </div>
         <div>
           <label className="block text-xs text-domino-text-muted mb-1">&nbsp;</label>
-          <button
-            onClick={handleRun}
-            disabled={!timeColumn || !targetColumn || loading}
-            className="h-[32px] px-4 text-sm bg-domino-accent-purple text-white rounded-[2px] hover:bg-domino-accent-purple-hover disabled:opacity-50 whitespace-nowrap"
-          >
-            {loading ? 'Analyzing...' : 'Run Analysis'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleRun}
+              disabled={!timeColumn || !targetColumn || loading}
+              className="h-[32px] px-4 text-sm bg-domino-accent-purple text-white rounded-[2px] hover:bg-domino-accent-purple-hover disabled:opacity-50 whitespace-nowrap"
+            >
+              {loading ? 'Analyzing...' : 'Run Analysis'}
+            </button>
+            {!loading && analysisComplete && !error && (
+              <span className="flex items-center gap-1 text-sm text-green-700">
+                <CheckCircleIcon className="h-4 w-4" />
+                Analysis complete
+              </span>
+            )}
+            {!loading && error && (
+              <span className="flex items-center gap-1 text-sm text-domino-accent-red">
+                <ExclamationTriangleIcon className="h-4 w-4" />
+                Analysis failed
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
