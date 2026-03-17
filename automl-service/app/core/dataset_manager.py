@@ -270,6 +270,9 @@ class DominoDatasetManager:
         # If not mounted locally, try to list files via the snapshot API.
         if not files:
             rw_snapshot_id = item.get("readWriteSnapshotId")
+            if not rw_snapshot_id and dataset_id:
+                from app.services.storage_resolver import get_storage_resolver
+                rw_snapshot_id = await get_storage_resolver().get_rw_snapshot_id(dataset_id)
             if rw_snapshot_id:
                 files, total_size = await self._list_files_via_snapshot_api(
                     rw_snapshot_id, dataset_name
