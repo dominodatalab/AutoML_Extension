@@ -1,7 +1,7 @@
 """Database CRUD operations."""
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Optional, Sequence
 
 from sqlalchemy import select, update, desc, delete, func

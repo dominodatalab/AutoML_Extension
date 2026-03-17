@@ -1,14 +1,11 @@
 """Prediction service for trained AutoGluon models."""
 
-import os
-import json
 import logging
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Union
 from pathlib import Path
 
 import pandas as pd
-import numpy as np
 
 from app.config import get_settings
 from app.core.model_loader import load_predictor

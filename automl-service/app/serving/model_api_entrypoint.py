@@ -5,8 +5,6 @@ resolve it. The trained model directory is provided at runtime through the
 AUTOML_MODEL_DIR environment variable.
 """
 
-from __future__ import annotations
-
 import os
 from pathlib import Path
 from typing import Any, Dict, Tuple

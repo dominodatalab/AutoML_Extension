@@ -1,6 +1,5 @@
 """DB-backed metadata/result store for async EDA jobs."""
 
-import json
 import logging
 from typing import Any, Optional
 

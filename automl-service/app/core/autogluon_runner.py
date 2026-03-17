@@ -4,7 +4,7 @@ import logging
 import os
 import json
 from datetime import datetime
-from typing import Any, Callable, Optional, Dict, List
+from typing import Any, Callable, Optional, Dict
 
 import pandas as pd
 import numpy as np

@@ -5,9 +5,6 @@ import json
 import logging
 import shutil
 from typing import Any, Dict, List, Optional
-from pathlib import Path
-
-from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 

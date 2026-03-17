@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.prediction_service import get_prediction_service
 from app.core.model_diagnostics import get_model_diagnostics
-from app.core.domino_registry import get_domino_registry
 from app.db import crud
 from app.dependencies import get_db
 from app.api.utils import get_job_paths
