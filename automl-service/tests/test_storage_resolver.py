@@ -253,6 +253,33 @@ class TestGetLatestSnapshotId:
 
 
 # ---------------------------------------------------------------------------
+# get_rw_snapshot_id
+# ---------------------------------------------------------------------------
+
+
+class TestGetRwSnapshotId:
+
+    @pytest.mark.asyncio
+    async def test_prefers_v1_snapshot_lookup_before_legacy_detail_endpoint(self):
+        resolver = ProjectStorageResolver()
+
+        with patch.object(
+            resolver,
+            "_resolve_rw_snapshot_v1",
+            new_callable=AsyncMock,
+            return_value="rw-snap-123",
+        ) as resolve_v1, patch(
+            "app.services.storage_resolver.domino_request",
+            new_callable=AsyncMock,
+        ) as domino_request_mock:
+            rw_sid = await resolver.get_rw_snapshot_id("ds-123")
+
+        assert rw_sid == "rw-snap-123"
+        resolve_v1.assert_awaited_once_with("ds-123")
+        domino_request_mock.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # list_snapshot_files
 # ---------------------------------------------------------------------------
 

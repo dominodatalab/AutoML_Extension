@@ -53,7 +53,7 @@ _MOUNT_TEMPLATES = [
 
 
 def _preferred_snapshot_api_base_url() -> Optional[str]:
-    """Prefer the direct Domino host over the local proxy for snapshot browsing."""
+    """Prefer the direct Domino host for Dataset RW snapshot APIs."""
     return resolve_domino_nucleus_host()
 
 
@@ -310,6 +310,7 @@ class ProjectStorageResolver:
                 "GET",
                 f"/api/datasetrw/v1/datasets/{dataset_id}/snapshots",
                 params={"limit": 1},
+                base_url=_preferred_snapshot_api_base_url(),
             )
             data = resp.json()
             snapshots = data.get("snapshots") or []
@@ -338,10 +339,18 @@ class ProjectStorageResolver:
                 self._rw_cache[dataset_id] = info.rw_snapshot_id
                 return info.rw_snapshot_id
 
+        # Preferred path: the v1 snapshots endpoint is the most reliable and
+        # already gives us the active RW head without an extra detail lookup.
+        rw_sid = await self._resolve_rw_snapshot_v1(dataset_id)
+        if rw_sid:
+            return rw_sid
+
         try:
             resp = await domino_request(
                 "GET",
                 f"/api/datasetrw/datasets/{dataset_id}",
+                base_url=_preferred_snapshot_api_base_url(),
+                max_retries=0,
             )
             data = resp.json()
             rw_sid = data.get("readWriteSnapshotId")
@@ -365,6 +374,8 @@ class ProjectStorageResolver:
             resp = await domino_request(
                 "GET",
                 f"/api/datasetrw/snapshots/{dataset_id}",
+                base_url=_preferred_snapshot_api_base_url(),
+                max_retries=0,
             )
             snapshots = resp.json()
             if isinstance(snapshots, list):
@@ -381,7 +392,7 @@ class ProjectStorageResolver:
                 exc_info=True,
             )
 
-        # Fallback 2: v1 snapshots endpoint (works through Domino proxy)
+        # Fallback 2: retry the v1 snapshots endpoint via the default host.
         try:
             resp = await domino_request(
                 "GET",
@@ -420,6 +431,7 @@ class ProjectStorageResolver:
             resp = await domino_request(
                 "GET",
                 f"/api/datasetrw/v1/datasets/{dataset_id}/snapshots",
+                base_url=_preferred_snapshot_api_base_url(),
             )
             data = resp.json()
             snapshots = data.get("snapshots") or []
@@ -619,6 +631,7 @@ class ProjectStorageResolver:
                 "GET",
                 f"/api/datasetrw/v1/datasets/{dataset_id}/snapshots",
                 params={"limit": 1},
+                base_url=_preferred_snapshot_api_base_url(),
             )
             data = resp.json()
             snapshots = data.get("snapshots") or []
