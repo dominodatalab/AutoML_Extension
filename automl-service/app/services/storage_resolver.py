@@ -886,7 +886,6 @@ class ProjectStorageResolver:
                     "POST",
                     endpoint,
                     json=payload,
-                    max_retries=1,
                 )
                 body = resp.json()
                 ds_id = str(

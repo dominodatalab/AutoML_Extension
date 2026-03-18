@@ -47,8 +47,6 @@ async def _list_project_datasets_v2(
                 "offset": offset,
                 "limit": page_size,
             },
-            # Fail fast here so we can fall back to the public v1 endpoint.
-            max_retries=0,
         )
         items = extract_dataset_list(resp.json())
         if not items:
