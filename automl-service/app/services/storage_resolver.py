@@ -855,32 +855,16 @@ class ProjectStorageResolver:
     async def _create_dataset(self, project_id: str) -> DatasetInfo:
         """POST to create the dataset, trying known endpoints in order.
 
-        Uses ``domino_request`` directly (through the proxy) rather than
-        the nucleus-first wrapper.  The Domino app proxy handles auth
-        injection for cross-project dataset creation.  This matches the
-        original pre-refactor behaviour that worked reliably.
+        Uses the same endpoints and payloads as the original pre-refactor
+        code.  The v1 endpoint with ``name`` is the path that works
+        reliably through the Domino App proxy.  The ``/dataset`` endpoint
+        works from workspaces but the App proxy disconnects on it.
         """
         # Each entry is (endpoint, payload).
-        # /dataset + datasetName is the canonical SDK endpoint.
-        # /api/datasetrw/v1/datasets + name also works via proxy.
-        # v2 is 404 everywhere — skipped.
+        # Order matches the original: v1 with both payload shapes first
+        # (the App proxy routes v1 reliably), then /dataset as fallback.
         attempts: list[tuple[str, dict]] = [
             (
-                "/dataset",
-                {
-                    "datasetName": DATASET_NAME,
-                    "projectId": project_id,
-                    "description": DATASET_DESCRIPTION,
-                },
-            ),
-            (
-                "/dataset",
-                {
-                    "datasetName": DATASET_NAME,
-                    "projectId": project_id,
-                },
-            ),
-            (
                 "/api/datasetrw/v1/datasets",
                 {
                     "name": DATASET_NAME,
@@ -893,6 +877,14 @@ class ProjectStorageResolver:
                 {
                     "name": DATASET_NAME,
                     "projectId": project_id,
+                },
+            ),
+            (
+                "/dataset",
+                {
+                    "datasetName": DATASET_NAME,
+                    "projectId": project_id,
+                    "description": DATASET_DESCRIPTION,
                 },
             ),
         ]

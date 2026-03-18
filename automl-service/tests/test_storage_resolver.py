@@ -228,8 +228,8 @@ class TestCreateDataset:
         assert info.name == "automl-extension"
         assert mock_request.await_count >= 1
         first_call = mock_request.await_args_list[0]
-        assert first_call.args == ("POST", "/dataset")
-        assert first_call.kwargs["json"]["datasetName"] == "automl-extension"
+        assert first_call.args == ("POST", "/api/datasetrw/v1/datasets")
+        assert first_call.kwargs["json"]["name"] == "automl-extension"
         assert first_call.kwargs["json"]["projectId"] == "proj-1"
 
     @pytest.mark.asyncio
@@ -262,8 +262,8 @@ class TestCreateDataset:
         assert mock_request.await_count == 2
         first_call = mock_request.await_args_list[0]
         second_call = mock_request.await_args_list[1]
-        assert first_call.args == ("POST", "/dataset")
-        assert second_call.args == ("POST", "/dataset")
+        assert first_call.args == ("POST", "/api/datasetrw/v1/datasets")
+        assert second_call.args == ("POST", "/api/datasetrw/v1/datasets")
 
     @pytest.mark.asyncio
     async def test_resolve_or_create_falls_back_to_find_existing(self):
