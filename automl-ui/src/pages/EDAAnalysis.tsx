@@ -38,6 +38,7 @@ function EDAAnalysis() {
   const [stratifyColumn, setStratifyColumn] = useState('')
   const [edaExecutionTarget, setEdaExecutionTarget] = useState<'local' | 'domino_job'>('local')
   const [edaMode, setEdaMode] = useState<'tabular' | 'timeseries'>('tabular')
+  const [hasAnalyzed, setHasAnalyzed] = useState(false)
   const [uploadResult, setUploadResult] = useState<FileUploadResponse | null>(null)
   const { isVerifying, isVerified, error: verifyError } = useSnapshotVerification(uploadResult)
 
@@ -108,7 +109,8 @@ function EDAAnalysis() {
   const { data: preview, isLoading: previewLoading, error: previewError } = useDatasetPreview(
     selectedFilePath || '',
     pageSize,
-    offset
+    offset,
+    hasAnalyzed
   )
 
   const {
@@ -163,6 +165,7 @@ function EDAAnalysis() {
     setTransforms([])
     setProfileData(null)
     setTsProfileData(null)
+    setHasAnalyzed(false)
   }
 
   const handleChangeFile = () => {
@@ -176,6 +179,7 @@ function EDAAnalysis() {
     setTargetColumn('')
     setIdColumn('')
     setRollingWindow('')
+    setHasAnalyzed(false)
   }
 
   const formatSize = (bytes: number): string => {
@@ -205,8 +209,6 @@ function EDAAnalysis() {
     }
     return null
   }, [profile, preview])
-
-  const effectiveTotalRows = profile?.summary?.total_rows ?? preview?.total_rows ?? 0
 
   const hasDatetimeColumns = useMemo(() => {
     if (!effectiveColumns) return false
@@ -239,11 +241,16 @@ function EDAAnalysis() {
 
   const handleAnalyze = () => {
     if (!selectedFilePath) return
+    setHasAnalyzed(true)
     if (edaExecutionTarget === 'local') {
       resetAsyncState()
       void profileFile(selectedFilePath, sampleSize, samplingStrategy, stratifyColumn || undefined)
     } else {
       void startAsyncTabularProfiling(selectedFilePath, sampleSize, samplingStrategy, stratifyColumn || undefined)
+    }
+    // In time series mode, also run TS profiling if columns are configured
+    if (edaMode === 'timeseries' && timeColumn && targetColumn && timeColumn !== targetColumn) {
+      handleRunTSAnalysis(timeColumn, targetColumn, idColumn, sampleSize, samplingStrategy, rollingWindow)
     }
   }
 
@@ -420,10 +427,16 @@ function EDAAnalysis() {
         </select>
         <button
           onClick={handleAnalyze}
-          disabled={!selectedFilePath || profilingLoading || ['starting', 'pending', 'running'].includes(asyncProfileStatus)}
+          disabled={
+            !selectedFilePath ||
+            profilingLoading ||
+            effectiveTsLoading ||
+            ['starting', 'pending', 'running'].includes(asyncProfileStatus) ||
+            (edaMode === 'timeseries' && effectiveColumns != null && (!timeColumn || !targetColumn || timeColumn === targetColumn))
+          }
           className="h-[32px] px-[15px] text-sm font-normal rounded-[2px] text-white bg-domino-accent-purple hover:bg-domino-accent-purple-hover disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
         >
-          Analyze
+          {profilingLoading || effectiveTsLoading || ['starting', 'pending', 'running'].includes(asyncProfileStatus) ? 'Analyzing...' : 'Analyze'}
         </button>
       </div>
 
@@ -443,8 +456,6 @@ function EDAAnalysis() {
       {edaMode === 'timeseries' && effectiveColumns && (
         <TimeSeriesConfigPanel
           columns={effectiveColumns}
-          totalRows={effectiveTotalRows}
-          onRunAnalysis={handleRunTSAnalysis}
           loading={effectiveTsLoading}
           timeColumn={timeColumn}
           targetColumn={targetColumn}

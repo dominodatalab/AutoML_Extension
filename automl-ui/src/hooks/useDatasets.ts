@@ -32,12 +32,12 @@ export function useDataset(datasetId: string) {
   })
 }
 
-export function useDatasetPreview(filePath: string, limit: number = 100, offset: number = 0) {
+export function useDatasetPreview(filePath: string, limit: number = 100, offset: number = 0, enabled: boolean = true) {
   const projectId = getProjectId() || ''
   return useQuery({
     queryKey: ['datasetPreview', projectId, filePath, limit, offset],
     queryFn: () => getDatasetPreview(filePath, limit, offset),
-    enabled: !!filePath,
+    enabled: !!filePath && enabled,
   })
 }
 

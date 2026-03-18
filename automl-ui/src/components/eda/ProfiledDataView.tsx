@@ -250,15 +250,19 @@ export function ProfiledDataView({
       {/* Tab Content */}
       <div className="bg-white border border-domino-border p-6">
         {activeTab === 'data' && (
-          <DataPreviewContent
-            preview={preview}
-            previewLoading={previewLoading}
-            previewError={previewError}
-            currentPage={currentPage}
-            pageSize={pageSize}
-            onPageChange={onPageChange}
-            onPageSizeChange={onPageSizeChange}
-          />
+          <TabContent loading={previewLoading} error={previewError ? String(previewError) : null} data={preview} emptyMessage="Select an execution target and click Analyze to preview your data">
+            {preview && (
+              <DataPreviewContent
+                preview={preview}
+                previewLoading={false}
+                previewError={null}
+                currentPage={currentPage}
+                pageSize={pageSize}
+                onPageChange={onPageChange}
+                onPageSizeChange={onPageSizeChange}
+              />
+            )}
+          </TabContent>
         )}
 
         {activeTab === 'columns' && (
