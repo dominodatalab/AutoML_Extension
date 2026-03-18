@@ -203,6 +203,40 @@ class TestFindExisting:
 
 
 # ---------------------------------------------------------------------------
+# _create_dataset
+# ---------------------------------------------------------------------------
+
+
+class TestCreateDataset:
+
+    @pytest.mark.asyncio
+    async def test_uses_dataset_rw_write_helper(self):
+        resolver = ProjectStorageResolver()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "dataset": {
+                "id": "ds-created",
+                "name": "automl-extension",
+            }
+        }
+
+        with patch.object(
+            resolver,
+            "_dataset_rw_write_request",
+            new_callable=AsyncMock,
+            return_value=mock_resp,
+        ) as write_request:
+            info = await resolver._create_dataset("proj-1")
+
+        assert info.dataset_id == "ds-created"
+        assert info.name == "automl-extension"
+        assert write_request.await_count >= 1
+        first_call = write_request.await_args_list[0]
+        assert first_call.args == ("POST", "/api/datasetrw/v2/datasets")
+        assert first_call.kwargs["json"]["projectId"] == "proj-1"
+
+
+# ---------------------------------------------------------------------------
 # _get_latest_snapshot_id
 # ---------------------------------------------------------------------------
 

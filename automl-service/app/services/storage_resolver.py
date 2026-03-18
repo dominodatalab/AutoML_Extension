@@ -896,7 +896,7 @@ class ProjectStorageResolver:
         for endpoint in endpoints:
             for payload in payloads:
                 try:
-                    resp = await domino_request(
+                    resp = await self._dataset_rw_write_request(
                         "POST",
                         endpoint,
                         json=payload,
