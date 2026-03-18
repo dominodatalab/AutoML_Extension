@@ -320,6 +320,31 @@ Derived defaults:
 - **Recharts 2** (diagnostics charts)
 - **Heroicons** (icons)
 
+# Local Development
+
+## installation
+See the individual service directories automl-service, automl-ui READMEs for installation instructions.
+
+## development
+You can develop this application locally by setting some environment variables and running the dev servers.
+
+```sh
+source .env-dev # see .env-dev-example
+
+# run dev servers, option A
+FRONTEND_PORT=3000 BACKEND_PORT=8000 ./app.sh --frontend
+PORT=8000 ./app.sh --backend
+
+# run dev servers, option B
+./app.sh --dev
+```
+
+## Retrieving DEV_ACCESS_TOKEN
+
+- start Domino workspace or App
+- open a terminal. In workspace, this would be via vscode or jupyterlab (or many other notebook types)
+- `curl localhost:8899/access-token`
+
 ## License
 
 MIT License

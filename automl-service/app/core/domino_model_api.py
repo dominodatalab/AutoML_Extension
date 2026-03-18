@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from app.config import get_settings
+from app.core.context.auth import get_request_auth_header
 
 logger = logging.getLogger(__name__)
 
@@ -47,39 +48,6 @@ class DominoModelAPIClient:
         except Exception as exc:
             logger.debug(f"Local token endpoint not available: {exc}")
         return None
-
-    @staticmethod
-    def _to_bearer_header(token: str) -> str:
-        token = token.strip()
-        if token.lower().startswith("bearer "):
-            return token
-        return f"Bearer {token}"
-
-    async def _get_auth_headers(self) -> Dict[str, str]:
-        """Build auth headers for each request.
-
-        Domino app tokens are short-lived, so we re-acquire from localhost on every call.
-        """
-        api_key_override = os.environ.get("API_KEY_OVERRIDE")
-        if api_key_override:
-            return {"X-Domino-Api-Key": api_key_override}
-
-        token = await self._get_ephemeral_token()
-        if token:
-            return {"Authorization": self._to_bearer_header(token)}
-
-        api_key = (
-            os.environ.get("DOMINO_API_KEY")
-            or os.environ.get("DOMINO_USER_API_KEY")
-            or self.settings.effective_api_key
-        )
-        if api_key:
-            return {"X-Domino-Api-Key": api_key}
-
-        raise ValueError(
-            "No Domino credentials available. Configure API_KEY_OVERRIDE, "
-            "local access token, or DOMINO_API_KEY/DOMINO_USER_API_KEY."
-        )
 
     @staticmethod
     def _extract_error(response: httpx.Response) -> str:
@@ -126,51 +94,14 @@ class DominoModelAPIClient:
         params: Optional[Dict[str, Any]] = None,
         json_data: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Make an HTTP request to the Domino API."""
+        """Make an HTTP request to the Domino API via domino_http.domino_request."""
         try:
-            client = await self._get_client()
-            auth_headers = await self._get_auth_headers()
-        except ValueError as e:
-            logger.warning(f"Domino API not configured: {e}")
-            return {"success": False, "data": [], "error": str(e)}
-
-        try:
-            request_headers: Dict[str, str] = {
-                **auth_headers,
-                "Accept": "application/json",
-            }
-            if json_data is not None:
-                request_headers["Content-Type"] = "application/json"
-
-            response = await client.request(
-                method=method,
-                url=path,
-                params=params,
-                json=json_data,
-                headers=request_headers,
-            )
-
-            # Check if response is HTML (authentication error)
-            content_type = response.headers.get("content-type", "")
-            if "text/html" in content_type:
-                error_message = self._extract_error(response)
-                logger.error(f"Received HTML response from Domino API for {path}: {error_message}")
-                return {
-                    "success": False,
-                    "data": [],
-                    "error": error_message,
-                    "status_code": response.status_code,
-                }
-
-            response.raise_for_status()
-
-            # Parse response
-            if method == "DELETE":
+            payload = json_data if method.upper() != "GET" else None
+            response = await domino_request(method.upper(), path, json=payload)
+            if method.upper() == "DELETE":
                 return {"success": True, "message": f"Resource deleted successfully"}
-
             if not response.text:
                 return {"success": True, "data": {}}
-
             try:
                 result = response.json()
             except ValueError:
@@ -180,7 +111,7 @@ class DominoModelAPIClient:
                     "success": False,
                     "data": [],
                     "error": error_message,
-                    "status_code": response.status_code,
+                    "status_code": getattr(response, 'status_code', 500),
                 }
             return {"success": True, "data": result}
         except httpx.HTTPStatusError as e:
@@ -204,39 +135,7 @@ class DominoModelAPIClient:
     ) -> Dict[str, Any]:
         """Make an authenticated request when endpoint response is plain text."""
         try:
-            client = await self._get_client()
-            auth_headers = await self._get_auth_headers()
-        except ValueError as e:
-            logger.warning(f"Domino API not configured: {e}")
-            return {"success": False, "error": str(e)}
-
-        try:
-            request_headers: Dict[str, str] = {
-                **auth_headers,
-                "Accept": "text/plain, application/json;q=0.9, */*;q=0.8",
-            }
-            response = await client.request(
-                method=method,
-                url=path,
-                params=params,
-                headers=request_headers,
-            )
-
-            content_type = response.headers.get("content-type", "")
-            if "text/html" in content_type:
-                error_message = self._extract_error(response)
-                logger.error(
-                    "Received HTML response from Domino API for %s: %s",
-                    path,
-                    error_message,
-                )
-                return {
-                    "success": False,
-                    "error": error_message,
-                    "status_code": response.status_code,
-                }
-
-            response.raise_for_status()
+            response = await domino_request(method.upper(), path)
             return {"success": True, "text": response.text}
         except httpx.HTTPStatusError as e:
             error_message = self._extract_error(e.response)

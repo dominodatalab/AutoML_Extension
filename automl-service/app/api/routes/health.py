@@ -58,6 +58,7 @@ async def get_current_user(request: Request):
 @router.get("/capabilities")
 async def get_capabilities():
     """Return platform capabilities for frontend feature gating."""
+    # TODO may not make sense to have in health routes
     settings = get_settings()
     standalone = settings.standalone_mode
     return {

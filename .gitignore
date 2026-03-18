@@ -7,9 +7,10 @@ automl-service/mlruns/
 **/*/mlflow.db
 
 # Database
+automl.db
 **/*/automl.db
-automl-service/automl.db
 automl-service/uploads/
+automl-service/test-reports
 
 # Node.js
 node_modules/
@@ -26,6 +27,7 @@ __pycache__/
 
 # Environment files
 .env
+.env-dev
 automl-ui/.env
 
 # IDE
