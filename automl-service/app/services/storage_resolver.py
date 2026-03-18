@@ -1,9 +1,9 @@
 """Resolve project-scoped storage via Domino Datasets (auto-created).
 
 Ensures a writable ``automl-extension`` dataset exists for a given target
-project and returns the local mount path.  The dataset is created via the
-Domino Dataset RW API (v1 for create, v2 for listing) if it does not
-already exist.
+project and returns the local mount path. The dataset is created via the
+Domino Dataset RW API (v1 for create, v2 with v1 fallback for listing) if it
+does not already exist.
 
 Usage::
 
@@ -28,6 +28,10 @@ from app.core.domino_http import (
     domino_request,
     resolve_domino_api_host,
     resolve_domino_nucleus_host,
+)
+from app.services.domino_dataset_api import (
+    extract_dataset_list as _extract_project_dataset_list,
+    list_project_datasets,
 )
 
 logger = logging.getLogger(__name__)
@@ -774,17 +778,10 @@ class ProjectStorageResolver:
     async def _find_existing(self, project_id: str) -> Optional[DatasetInfo]:
         """List datasets for *project_id* and return ours if it exists."""
         try:
-            resp = await domino_request(
-                "GET",
-                "/api/datasetrw/v2/datasets",
-                params={"projectIdsToInclude": project_id},
-            )
+            datasets = await list_project_datasets(project_id)
         except Exception:
             logger.exception("Failed to list datasets for project %s", project_id)
             return None
-
-        data = resp.json()
-        datasets = _extract_dataset_list(data)
 
         for ds in datasets:
             name = ds.get("datasetName") or ds.get("name") or ""
@@ -913,23 +910,7 @@ def _extract_dataset_list(data: object) -> list[dict]:
     The v2 response wraps each item as ``{"dataset": {...}}``; this helper
     unwraps to the inner dict so callers can access fields directly.
     """
-    if isinstance(data, list):
-        items = data
-    elif isinstance(data, dict):
-        items = (
-            data.get("items")
-            or data.get("datasets")
-            or data.get("data")
-            or []
-        )
-    else:
-        return []
-
-    # Unwrap v2 nested {"dataset": {...}} wrappers
-    return [
-        item.get("dataset", item) if isinstance(item, dict) and "dataset" in item else item
-        for item in items
-    ]
+    return _extract_project_dataset_list(data)
 
 
 @lru_cache()

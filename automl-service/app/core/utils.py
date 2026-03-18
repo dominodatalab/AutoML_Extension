@@ -187,22 +187,14 @@ async def _resolve_dataset_id_by_name(
     project_id: str, dataset_name: str
 ) -> Optional[str]:
     """Look up a dataset ID by name within a project via the Domino API."""
-    from app.core.domino_http import domino_request
+    from app.services.domino_dataset_api import list_project_datasets
 
     try:
-        resp = await domino_request(
-            "GET",
-            "/api/datasetrw/v2/datasets",
-            params={"projectIdsToInclude": project_id},
-        )
-        body = resp.json()
-        items = body if isinstance(body, list) else body.get("items", body.get("datasets", []))
+        items = await list_project_datasets(project_id)
         for item in items:
-            # v2 wraps as {"dataset": {...}}
-            ds = item.get("dataset", item) if isinstance(item, dict) and "dataset" in item else item
-            name = ds.get("datasetName") or ds.get("name") or ""
+            name = item.get("datasetName") or item.get("name") or ""
             if name == dataset_name:
-                return str(ds.get("datasetId") or ds.get("id") or "")
+                return str(item.get("datasetId") or item.get("id") or "")
     except Exception:
         logger.debug(
             "Failed to resolve dataset '%s' in project %s",

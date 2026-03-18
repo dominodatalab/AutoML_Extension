@@ -17,6 +17,7 @@ from app.api.schemas.dataset import (
 from app.core.dataset_mounts import resolve_dataset_mount_paths
 from app.core.domino_http import domino_request
 from app.core.tabular_data import read_tabular_preview, read_tabular_schema
+from app.services.domino_dataset_api import list_project_datasets
 
 logger = logging.getLogger(__name__)
 SUPPORTED_DATA_EXTENSIONS = (".csv", ".parquet", ".pq")
@@ -149,9 +150,11 @@ class DominoDatasetManager:
         """List datasets, preferring the Domino API when a project ID is available.
 
         When *project_id* is supplied and the Domino environment is configured,
-        the v2 Dataset API is used to retrieve project-scoped datasets. The
-        results are then cross-referenced with local mount paths so that file
-        listings include real filesystem paths for preview/training.
+        the Dataset RW list API is used to retrieve project-scoped datasets,
+        trying v2 first and falling back to v1 when the proxy/runtime does not
+        serve v2 reliably. The results are then cross-referenced with local
+        mount paths so that file listings include real filesystem paths for
+        preview/training.
 
         Falls back to the legacy filesystem-scan approach when the API is
         unavailable or the environment is not configured.
@@ -171,7 +174,16 @@ class DominoDatasetManager:
                     return datasets
             except Exception:
                 logger.exception(
-                    "Domino Dataset API call failed for project %s, falling back to filesystem scan",
+                    "Domino Dataset API call failed for project %s",
+                    project_id,
+                )
+                app_project_id = os.environ.get("DOMINO_PROJECT_ID", "")
+                if app_project_id and project_id != app_project_id:
+                    raise RuntimeError(
+                        f"Failed to list datasets for target project {project_id} via Domino API"
+                    )
+                logger.info(
+                    "Falling back to filesystem scan for app project %s after API failure",
                     project_id,
                 )
 
@@ -192,57 +204,22 @@ class DominoDatasetManager:
     ) -> Optional[list[DatasetResponse]]:
         """List datasets for a project using the Domino Dataset RW v2 API.
 
-        Returns None when the API is unreachable so the caller can fall back.
+        Falls back to the v1 Dataset RW API when v2 is unavailable.
         """
         datasets: list[DatasetResponse] = []
-        offset = 0
-        limit = 50
+        items = await list_project_datasets(project_id)
 
-        while True:
-            try:
-                resp = await domino_request(
-                    "GET",
-                    "/api/datasetrw/v2/datasets",
-                    params={
-                        "projectIdsToInclude": project_id,
-                        "offset": offset,
-                        "limit": limit,
-                    },
-                )
-            except httpx.HTTPStatusError as exc:
-                logger.error(
-                    "Domino Dataset API returned %s: %s",
-                    exc.response.status_code,
-                    exc.response.text[:200],
-                )
-                return None
-
-            body = resp.json()
-            items = body if isinstance(body, list) else body.get("items", body.get("datasets", []))
-            if not items:
-                break
-
-            # v2 wraps each item as {"dataset": {...}} — unwrap
-            items = [
-                it.get("dataset", it) if isinstance(it, dict) and "dataset" in it else it
-                for it in items
-            ]
-
-            for item in items:
-                dataset_id = str(item.get("datasetId") or item.get("id") or "")
-                if dataset_id:
-                    self._dataset_item_cache[dataset_id] = dict(item)
-                ds = await self._api_item_to_dataset_response(
-                    item,
-                    include_files=include_files,
-                )
-                if ds is not None:
-                    datasets.append(ds)
-
-            # Stop if we received fewer items than the page size (last page).
-            if len(items) < limit:
-                break
-            offset += limit
+        for item in items:
+            dataset_id = str(item.get("datasetId") or item.get("id") or "")
+            if dataset_id:
+                self._dataset_item_cache[dataset_id] = dict(item)
+            ds = await self._api_item_to_dataset_response(
+                item,
+                include_files=include_files,
+                requested_project_id=project_id,
+            )
+            if ds is not None:
+                datasets.append(ds)
 
         return datasets
 
@@ -250,6 +227,7 @@ class DominoDatasetManager:
         self,
         item: dict,
         include_files: bool = True,
+        requested_project_id: Optional[str] = None,
     ) -> Optional[DatasetResponse]:
         """Convert a Domino API dataset object into a DatasetResponse.
 
@@ -271,8 +249,11 @@ class DominoDatasetManager:
         # wrong files for preview and training.
         dataset_project_id = item.get("projectId") or item.get("ownerProjectId") or ""
         app_project_id = os.environ.get("DOMINO_PROJECT_ID", "")
+        requested_matches_app = bool(
+            requested_project_id and app_project_id and requested_project_id == app_project_id
+        )
         is_local_dataset = bool(
-            app_project_id and dataset_project_id and dataset_project_id == app_project_id
+            requested_matches_app and (not dataset_project_id or dataset_project_id == app_project_id)
         )
 
         dataset_path: Optional[str] = None

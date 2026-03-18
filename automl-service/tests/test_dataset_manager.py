@@ -184,3 +184,58 @@ class TestSnapshotTraversal:
             f.path.startswith("/domino/datasets/local/automl_shared_db/")
             for f in files
         )
+
+
+class TestProjectScopedFallbacks:
+    """Protect against showing app-project files for target-project requests."""
+
+    @pytest.mark.asyncio
+    async def test_cross_project_api_failure_does_not_fallback_to_local_scan(self, monkeypatch):
+        manager = DominoDatasetManager()
+        monkeypatch.setenv("DOMINO_PROJECT_ID", "app-project")
+
+        with patch.object(
+            type(manager.settings),
+            "is_domino_environment",
+            new_callable=PropertyMock,
+            return_value=True,
+        ), patch(
+            "app.core.dataset_manager.list_project_datasets",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("boom"),
+        ), patch.object(
+            manager,
+            "_list_local_datasets",
+            new_callable=AsyncMock,
+        ) as list_local:
+            with pytest.raises(RuntimeError, match="target project target-project"):
+                await manager.list_datasets(project_id="target-project", include_files=False)
+
+        list_local.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_app_project_api_failure_can_fallback_to_local_scan(self, monkeypatch):
+        manager = DominoDatasetManager()
+        monkeypatch.setenv("DOMINO_PROJECT_ID", "app-project")
+
+        local_dataset = object()
+
+        with patch.object(
+            type(manager.settings),
+            "is_domino_environment",
+            new_callable=PropertyMock,
+            return_value=True,
+        ), patch(
+            "app.core.dataset_manager.list_project_datasets",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("boom"),
+        ), patch.object(
+            manager,
+            "_list_local_datasets",
+            new_callable=AsyncMock,
+            return_value=[local_dataset],
+        ) as list_local:
+            datasets = await manager.list_datasets(project_id="app-project", include_files=False)
+
+        assert datasets == [local_dataset]
+        list_local.assert_awaited_once()
