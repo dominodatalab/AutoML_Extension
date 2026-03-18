@@ -1,8 +1,7 @@
 """Custom compatibility dataset routes."""
 
-import os
-
 from fastapi import Body, FastAPI, File, Query, Request, UploadFile
+from app.api.utils import resolve_request_project_id
 from app.services.dataset_service import (
     build_compat_dataset_preview_payload,
     get_dataset_or_404,
@@ -20,11 +19,7 @@ def register_custom_dataset_routes(app: FastAPI) -> None:
         request: Request,
         include_files: bool = Query(True, description="Include file entries for each dataset"),
     ):
-        project_id = (
-            request.headers.get("X-Project-Id")
-            or os.environ.get("DOMINO_PROJECT_ID")
-            or None
-        )
+        project_id = resolve_request_project_id(request)
         return await list_datasets_response(
             get_dataset_manager(),
             project_id=project_id,
@@ -38,11 +33,7 @@ def register_custom_dataset_routes(app: FastAPI) -> None:
         if file_path:
             from app.core.utils import ensure_local_file
 
-            project_id = (
-                request.headers.get("X-Project-Id")
-                or os.environ.get("DOMINO_PROJECT_ID")
-                or None
-            )
+            project_id = resolve_request_project_id(request)
             body = {**body, "file_path": await ensure_local_file(file_path, project_id)}
         return await build_compat_dataset_preview_payload(get_dataset_manager(), body)
 

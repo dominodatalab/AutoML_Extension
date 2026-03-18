@@ -1,15 +1,25 @@
 import { getBasePath } from '../utils/basePath'
 import { debug } from '../utils/logger'
 
+const PROJECT_ID_PARAM_KEYS = ['projectId', 'project_id'] as const
+
+function getProjectIdFromParams(params: URLSearchParams): string | undefined {
+  for (const key of PROJECT_ID_PARAM_KEYS) {
+    const value = params.get(key)
+    if (value) return value
+  }
+  return undefined
+}
+
 /**
- * Extract projectId from a Location-like object (search then hash).
+ * Extract projectId/project_id from a Location-like object (search then hash).
  */
 function extractProjectId(loc: { search: string; hash: string }): string | undefined {
-  const fromSearch = new URLSearchParams(loc.search).get('projectId')
+  const fromSearch = getProjectIdFromParams(new URLSearchParams(loc.search))
   if (fromSearch) return fromSearch
 
   if (loc.hash) {
-    const fromHash = new URLSearchParams(loc.hash.slice(1)).get('projectId')
+    const fromHash = getProjectIdFromParams(new URLSearchParams(loc.hash.slice(1)))
     if (fromHash) return fromHash
   }
   return undefined
@@ -24,7 +34,7 @@ function extractProjectId(loc: { search: string; hash: string }): string | undef
  *   1. Current iframe URL (query string, then hash)
  *   2. Parent frame URL (same-origin only; query string, then hash)
  */
-function getProjectIdFromUrl(): string | undefined {
+export function getProjectIdFromUrl(): string | undefined {
   try {
     // 1. Current frame
     const fromSelf = extractProjectId(window.location)
@@ -120,14 +130,19 @@ class ApiClient {
       fullUrl = `/api/v1/${cleanEndpoint}`
     }
 
+    const projectId = getProjectId()
+
     // Add query params
-    if (config?.params) {
+    if (config?.params || projectId) {
       const searchParams = new URLSearchParams()
-      Object.entries(config.params).forEach(([key, value]) => {
+      Object.entries(config?.params || {}).forEach(([key, value]) => {
         if (value !== undefined) {
           searchParams.append(key, String(value))
         }
       })
+      if (projectId && !searchParams.has('projectId') && !searchParams.has('project_id')) {
+        searchParams.append('project_id', projectId)
+      }
       const queryString = searchParams.toString()
       if (queryString) {
         fullUrl += `?${queryString}`
@@ -139,7 +154,6 @@ class ApiClient {
     // Dynamically resolve project ID on every request so it works even
     // when the module loaded before query params were available, or after
     // React Router navigation strips them from the URL.
-    const projectId = getProjectId()
     if (projectId) {
       headers['X-Project-Id'] = projectId
     }

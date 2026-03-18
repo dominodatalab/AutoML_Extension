@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { getDatasets, getDataset, getDatasetPreview, getDatasetSchema, uploadFile, verifySnapshot } from '../api/datasets'
+import { getProjectId } from '../api'
 import type { FileUploadResponse } from '../types/dataset'
 
 interface UseDatasetsOptions {
@@ -10,8 +11,9 @@ interface UseDatasetsOptions {
 
 export function useDatasets(options: UseDatasetsOptions = {}) {
   const includeFiles = options.includeFiles ?? true
+  const projectId = getProjectId() || ''
   return useQuery({
-    queryKey: ['datasets', includeFiles],
+    queryKey: ['datasets', projectId, includeFiles],
     queryFn: () => getDatasets({ includeFiles }),
     enabled: options.enabled ?? true,
     staleTime: includeFiles ? 60_000 : 30_000,
@@ -20,8 +22,9 @@ export function useDatasets(options: UseDatasetsOptions = {}) {
 }
 
 export function useDataset(datasetId: string) {
+  const projectId = getProjectId() || ''
   return useQuery({
-    queryKey: ['dataset', datasetId],
+    queryKey: ['dataset', projectId, datasetId],
     queryFn: () => getDataset(datasetId),
     enabled: !!datasetId,
     staleTime: 5 * 60 * 1000,
@@ -30,16 +33,18 @@ export function useDataset(datasetId: string) {
 }
 
 export function useDatasetPreview(filePath: string, limit: number = 100, offset: number = 0) {
+  const projectId = getProjectId() || ''
   return useQuery({
-    queryKey: ['datasetPreview', filePath, limit, offset],
+    queryKey: ['datasetPreview', projectId, filePath, limit, offset],
     queryFn: () => getDatasetPreview(filePath, limit, offset),
     enabled: !!filePath,
   })
 }
 
 export function useDatasetSchema(filePath: string) {
+  const projectId = getProjectId() || ''
   return useQuery({
-    queryKey: ['datasetSchema', filePath],
+    queryKey: ['datasetSchema', projectId, filePath],
     queryFn: () => getDatasetSchema(filePath),
     enabled: !!filePath,
   })

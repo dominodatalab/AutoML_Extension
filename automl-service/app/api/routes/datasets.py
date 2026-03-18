@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse
 
 from app.api.error_handler import handle_errors
+from app.api.utils import resolve_request_project_id
 
 from app.api.schemas.dataset import (
     DatasetResponse,
@@ -67,12 +68,8 @@ async def _verify_snapshot_active(
 
 
 def _resolve_project_id(request: Request) -> Optional[str]:
-    """Extract project ID from request header with env var fallback."""
-    return (
-        request.headers.get("X-Project-Id")
-        or os.environ.get("DOMINO_PROJECT_ID")
-        or None
-    )
+    """Extract project ID from request metadata with env var fallback."""
+    return resolve_request_project_id(request)
 
 
 @router.get("", response_model=DatasetListResponse)
@@ -172,7 +169,7 @@ async def preview_file_by_path(request: FilePreviewRequest, http_request: Reques
     """Preview a file by its path with pagination support."""
     from app.core.utils import ensure_local_file
 
-    project_id = http_request.headers.get("X-Project-Id")
+    project_id = resolve_request_project_id(http_request)
     resolved_path = await ensure_local_file(request.file_path, project_id)
     return preview_file_response(
         file_path=resolved_path,

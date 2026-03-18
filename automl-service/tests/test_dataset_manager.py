@@ -113,3 +113,74 @@ class TestApiDatasetSummaries:
         assert response is not None
         assert response.id == "ds-123"
         api_request.assert_not_called()
+
+
+class TestSnapshotTraversal:
+    """Verify recursive snapshot traversal across multiple directories."""
+
+    @pytest.mark.asyncio
+    async def test_list_files_via_snapshot_api_recurses_all_directories(self):
+        manager = DominoDatasetManager()
+
+        def _entries_for(snapshot_id: str, path: str = ""):
+            assert snapshot_id == "snap-123"
+            return {
+                "": [
+                    {"fileName": "uploads", "isDirectory": True, "sizeInBytes": 0},
+                    {"fileName": "temp", "isDirectory": True, "sizeInBytes": 0},
+                ],
+                "uploads": [
+                    {"fileName": "uploads/top.csv", "isDirectory": False, "sizeInBytes": 11},
+                    {"fileName": "uploads/nested", "isDirectory": True, "sizeInBytes": 0},
+                ],
+                "uploads/nested": [
+                    {
+                        "fileName": "uploads/nested/model.parquet",
+                        "isDirectory": False,
+                        "sizeInBytes": 22,
+                    },
+                ],
+                "temp": [
+                    {"fileName": "temp/dataset_cache", "isDirectory": True, "sizeInBytes": 0},
+                ],
+                "temp/dataset_cache": [
+                    {
+                        "fileName": "temp/dataset_cache/panel.csv",
+                        "isDirectory": False,
+                        "sizeInBytes": 33,
+                    },
+                    {
+                        "fileName": "temp/dataset_cache/notes.txt",
+                        "isDirectory": False,
+                        "sizeInBytes": 44,
+                    },
+                ],
+            }[path]
+
+        mock_resolver = AsyncMock()
+        mock_resolver.list_snapshot_files.side_effect = _entries_for
+
+        with patch(
+            "app.services.storage_resolver.get_storage_resolver",
+            return_value=mock_resolver,
+        ), patch(
+            "app.core.domino_project_type.detect_project_type",
+        ) as detect_project_type:
+            from app.core.domino_project_type import DominoProjectType
+
+            detect_project_type.return_value = DominoProjectType.DFS
+            files, total_size = await manager._list_files_via_snapshot_api(
+                "snap-123",
+                "automl_shared_db",
+            )
+
+        assert [f.name for f in files] == [
+            "uploads/top.csv",
+            "uploads/nested/model.parquet",
+            "temp/dataset_cache/panel.csv",
+        ]
+        assert total_size == 66
+        assert all(
+            f.path.startswith("/domino/datasets/local/automl_shared_db/")
+            for f in files
+        )

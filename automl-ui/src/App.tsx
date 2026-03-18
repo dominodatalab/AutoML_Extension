@@ -1,10 +1,10 @@
 import { Suspense, lazy, useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useSearchParams } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import Layout from './components/layout/Layout'
 import Spinner from './components/common/Spinner'
 import { getBasePath } from './utils/basePath'
-import { setProjectId } from './api'
+import { getProjectIdFromUrl, setProjectId } from './api'
 
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const NewJob = lazy(() => import('./pages/NewJob'))
@@ -12,26 +12,19 @@ const JobDetail = lazy(() => import('./pages/JobDetail'))
 const EDAAnalysis = lazy(() => import('./pages/EDAAnalysis'))
 
 /**
- * Sync projectId from both query string and hash fragment into the API
+ * Sync projectId/project_id from both query string and hash fragment into the API
  * client so the X-Project-Id header is sent on every request.
  * Domino's app proxy strips query params, so #projectId=... is the
  * reliable transport.
  */
 function ProjectIdSync() {
-  const [searchParams] = useSearchParams()
   const location = useLocation()
   useEffect(() => {
-    // Query string: ?projectId=...
-    const fromSearch = searchParams.get('projectId')
-    if (fromSearch) { setProjectId(fromSearch); return }
-
-    // Hash fragment: #projectId=...
-    const hash = window.location.hash
-    if (hash) {
-      const fromHash = new URLSearchParams(hash.slice(1)).get('projectId')
-      if (fromHash) setProjectId(fromHash)
+    const projectId = getProjectIdFromUrl()
+    if (projectId) {
+      setProjectId(projectId)
     }
-  }, [searchParams, location])
+  }, [location])
   return null
 }
 
