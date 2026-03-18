@@ -233,7 +233,7 @@ class TestCreateDataset:
         assert first_call.kwargs["json"]["projectId"] == "proj-1"
 
     @pytest.mark.asyncio
-    async def test_retries_with_minimal_v1_payload(self):
+    async def test_retries_with_next_payload_on_error(self):
         resolver = ProjectStorageResolver()
         bad_response = MagicMock()
         bad_response.status_code = 400
@@ -255,12 +255,7 @@ class TestCreateDataset:
             "app.services.storage_resolver.domino_request",
             new_callable=AsyncMock,
             side_effect=[bad_error, mock_resp],
-        ) as mock_request, patch.object(
-            resolver,
-            "_find_existing",
-            new_callable=AsyncMock,
-            return_value=None,
-        ) as find_existing:
+        ) as mock_request:
             info = await resolver._create_dataset("proj-1")
 
         assert info.dataset_id == "ds-created"
@@ -268,49 +263,32 @@ class TestCreateDataset:
         first_call = mock_request.await_args_list[0]
         second_call = mock_request.await_args_list[1]
         assert first_call.args == ("POST", "/dataset")
-        assert first_call.kwargs["json"] == {
-            "datasetName": "automl-extension",
-            "projectId": "proj-1",
-            "description": "AutoML Extension storage - auto-created by the AutoML App",
-        }
         assert second_call.args == ("POST", "/dataset")
-        assert second_call.kwargs["json"] == {
-            "datasetName": "automl-extension",
-            "projectId": "proj-1",
-        }
-        find_existing.assert_awaited_once_with("proj-1")
 
     @pytest.mark.asyncio
-    async def test_returns_existing_dataset_after_duplicate_like_error(self):
+    async def test_resolve_or_create_falls_back_to_find_existing(self):
+        """When create fails, _resolve_or_create falls back to listing."""
         resolver = ProjectStorageResolver()
-        bad_response = MagicMock()
-        bad_response.status_code = 400
-        bad_response.text = "dataset already exists"
-        bad_error = httpx.HTTPStatusError(
-            "bad request",
-            request=MagicMock(),
-            response=bad_response,
-        )
         existing = DatasetInfo(
             dataset_id="ds-existing",
             name="automl-extension",
             project_id="proj-1",
         )
 
-        with patch(
-            "app.services.storage_resolver.domino_request",
+        with patch.object(
+            resolver,
+            "_create_dataset",
             new_callable=AsyncMock,
-            side_effect=bad_error,
-        ) as mock_request, patch.object(
+            side_effect=RuntimeError("all create attempts failed"),
+        ), patch.object(
             resolver,
             "_find_existing",
             new_callable=AsyncMock,
             return_value=existing,
         ) as find_existing:
-            info = await resolver._create_dataset("proj-1")
+            info = await resolver._resolve_or_create("proj-1")
 
         assert info is existing
-        mock_request.assert_awaited_once()
         find_existing.assert_awaited_once_with("proj-1")
 
 

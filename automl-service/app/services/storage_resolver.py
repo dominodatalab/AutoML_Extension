@@ -783,7 +783,27 @@ class ProjectStorageResolver:
     # ------------------------------------------------------------------
 
     async def _resolve_or_create(self, project_id: str) -> DatasetInfo:
-        """Find or create the automl-extension dataset for *project_id*."""
+        """Find or create the automl-extension dataset for *project_id*.
+
+        Tries to create first (``POST /dataset``) which is a single fast
+        call through the proxy.  If the dataset already exists (HTTP 400),
+        falls back to listing to resolve the existing ID.  This avoids the
+        listing step entirely for new datasets and works in App environments
+        where the proxy disconnects on GET listing requests.
+        """
+        logger.info("Ensuring dataset '%s' exists in project %s", DATASET_NAME, project_id)
+        try:
+            created = await self._create_dataset(project_id)
+            self._cache[project_id] = created
+            return created
+        except Exception:
+            # Creation failed — dataset likely already exists.
+            logger.debug(
+                "Create failed for project %s, looking up existing dataset",
+                project_id,
+                exc_info=True,
+            )
+
         existing = await self._find_existing(project_id)
         if existing:
             logger.info(
@@ -795,11 +815,9 @@ class ProjectStorageResolver:
             self._cache[project_id] = existing
             return existing
 
-        logger.info("Creating dataset '%s' in project %s", DATASET_NAME, project_id)
-        created = await self._create_dataset(project_id)
-
-        self._cache[project_id] = created
-        return created
+        raise RuntimeError(
+            f"Failed to create or find dataset '{DATASET_NAME}' in project {project_id}"
+        )
 
     async def _find_existing(self, project_id: str) -> Optional[DatasetInfo]:
         """List datasets for *project_id* and return ours if it exists."""
@@ -916,17 +934,6 @@ class ProjectStorageResolver:
                 )
             except httpx.HTTPStatusError as exc:
                 last_error = self._format_http_error(exc)
-                if exc.response is not None and exc.response.status_code in (400, 409, 422):
-                    existing = await self._find_existing(project_id)
-                    if existing:
-                        logger.info(
-                            "Dataset '%s' became visible after failed create for project %s; "
-                            "using existing dataset id=%s",
-                            DATASET_NAME,
-                            project_id,
-                            existing.dataset_id,
-                        )
-                        return existing
             except Exception as exc:
                 last_error = str(exc)
 
