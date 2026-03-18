@@ -47,6 +47,9 @@ async def _list_project_datasets_v2(
                 "offset": offset,
                 "limit": page_size,
             },
+            # Callers handle failures (e.g. _find_existing returns None),
+            # so fail fast instead of retrying against a disconnecting proxy.
+            max_retries=0,
         )
         items = extract_dataset_list(resp.json())
         if not items:
@@ -77,6 +80,7 @@ async def _list_project_datasets_v1(
                 "offset": offset,
                 "limit": page_size,
             },
+            max_retries=0,
         )
         items = extract_dataset_list(resp.json())
         if not items:
