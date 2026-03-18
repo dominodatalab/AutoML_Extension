@@ -107,9 +107,8 @@ async def get_domino_auth_headers(force_refresh: bool = False) -> dict[str, str]
                 return cached_headers
 
         try:
-            client = await _get_shared_request_client()
-            # TODO this url must be dynamically resolved
-            resp = await client.get("http://localhost:8899/access-token", timeout=5.0)
+            async with httpx.AsyncClient() as client:
+                resp = await client.get("http://localhost:8899/access-token", timeout=5.0)
             if resp.status_code == 200 and resp.text.strip():
                 return _cache_auth_headers(
                     {"Authorization": f"Bearer {resp.text.strip()}"}
@@ -189,19 +188,23 @@ async def domino_request(
     last_exc: Optional[Exception] = None
 
     for attempt in range(max_retries + 1):
-        client = await _get_shared_request_client()
         auth_headers = await get_domino_auth_headers(force_refresh=attempt > 0)
         merged_headers = {**auth_headers, **(headers or {})}
         try:
-            resp = await client.request(
-                method,
-                url,
-                json=json,
-                params=params,
-                files=files,
-                headers=merged_headers,
-                timeout=timeout,
-            )
+            # Fresh client per request — the Domino App proxy closes idle
+            # connections server-side, causing "Server disconnected" errors
+            # with a shared connection pool.  This matches the behaviour of
+            # the python-domino SDK (which used synchronous requests).
+            async with httpx.AsyncClient() as client:
+                resp = await client.request(
+                    method,
+                    url,
+                    json=json,
+                    params=params,
+                    files=files,
+                    headers=merged_headers,
+                    timeout=timeout,
+                )
             if resp.status_code in retry_statuses and attempt < max_retries:
                 backoff = 2**attempt  # 1, 2, 4, 8
                 logger.warning(
@@ -221,10 +224,6 @@ async def domino_request(
             raise
         except Exception as exc:
             last_exc = exc
-            # Reset the shared client so the next attempt (or the next
-            # call) gets a fresh TCP connection.  Stale connections cause
-            # "Server disconnected" errors against the Domino App proxy.
-            await _close_shared_request_client()
             if attempt < max_retries:
                 backoff = 2**attempt
                 logger.warning(
