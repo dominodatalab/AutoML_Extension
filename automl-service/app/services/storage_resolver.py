@@ -294,28 +294,18 @@ class ProjectStorageResolver:
 
         if rw_snapshot_id:
             encoded_path = quote(file_path, safe="")
-            # v4 endpoint — correct path, requires API key auth
+            # v4 endpoint works on both proxy and nucleus; try with both
+            # API key auth and Bearer token auth.
             endpoints.append((
                 f"/v4/datasetrw/snapshot/{rw_snapshot_id}/file/raw"
                 f"?path={encoded_path}&download=true",
                 True,
             ))
-            # Legacy /api endpoint as fallback (Bearer token auth)
             endpoints.append((
-                f"/api/datasetrw/snapshot/{rw_snapshot_id}/file/raw"
+                f"/v4/datasetrw/snapshot/{rw_snapshot_id}/file/raw"
                 f"?path={encoded_path}&download=true",
                 False,
             ))
-        if snapshot_id:
-            endpoints.append((
-                f"/api/datasetrw/v1/datasets/{dataset_id}"
-                f"/snapshots/{snapshot_id}/files/{file_path}",
-                False,
-            ))
-        endpoints.extend([
-            (f"/api/datasetrw/v1/datasets/{dataset_id}/files/{file_path}", False),
-            (f"/v4/datasetrw/datasets/{dataset_id}/files/{file_path}", False),
-        ])
 
         # Try each endpoint via the default host (proxy), then fall back
         # to the nucleus-frontend host directly (proxy may 404 for
@@ -400,54 +390,10 @@ class ProjectStorageResolver:
         if rw_sid:
             return rw_sid
 
-        try:
-            resp = await domino_request(
-                "GET",
-                f"/api/datasetrw/datasets/{dataset_id}",
-                base_url=_preferred_snapshot_api_base_url(),
-                max_retries=0,
-            )
-            data = resp.json()
-            rw_sid = data.get("readWriteSnapshotId")
-            if rw_sid:
-                # Backfill both caches
-                self._rw_cache[dataset_id] = rw_sid
-                for info in self._cache.values():
-                    if info.dataset_id == dataset_id:
-                        info.rw_snapshot_id = rw_sid
-                        break
-                return rw_sid
-        except Exception:
-            logger.debug(
-                "Failed to get RW snapshot ID for dataset %s",
-                dataset_id,
-                exc_info=True,
-            )
-
-        # Fallback 1: non-versioned snapshots endpoint
-        try:
-            resp = await domino_request(
-                "GET",
-                f"/api/datasetrw/snapshots/{dataset_id}",
-                base_url=_preferred_snapshot_api_base_url(),
-                max_retries=0,
-            )
-            snapshots = resp.json()
-            if isinstance(snapshots, list):
-                for snap in snapshots:
-                    if snap.get("isReadWrite"):
-                        rw_sid = str(snap.get("id", ""))
-                        if rw_sid:
-                            self._backfill_rw_cache(dataset_id, rw_sid)
-                            return rw_sid
-        except Exception:
-            logger.debug(
-                "Failed to list snapshots for dataset %s",
-                dataset_id,
-                exc_info=True,
-            )
-
-        # Fallback 2: retry the v1 snapshots endpoint via the default host.
+        # Fallback: retry the v1 snapshots endpoint via the default host
+        # (proxy).  The non-versioned /api/datasetrw/datasets/{id} and
+        # /api/datasetrw/snapshots/{id} endpoints are 404 on this Domino
+        # version, so we skip them.
         try:
             resp = await domino_request(
                 "GET",
@@ -658,9 +604,9 @@ class ProjectStorageResolver:
         if not relative_paths:
             return True
         try:
-            await domino_request(
+            await self._dataset_rw_write_request(
                 "DELETE",
-                f"/api/datasetrw/snapshot/{snapshot_id}/files",
+                f"/v4/datasetrw/snapshot/{snapshot_id}/files",
                 json={"relativePaths": relative_paths},
             )
             logger.info(
@@ -722,9 +668,13 @@ class ProjectStorageResolver:
           1. POST .../snapshot/file/start → get upload_key
           2. POST .../snapshot/file (multipart chunk) → upload data (repeated per chunk)
           3. GET  .../snapshot/file/end/{key} → finalize
+
+        Upload requests go through the proxy (``domino_request`` default)
+        rather than the nucleus-first wrapper because the Domino app proxy
+        injects auth headers that the v4 multipart endpoints require.
         """
         # Step 1: Start upload session
-        resp = await self._dataset_rw_write_request(
+        resp = await domino_request(
             "POST",
             f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/start",
             json={
@@ -746,7 +696,7 @@ class ProjectStorageResolver:
             )
 
             # Step 3: Finalize
-            await self._dataset_rw_write_request(
+            await domino_request(
                 "GET",
                 f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/end/{upload_key}",
             )
@@ -761,7 +711,7 @@ class ProjectStorageResolver:
         except Exception:
             # Cancel on failure
             try:
-                await self._dataset_rw_write_request(
+                await domino_request(
                     "GET",
                     f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/cancel/{upload_key}",
                 )
@@ -801,7 +751,7 @@ class ProjectStorageResolver:
 
             for attempt in range(_UPLOAD_MAX_RETRIES):
                 try:
-                    await self._dataset_rw_write_request(
+                    await domino_request(
                         "POST",
                         f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file",
                         params=chunk_params,
@@ -885,15 +835,19 @@ class ProjectStorageResolver:
     async def _create_dataset(self, project_id: str) -> DatasetInfo:
         """POST to create the dataset, trying known endpoints in order.
 
-        The Domino proxy only routes versioned paths (``/api/datasetrw/v2/...``,
-        ``/api/datasetrw/v1/...``).  The bare ``/api/datasetrw`` path is
-        documented but 404s on the direct host and disconnects via the proxy,
-        so we try the v2 path first (which the proxy can route), then v1.
+        The python-domino SDK uses ``POST /dataset`` (the legacy Domino REST
+        endpoint) which is the only create path that works reliably across
+        both the nucleus host and the Domino app proxy.  The internal
+        ``/api/datasetrw/`` endpoints return 404 or 400 on the direct host
+        and disconnect via the proxy.
         """
         # Each entry is (endpoint, payload).
+        # /dataset is the canonical SDK endpoint (python-domino uses it).
+        # /api/datasetrw/v1/datasets with "name" also works on both hosts.
+        # /api/datasetrw/v2/datasets is 404 everywhere — do not use.
         attempts: list[tuple[str, dict]] = [
             (
-                "/api/datasetrw/v2/datasets",
+                "/dataset",
                 {
                     "datasetName": DATASET_NAME,
                     "projectId": project_id,
@@ -901,7 +855,7 @@ class ProjectStorageResolver:
                 },
             ),
             (
-                "/api/datasetrw/v2/datasets",
+                "/dataset",
                 {
                     "datasetName": DATASET_NAME,
                     "projectId": project_id,

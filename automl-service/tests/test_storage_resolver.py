@@ -72,16 +72,18 @@ class TestDownloadFile:
 
         with patch.object(
             resolver, "_get_latest_snapshot_id", new_callable=AsyncMock, return_value="snap-1"
+        ), patch.object(
+            resolver, "get_rw_snapshot_id", new_callable=AsyncMock, return_value="rw-snap-1"
         ), patch(
             "app.services.storage_resolver.domino_download", new_callable=AsyncMock
         ) as mock_dl:
             result = await resolver.download_file("ds-123", "uploads/file.csv", dest)
 
         assert result == dest
-        # First call should use snapshot endpoint
+        # First call should use the v4 raw endpoint with the RW snapshot
         call_path = mock_dl.call_args_list[0][0][0]
-        assert "snap-1" in call_path
-        assert "uploads/file.csv" in call_path
+        assert "rw-snap-1" in call_path
+        assert "/v4/datasetrw/snapshot/" in call_path
 
     @pytest.mark.asyncio
     async def test_falls_back_when_snapshot_endpoint_fails(self, tmp_path):
@@ -96,10 +98,12 @@ class TestDownloadFile:
                 raise httpx.HTTPStatusError(
                     "Not Found", request=MagicMock(), response=MagicMock(status_code=404)
                 )
-            # Second call succeeds
+            # Second call succeeds (Bearer auth fallback on same v4 endpoint)
 
         with patch.object(
             resolver, "_get_latest_snapshot_id", new_callable=AsyncMock, return_value="snap-1"
+        ), patch.object(
+            resolver, "get_rw_snapshot_id", new_callable=AsyncMock, return_value="rw-snap-1"
         ), patch(
             "app.services.storage_resolver.domino_download", side_effect=fake_download
         ):
@@ -109,21 +113,23 @@ class TestDownloadFile:
         assert call_count == 2
 
     @pytest.mark.asyncio
-    async def test_download_without_snapshot(self, tmp_path):
+    async def test_download_without_latest_snapshot(self, tmp_path):
+        """Even without a latest snapshot, the RW snapshot provides the v4 path."""
         resolver = ProjectStorageResolver()
         dest = str(tmp_path / "output.csv")
 
         with patch.object(
             resolver, "_get_latest_snapshot_id", new_callable=AsyncMock, return_value=None
+        ), patch.object(
+            resolver, "get_rw_snapshot_id", new_callable=AsyncMock, return_value="rw-snap-1"
         ), patch(
             "app.services.storage_resolver.domino_download", new_callable=AsyncMock
         ) as mock_dl:
             result = await resolver.download_file("ds-123", "uploads/file.csv", dest)
 
         assert result == dest
-        # Without snapshot, first endpoint should be direct v1
         call_path = mock_dl.call_args_list[0][0][0]
-        assert "/api/datasetrw/v1/datasets/ds-123/files/" in call_path
+        assert "/v4/datasetrw/snapshot/rw-snap-1/file/raw" in call_path
 
     @pytest.mark.asyncio
     async def test_raises_when_all_endpoints_fail(self, tmp_path):
@@ -132,6 +138,8 @@ class TestDownloadFile:
 
         with patch.object(
             resolver, "_get_latest_snapshot_id", new_callable=AsyncMock, return_value=None
+        ), patch.object(
+            resolver, "get_rw_snapshot_id", new_callable=AsyncMock, return_value="rw-snap-1"
         ), patch(
             "app.services.storage_resolver.domino_download",
             side_effect=RuntimeError("fail"),
@@ -221,7 +229,7 @@ class TestCreateDataset:
         assert info.name == "automl-extension"
         assert write_request.await_count >= 1
         first_call = write_request.await_args_list[0]
-        assert first_call.args == ("POST", "/api/datasetrw/v2/datasets")
+        assert first_call.args == ("POST", "/dataset")
         assert first_call.kwargs["json"]["datasetName"] == "automl-extension"
         assert first_call.kwargs["json"]["projectId"] == "proj-1"
 
@@ -261,13 +269,13 @@ class TestCreateDataset:
         assert write_request.await_count == 2
         first_call = write_request.await_args_list[0]
         second_call = write_request.await_args_list[1]
-        assert first_call.args == ("POST", "/api/datasetrw/v2/datasets")
+        assert first_call.args == ("POST", "/dataset")
         assert first_call.kwargs["json"] == {
             "datasetName": "automl-extension",
             "projectId": "proj-1",
             "description": "AutoML Extension storage - auto-created by the AutoML App",
         }
-        assert second_call.args == ("POST", "/api/datasetrw/v2/datasets")
+        assert second_call.args == ("POST", "/dataset")
         assert second_call.kwargs["json"] == {
             "datasetName": "automl-extension",
             "projectId": "proj-1",
@@ -463,18 +471,18 @@ class TestDatasetRwWriteRequest:
 class TestUploadFile:
 
     @pytest.mark.asyncio
-    async def test_upload_file_uses_dataset_rw_write_helper(self):
+    async def test_upload_file_uses_proxy(self):
+        """Upload goes through domino_request (proxy) not the nucleus wrapper."""
         resolver = ProjectStorageResolver()
         start_resp = MagicMock()
         start_resp.json.return_value = "upload-key-123"
         end_resp = MagicMock()
 
-        with patch.object(
-            resolver,
-            "_dataset_rw_write_request",
+        with patch(
+            "app.services.storage_resolver.domino_request",
             new_callable=AsyncMock,
             side_effect=[start_resp, end_resp],
-        ) as write_request, patch.object(
+        ) as mock_request, patch.object(
             resolver,
             "_upload_chunks",
             new_callable=AsyncMock,
@@ -485,7 +493,7 @@ class TestUploadFile:
                 b"hello world",
             )
 
-        assert write_request.await_args_list[0].args == (
+        assert mock_request.await_args_list[0].args == (
             "POST",
             "/v4/datasetrw/datasets/ds-123/snapshot/file/start",
         )
@@ -496,7 +504,7 @@ class TestUploadFile:
             b"hello world",
             8 * 1024 * 1024,
         )
-        assert write_request.await_args_list[1].args == (
+        assert mock_request.await_args_list[1].args == (
             "GET",
             "/v4/datasetrw/datasets/ds-123/snapshot/file/end/upload-key-123",
         )
