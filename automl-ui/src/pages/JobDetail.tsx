@@ -185,7 +185,6 @@ function JobDetail() {
         activeTab={activeTab}
         onTabChange={setActiveTab}
         currentStatus={currentStatus}
-        modelType={job?.model_type}
         dominoEnabled={dominoEnabled}
       />
 
