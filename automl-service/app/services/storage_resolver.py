@@ -247,14 +247,20 @@ class ProjectStorageResolver:
                 )
             except httpx.HTTPStatusError as exc:
                 last_exc = exc
+                resp_body = ""
+                try:
+                    resp_body = exc.response.text[:300]
+                except Exception:
+                    pass
                 if is_last:
                     raise
                 logger.warning(
                     "Domino Dataset RW %s %s returned HTTP %s via direct host; "
-                    "falling back to the default host",
+                    "falling back to the default host. Body: %s",
                     method,
                     path,
                     exc.response.status_code,
+                    resp_body,
                 )
             except Exception as exc:
                 last_exc = exc
@@ -930,8 +936,8 @@ class ProjectStorageResolver:
             except Exception as exc:
                 last_error = str(exc)
 
-            logger.debug(
-                "Create attempt failed on %s with payload %s: %s",
+            logger.warning(
+                "Create attempt failed on %s with payload keys %s: %s",
                 endpoint,
                 list(payload.keys()),
                 last_error,
