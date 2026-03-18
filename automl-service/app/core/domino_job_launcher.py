@@ -95,6 +95,7 @@ class DominoJobLauncher:
                 # Fail fast on the direct host so we can still fall back to the
                 # proxy/default host when the direct route is unavailable.
                 request_kwargs.setdefault("max_retries", 0)
+            is_last = index == len(base_urls) - 1
             try:
                 return await domino_request(
                     method,
@@ -102,11 +103,20 @@ class DominoJobLauncher:
                     base_url=base_url,
                     **request_kwargs,
                 )
-            except httpx.HTTPStatusError:
-                raise
+            except httpx.HTTPStatusError as exc:
+                last_exc = exc
+                if is_last:
+                    raise
+                logger.warning(
+                    "Domino Jobs API %s %s returned HTTP %s via direct host; "
+                    "falling back to the default host",
+                    method,
+                    path,
+                    exc.response.status_code,
+                )
             except Exception as exc:
                 last_exc = exc
-                if index == len(base_urls) - 1:
+                if is_last:
                     raise
                 logger.warning(
                     "Domino Jobs API %s %s failed via direct host (%s); "

@@ -38,7 +38,7 @@ from app.services.domino_dataset_api import (
 logger = logging.getLogger(__name__)
 
 DATASET_NAME = "automl-extension"
-DATASET_DESCRIPTION = "AutoML Extension storage — auto-created by the AutoML App"
+DATASET_DESCRIPTION = "AutoML Extension storage - auto-created by the AutoML App"
 
 # Upload settings (matching python-domino SDK defaults)
 _UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024  # 8 MB
@@ -211,7 +211,10 @@ class ProjectStorageResolver:
 
     async def delete_dataset(self, dataset_id: str) -> None:
         """Delete a dataset via the v1 API and remove it from the cache."""
-        await domino_request("DELETE", f"/api/datasetrw/v1/datasets/{dataset_id}")
+        await self._dataset_rw_write_request(
+            "DELETE",
+            f"/api/datasetrw/v1/datasets/{dataset_id}",
+        )
         self._cache = {k: v for k, v in self._cache.items() if v.dataset_id != dataset_id}
         self._rw_cache.pop(dataset_id, None)
         logger.info("Deleted dataset %s", dataset_id)
@@ -234,6 +237,7 @@ class ProjectStorageResolver:
             request_kwargs = dict(kwargs)
             if base_url is not None:
                 request_kwargs.setdefault("max_retries", 0)
+            is_last = index == len(base_urls) - 1
             try:
                 return await domino_request(
                     method,
@@ -241,11 +245,20 @@ class ProjectStorageResolver:
                     base_url=base_url,
                     **request_kwargs,
                 )
-            except httpx.HTTPStatusError:
-                raise
+            except httpx.HTTPStatusError as exc:
+                last_exc = exc
+                if is_last:
+                    raise
+                logger.warning(
+                    "Domino Dataset RW %s %s returned HTTP %s via direct host; "
+                    "falling back to the default host",
+                    method,
+                    path,
+                    exc.response.status_code,
+                )
             except Exception as exc:
                 last_exc = exc
-                if index == len(base_urls) - 1:
+                if is_last:
                     raise
                 logger.warning(
                     "Domino Dataset RW %s %s failed via direct host (%s); "
@@ -870,78 +883,102 @@ class ProjectStorageResolver:
         return None
 
     async def _create_dataset(self, project_id: str) -> DatasetInfo:
-        """POST to create the dataset.  Tries common payload shapes."""
+        """POST to create the dataset using the documented v1 public API."""
         payloads = [
-            # Most likely Domino v2 shape
-            {
-                "datasetName": DATASET_NAME,
-                "projectId": project_id,
-                "description": DATASET_DESCRIPTION,
-            },
-            # Alternate field names
             {
                 "name": DATASET_NAME,
                 "projectId": project_id,
                 "description": DATASET_DESCRIPTION,
             },
+            # Some Domino builds are stricter about optional fields than the
+            # public schema suggests, so retry with the minimum valid payload.
+            {
+                "name": DATASET_NAME,
+                "projectId": project_id,
+            },
         ]
 
-        # v2 POST returns 404 on some Domino versions; v1 requires "name".
-        endpoints = [
-            "/api/datasetrw/v2/datasets",
-            "/api/datasetrw/v1/datasets",
-        ]
+        endpoint = "/api/datasetrw/v1/datasets"
 
         last_error: Optional[str] = None
-        for endpoint in endpoints:
-            for payload in payloads:
-                try:
-                    resp = await self._dataset_rw_write_request(
-                        "POST",
-                        endpoint,
-                        json=payload,
-                    )
-                    body = resp.json()
-                    ds_id = str(
-                        body.get("datasetId")
-                        or body.get("id")
-                        or body.get("dataset", {}).get("id")
-                        or ""
-                    )
-                    ds_name = (
-                        body.get("datasetName")
-                        or body.get("name")
-                        or body.get("dataset", {}).get("name")
-                        or DATASET_NAME
-                    )
-                    logger.info(
-                        "Created dataset '%s' (id=%s) in project %s via %s",
-                        ds_name,
-                        ds_id,
-                        project_id,
-                        endpoint,
-                    )
-                    mount = self._probe_mount(ds_name)
-                    return DatasetInfo(
-                        dataset_id=ds_id,
-                        name=ds_name,
-                        project_id=project_id,
-                        mount_path=mount,
-                    )
-                except Exception as exc:
-                    last_error = str(exc)
-                    logger.debug(
-                        "Create attempt failed on %s with payload %s: %s",
-                        endpoint,
-                        list(payload.keys()),
-                        exc,
-                    )
-                    continue
+        for payload in payloads:
+            try:
+                resp = await self._dataset_rw_write_request(
+                    "POST",
+                    endpoint,
+                    json=payload,
+                )
+                body = resp.json()
+                ds_id = str(
+                    body.get("datasetId")
+                    or body.get("id")
+                    or body.get("dataset", {}).get("id")
+                    or ""
+                )
+                ds_name = (
+                    body.get("datasetName")
+                    or body.get("name")
+                    or body.get("dataset", {}).get("name")
+                    or DATASET_NAME
+                )
+                logger.info(
+                    "Created dataset '%s' (id=%s) in project %s via %s",
+                    ds_name,
+                    ds_id,
+                    project_id,
+                    endpoint,
+                )
+                mount = self._probe_mount(ds_name)
+                return DatasetInfo(
+                    dataset_id=ds_id,
+                    name=ds_name,
+                    project_id=project_id,
+                    mount_path=mount,
+                )
+            except httpx.HTTPStatusError as exc:
+                last_error = self._format_http_error(exc)
+                if exc.response is not None and exc.response.status_code in (400, 409, 422):
+                    existing = await self._find_existing(project_id)
+                    if existing:
+                        logger.info(
+                            "Dataset '%s' became visible after failed create for project %s; "
+                            "using existing dataset id=%s",
+                            DATASET_NAME,
+                            project_id,
+                            existing.dataset_id,
+                        )
+                        return existing
+            except Exception as exc:
+                last_error = str(exc)
+
+            logger.debug(
+                "Create attempt failed on %s with payload %s: %s",
+                endpoint,
+                list(payload.keys()),
+                last_error,
+            )
 
         raise RuntimeError(
             f"Failed to create dataset '{DATASET_NAME}' in project {project_id}. "
             f"Last error: {last_error}"
         )
+
+    @staticmethod
+    def _format_http_error(exc: httpx.HTTPStatusError) -> str:
+        """Return a compact error string including response text when present."""
+        response = exc.response
+        if response is None:
+            return str(exc)
+        try:
+            detail = response.text.strip()
+        except Exception:
+            detail = ""
+        if detail:
+            detail = " ".join(detail.split())
+            if len(detail) > 300:
+                detail = f"{detail[:297]}..."
+            return f"{exc} body={detail}"
+        return str(exc)
 
     @staticmethod
     def _probe_mount(dataset_name: str) -> Optional[str]:

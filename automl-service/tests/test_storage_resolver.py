@@ -4,7 +4,6 @@ Covers:
 - download_file() — endpoint probing and delegation to domino_download
 - _find_existing() — dataset listing and matching
 - _create_dataset() — creation with payload variants
-- _grant_project_access() — editor grant
 - _get_latest_snapshot_id() — snapshot lookup
 - upload_file() — chunked upload workflow
 - _extract_dataset_list() — v2 response unwrapping
@@ -90,7 +89,7 @@ class TestDownloadFile:
         dest = str(tmp_path / "output.csv")
         call_count = 0
 
-        async def fake_download(path, dest_path):
+        async def fake_download(path, dest_path, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -151,18 +150,13 @@ class TestFindExisting:
     @pytest.mark.asyncio
     async def test_finds_matching_dataset(self):
         resolver = ProjectStorageResolver()
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "items": [
-                {"dataset": {"datasetName": "automl-extension", "datasetId": "ds-abc"}},
-                {"dataset": {"datasetName": "other-dataset", "datasetId": "ds-xyz"}},
-            ]
-        }
-
         with patch(
-            "app.services.storage_resolver.domino_request",
+            "app.services.storage_resolver.list_project_datasets",
             new_callable=AsyncMock,
-            return_value=mock_resp,
+            return_value=[
+                {"datasetName": "automl-extension", "datasetId": "ds-abc"},
+                {"datasetName": "other-dataset", "datasetId": "ds-xyz"},
+            ],
         ):
             info = await resolver._find_existing("proj-1")
 
@@ -173,17 +167,12 @@ class TestFindExisting:
     @pytest.mark.asyncio
     async def test_returns_none_when_not_found(self):
         resolver = ProjectStorageResolver()
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "items": [
-                {"dataset": {"datasetName": "something-else", "datasetId": "ds-xyz"}},
-            ]
-        }
-
         with patch(
-            "app.services.storage_resolver.domino_request",
+            "app.services.storage_resolver.list_project_datasets",
             new_callable=AsyncMock,
-            return_value=mock_resp,
+            return_value=[
+                {"datasetName": "something-else", "datasetId": "ds-xyz"},
+            ],
         ):
             info = await resolver._find_existing("proj-1")
 
@@ -194,7 +183,7 @@ class TestFindExisting:
         resolver = ProjectStorageResolver()
 
         with patch(
-            "app.services.storage_resolver.domino_request",
+            "app.services.storage_resolver.list_project_datasets",
             side_effect=httpx.HTTPStatusError("err", request=MagicMock(), response=MagicMock()),
         ):
             info = await resolver._find_existing("proj-1")
@@ -232,8 +221,119 @@ class TestCreateDataset:
         assert info.name == "automl-extension"
         assert write_request.await_count >= 1
         first_call = write_request.await_args_list[0]
-        assert first_call.args == ("POST", "/api/datasetrw/v2/datasets")
+        assert first_call.args == ("POST", "/api/datasetrw/v1/datasets")
+        assert first_call.kwargs["json"]["name"] == "automl-extension"
         assert first_call.kwargs["json"]["projectId"] == "proj-1"
+
+    @pytest.mark.asyncio
+    async def test_retries_with_minimal_v1_payload(self):
+        resolver = ProjectStorageResolver()
+        bad_response = MagicMock()
+        bad_response.status_code = 400
+        bad_response.text = "Bad Request"
+        bad_error = httpx.HTTPStatusError(
+            "bad request",
+            request=MagicMock(),
+            response=bad_response,
+        )
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "dataset": {
+                "id": "ds-created",
+                "name": "automl-extension",
+            }
+        }
+
+        with patch.object(
+            resolver,
+            "_dataset_rw_write_request",
+            new_callable=AsyncMock,
+            side_effect=[bad_error, mock_resp],
+        ) as write_request, patch.object(
+            resolver,
+            "_find_existing",
+            new_callable=AsyncMock,
+            return_value=None,
+        ) as find_existing:
+            info = await resolver._create_dataset("proj-1")
+
+        assert info.dataset_id == "ds-created"
+        assert write_request.await_count == 2
+        first_call = write_request.await_args_list[0]
+        second_call = write_request.await_args_list[1]
+        assert first_call.kwargs["json"] == {
+            "name": "automl-extension",
+            "projectId": "proj-1",
+            "description": "AutoML Extension storage - auto-created by the AutoML App",
+        }
+        assert second_call.kwargs["json"] == {
+            "name": "automl-extension",
+            "projectId": "proj-1",
+        }
+        find_existing.assert_awaited_once_with("proj-1")
+
+    @pytest.mark.asyncio
+    async def test_returns_existing_dataset_after_duplicate_like_error(self):
+        resolver = ProjectStorageResolver()
+        bad_response = MagicMock()
+        bad_response.status_code = 400
+        bad_response.text = "dataset already exists"
+        bad_error = httpx.HTTPStatusError(
+            "bad request",
+            request=MagicMock(),
+            response=bad_response,
+        )
+        existing = DatasetInfo(
+            dataset_id="ds-existing",
+            name="automl-extension",
+            project_id="proj-1",
+        )
+
+        with patch.object(
+            resolver,
+            "_dataset_rw_write_request",
+            new_callable=AsyncMock,
+            side_effect=bad_error,
+        ) as write_request, patch.object(
+            resolver,
+            "_find_existing",
+            new_callable=AsyncMock,
+            return_value=existing,
+        ) as find_existing:
+            info = await resolver._create_dataset("proj-1")
+
+        assert info is existing
+        write_request.assert_awaited_once()
+        find_existing.assert_awaited_once_with("proj-1")
+
+
+class TestDeleteDataset:
+
+    @pytest.mark.asyncio
+    async def test_uses_dataset_rw_write_helper(self):
+        resolver = ProjectStorageResolver()
+        resolver._cache = {
+            "proj-1": DatasetInfo(
+                dataset_id="ds-123",
+                name="automl-extension",
+                project_id="proj-1",
+            )
+        }
+        resolver._rw_cache["ds-123"] = "rw-123"
+
+        with patch.object(
+            resolver,
+            "_dataset_rw_write_request",
+            new_callable=AsyncMock,
+        ) as write_request:
+            await resolver.delete_dataset("ds-123")
+
+        write_request.assert_awaited_once_with(
+            "DELETE",
+            "/api/datasetrw/v1/datasets/ds-123",
+        )
+        assert resolver._cache == {}
+        assert resolver._rw_cache == {}
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +347,7 @@ class TestGetLatestSnapshotId:
     async def test_returns_snapshot_id(self):
         resolver = ProjectStorageResolver()
         mock_resp = MagicMock()
-        mock_resp.json.return_value = [{"id": "snap-42"}]
+        mock_resp.json.return_value = {"snapshots": [{"id": "snap-42"}]}
 
         with patch(
             "app.services.storage_resolver.domino_request",
@@ -430,42 +530,6 @@ class TestListSnapshotFiles:
             params={"path": "uploads"},
             base_url="http://nucleus-frontend.domino-platform:80",
         )
-
-
-# ---------------------------------------------------------------------------
-# _grant_project_access
-# ---------------------------------------------------------------------------
-
-
-class TestGrantProjectAccess:
-
-    @pytest.mark.asyncio
-    async def test_grant_calls_correct_endpoint(self):
-        resolver = ProjectStorageResolver()
-
-        with patch(
-            "app.services.storage_resolver.domino_request", new_callable=AsyncMock
-        ) as mock_req:
-            await resolver._grant_project_access("ds-abc", "proj-target")
-
-        mock_req.assert_called_once()
-        args, kwargs = mock_req.call_args
-        assert args[0] == "POST"
-        assert "ds-abc" in args[1]
-        assert "grants" in args[1]
-        assert kwargs["json"]["targetId"] == "proj-target"
-        assert kwargs["json"]["targetRole"] == "DatasetRwEditor"
-
-    @pytest.mark.asyncio
-    async def test_grant_swallows_errors(self):
-        resolver = ProjectStorageResolver()
-
-        with patch(
-            "app.services.storage_resolver.domino_request",
-            side_effect=Exception("403 forbidden"),
-        ):
-            # Should not raise
-            await resolver._grant_project_access("ds-abc", "proj-target")
 
 
 # ---------------------------------------------------------------------------
