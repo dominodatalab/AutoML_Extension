@@ -7,8 +7,8 @@ automl-service/mlruns/
 **/*/mlflow.db
 
 # Database
+automl.db
 **/*/automl.db
-automl-service/automl.db
 automl-service/uploads/
 
 # Node.js

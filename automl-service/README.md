@@ -189,10 +189,10 @@ The test suite covers the entire backend with **654 unit tests** and **44 integr
 
 ### Test dependencies
 
-Install the test dependencies (in addition to `requirements.txt`):
+Install requirements files
 
 ```bash
-pip install pytest pytest-asyncio pytest-html aiosqlite httpx
+pip install -r requirements-dev.txt -r requirements.txt
 ```
 
 > **Note:** `aiosqlite` and `httpx` are already in `requirements.txt`. The additional packages are `pytest`, `pytest-asyncio`, and `pytest-html`.

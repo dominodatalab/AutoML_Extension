@@ -1,0 +1,6 @@
+pytest-html
+pytest
+pytest_asyncio
+aiosqlite
+httpx
+
