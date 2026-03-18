@@ -1,6 +1,6 @@
 import { useCallback, useState, useEffect, useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { useDataset, useDatasets, useUploadFile, useDatasetPreview, useSnapshotVerification } from '../hooks/useDatasets'
+import { useDataset, useDatasets, useUploadFile, useDatasetPreview, useDatasetSchema, useSnapshotVerification } from '../hooks/useDatasets'
 import { useEdaAsyncProfiling } from '../hooks/useEdaAsyncProfiling'
 import { useProfiling } from '../hooks/useProfiling'
 import { useStore } from '../store'
@@ -112,6 +112,8 @@ function EDAAnalysis() {
     offset,
     hasAnalyzed
   )
+  // Fetch schema (column names + dtypes) immediately so TS config panel can render before Analyze
+  const { data: schema } = useDatasetSchema(selectedFilePath || '')
 
   const {
     asyncDominoJobId,
@@ -188,7 +190,7 @@ function EDAAnalysis() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   }
 
-  // Build lightweight column profiles from preview data when full profile isn't ready yet
+  // Build lightweight column profiles from profile, preview, or schema (whichever is available first)
   const effectiveColumns: ColumnProfile[] | null = useMemo(() => {
     if (profile?.columns) return profile.columns
     if (preview?.columns && preview?.dtypes) {
@@ -207,8 +209,24 @@ function EDAAnalysis() {
         } as ColumnProfile
       })
     }
+    // Fall back to schema (available before Analyze is clicked)
+    if (schema?.columns) {
+      return schema.columns.map(({ name, dtype }) => {
+        const isDt = dtype.includes('datetime')
+        const isNum = dtype.startsWith('int') || dtype.startsWith('float')
+        return {
+          name,
+          dtype,
+          missing_count: 0,
+          missing_percentage: 0,
+          unique_count: 0,
+          unique_percentage: 0,
+          semantic_type: isDt ? 'datetime' : isNum ? 'numeric' : 'category',
+        } as ColumnProfile
+      })
+    }
     return null
-  }, [profile, preview])
+  }, [profile, preview, schema])
 
   const hasDatetimeColumns = useMemo(() => {
     if (!effectiveColumns) return false
