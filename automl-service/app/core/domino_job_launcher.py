@@ -16,6 +16,7 @@ import httpx
 from app.config import get_settings
 from app.core.domino_http import (
     domino_request,
+    resolve_domino_nucleus_host,
     resolve_domino_project_id,
 )
 
@@ -72,6 +73,50 @@ class DominoJobLauncher:
 
     def _host(self) -> Optional[str]:
         return self.settings.domino_api_host or os.environ.get("DOMINO_API_HOST")
+
+    @staticmethod
+    def _job_api_base_urls() -> list[Optional[str]]:
+        """Prefer the direct Domino host for Jobs API calls, then fall back."""
+        base_urls: list[Optional[str]] = []
+        nucleus = resolve_domino_nucleus_host()
+        if nucleus:
+            base_urls.append(nucleus)
+        base_urls.append(None)
+        return base_urls
+
+    async def _job_api_request(self, method: str, path: str, **kwargs) -> httpx.Response:
+        """Call a Jobs API endpoint, preferring the direct host over the proxy."""
+        last_exc: Optional[Exception] = None
+        base_urls = self._job_api_base_urls()
+
+        for index, base_url in enumerate(base_urls):
+            request_kwargs = dict(kwargs)
+            if base_url is not None:
+                # Fail fast on the direct host so we can still fall back to the
+                # proxy/default host when the direct route is unavailable.
+                request_kwargs.setdefault("max_retries", 0)
+            try:
+                return await domino_request(
+                    method,
+                    path,
+                    base_url=base_url,
+                    **request_kwargs,
+                )
+            except httpx.HTTPStatusError:
+                raise
+            except Exception as exc:
+                last_exc = exc
+                if index == len(base_urls) - 1:
+                    raise
+                logger.warning(
+                    "Domino Jobs API %s %s failed via direct host (%s); "
+                    "falling back to the default host",
+                    method,
+                    path,
+                    exc,
+                )
+
+        raise last_exc or RuntimeError(f"Domino Jobs API {method} {path} failed")
 
     @staticmethod
     def _build_cli_args(args: dict[str, Any]) -> list[str]:
@@ -314,7 +359,7 @@ class DominoJobLauncher:
 
         logger.info("[JOB LAUNCH] POST /api/jobs/v1/jobs payload: %s", json.dumps(payload, default=str))
         try:
-            resp = await domino_request("POST", "/api/jobs/v1/jobs", json=payload)
+            resp = await self._job_api_request("POST", "/api/jobs/v1/jobs", json=payload)
             result = resp.json()
             logger.info("[JOB LAUNCH] Response: %s", json.dumps(result, default=str)[:500])
             return result
@@ -333,7 +378,7 @@ class DominoJobLauncher:
                     self._summarize_error(e),
                 )
                 payload.pop("commitId", None)
-                resp = await domino_request("POST", "/api/jobs/v1/jobs", json=payload)
+                resp = await self._job_api_request("POST", "/api/jobs/v1/jobs", json=payload)
                 return resp.json()
             raise
 
@@ -468,7 +513,7 @@ class DominoJobLauncher:
                 "error": "Domino environment not configured",
             }
         try:
-            resp = await domino_request("GET", f"/api/jobs/beta/jobs/{domino_job_id}")
+            resp = await self._job_api_request("GET", f"/api/jobs/beta/jobs/{domino_job_id}")
             data = resp.json()
             execution_status = self._extract_execution_status(data)
             return {
@@ -487,7 +532,7 @@ class DominoJobLauncher:
             return {"success": False, "error": "Domino environment not configured"}
         try:
             project_id = project_id or resolve_domino_project_id()
-            resp = await domino_request(
+            resp = await self._job_api_request(
                 "POST",
                 "/v4/jobs/stop",
                 json={
