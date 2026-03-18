@@ -217,18 +217,17 @@ class TestCreateDataset:
             }
         }
 
-        with patch.object(
-            resolver,
-            "_dataset_rw_write_request",
+        with patch(
+            "app.services.storage_resolver.domino_request",
             new_callable=AsyncMock,
             return_value=mock_resp,
-        ) as write_request:
+        ) as mock_request:
             info = await resolver._create_dataset("proj-1")
 
         assert info.dataset_id == "ds-created"
         assert info.name == "automl-extension"
-        assert write_request.await_count >= 1
-        first_call = write_request.await_args_list[0]
+        assert mock_request.await_count >= 1
+        first_call = mock_request.await_args_list[0]
         assert first_call.args == ("POST", "/dataset")
         assert first_call.kwargs["json"]["datasetName"] == "automl-extension"
         assert first_call.kwargs["json"]["projectId"] == "proj-1"
@@ -252,12 +251,11 @@ class TestCreateDataset:
             }
         }
 
-        with patch.object(
-            resolver,
-            "_dataset_rw_write_request",
+        with patch(
+            "app.services.storage_resolver.domino_request",
             new_callable=AsyncMock,
             side_effect=[bad_error, mock_resp],
-        ) as write_request, patch.object(
+        ) as mock_request, patch.object(
             resolver,
             "_find_existing",
             new_callable=AsyncMock,
@@ -266,9 +264,9 @@ class TestCreateDataset:
             info = await resolver._create_dataset("proj-1")
 
         assert info.dataset_id == "ds-created"
-        assert write_request.await_count == 2
-        first_call = write_request.await_args_list[0]
-        second_call = write_request.await_args_list[1]
+        assert mock_request.await_count == 2
+        first_call = mock_request.await_args_list[0]
+        second_call = mock_request.await_args_list[1]
         assert first_call.args == ("POST", "/dataset")
         assert first_call.kwargs["json"] == {
             "datasetName": "automl-extension",
@@ -299,12 +297,11 @@ class TestCreateDataset:
             project_id="proj-1",
         )
 
-        with patch.object(
-            resolver,
-            "_dataset_rw_write_request",
+        with patch(
+            "app.services.storage_resolver.domino_request",
             new_callable=AsyncMock,
             side_effect=bad_error,
-        ) as write_request, patch.object(
+        ) as mock_request, patch.object(
             resolver,
             "_find_existing",
             new_callable=AsyncMock,
@@ -313,7 +310,7 @@ class TestCreateDataset:
             info = await resolver._create_dataset("proj-1")
 
         assert info is existing
-        write_request.assert_awaited_once()
+        mock_request.assert_awaited_once()
         find_existing.assert_awaited_once_with("proj-1")
 
 
@@ -518,15 +515,12 @@ class TestUploadFile:
 class TestListSnapshotFiles:
 
     @pytest.mark.asyncio
-    async def test_prefers_direct_host_for_snapshot_browsing(self):
+    async def test_snapshot_browsing_uses_proxy(self):
         resolver = ProjectStorageResolver()
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"rows": []}
 
         with patch(
-            "app.services.storage_resolver.resolve_domino_nucleus_host",
-            return_value="http://nucleus-frontend.domino-platform:80",
-        ), patch(
             "app.services.storage_resolver.domino_request",
             new_callable=AsyncMock,
             return_value=mock_resp,
@@ -538,7 +532,6 @@ class TestListSnapshotFiles:
             "GET",
             "/v4/datasetrw/files/snap-123",
             params={"path": "uploads"},
-            base_url="http://nucleus-frontend.domino-platform:80",
         )
 
 

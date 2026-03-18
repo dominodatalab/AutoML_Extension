@@ -1,18 +1,12 @@
 """Helpers for Domino Dataset RW listing APIs."""
 
 import logging
-from typing import Optional
 
-from app.core.domino_http import domino_request, resolve_domino_nucleus_host
+from app.core.domino_http import domino_request
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PAGE_SIZE = 50
-
-
-def _preferred_dataset_api_base_url() -> Optional[str]:
-    """Prefer the direct Domino host over the local proxy for dataset listing."""
-    return resolve_domino_nucleus_host()
 
 
 def extract_dataset_list(data: object) -> list[dict]:
@@ -53,7 +47,6 @@ async def _list_project_datasets_v2(
                 "offset": offset,
                 "limit": page_size,
             },
-            base_url=_preferred_dataset_api_base_url(),
             # Fail fast here so we can fall back to the public v1 endpoint.
             max_retries=0,
         )
@@ -86,7 +79,6 @@ async def _list_project_datasets_v1(
                 "offset": offset,
                 "limit": page_size,
             },
-            base_url=_preferred_dataset_api_base_url(),
         )
         items = extract_dataset_list(resp.json())
         if not items:

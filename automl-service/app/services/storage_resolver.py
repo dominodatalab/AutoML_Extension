@@ -361,7 +361,6 @@ class ProjectStorageResolver:
                 "GET",
                 f"/api/datasetrw/v1/datasets/{dataset_id}/snapshots",
                 params={"limit": 1},
-                base_url=_preferred_snapshot_api_base_url(),
             )
             data = resp.json()
             snapshots = data.get("snapshots") or []
@@ -438,7 +437,6 @@ class ProjectStorageResolver:
             resp = await domino_request(
                 "GET",
                 f"/api/datasetrw/v1/datasets/{dataset_id}/snapshots",
-                base_url=_preferred_snapshot_api_base_url(),
             )
             data = resp.json()
             snapshots = data.get("snapshots") or []
@@ -476,7 +474,6 @@ class ProjectStorageResolver:
                 "GET",
                 f"/v4/datasetrw/files/{snapshot_id}",
                 params={"path": path},
-                base_url=_preferred_snapshot_api_base_url(),
             )
             data = resp.json()
             rows = data.get("rows", [])
@@ -638,7 +635,6 @@ class ProjectStorageResolver:
                 "GET",
                 f"/api/datasetrw/v1/datasets/{dataset_id}/snapshots",
                 params={"limit": 1},
-                base_url=_preferred_snapshot_api_base_url(),
             )
             data = resp.json()
             snapshots = data.get("snapshots") or []
@@ -841,16 +837,15 @@ class ProjectStorageResolver:
     async def _create_dataset(self, project_id: str) -> DatasetInfo:
         """POST to create the dataset, trying known endpoints in order.
 
-        The python-domino SDK uses ``POST /dataset`` (the legacy Domino REST
-        endpoint) which is the only create path that works reliably across
-        both the nucleus host and the Domino app proxy.  The internal
-        ``/api/datasetrw/`` endpoints return 404 or 400 on the direct host
-        and disconnect via the proxy.
+        Uses ``domino_request`` directly (through the proxy) rather than
+        the nucleus-first wrapper.  The Domino app proxy handles auth
+        injection for cross-project dataset creation.  This matches the
+        original pre-refactor behaviour that worked reliably.
         """
         # Each entry is (endpoint, payload).
-        # /dataset is the canonical SDK endpoint (python-domino uses it).
-        # /api/datasetrw/v1/datasets with "name" also works on both hosts.
-        # /api/datasetrw/v2/datasets is 404 everywhere — do not use.
+        # /dataset + datasetName is the canonical SDK endpoint.
+        # /api/datasetrw/v1/datasets + name also works via proxy.
+        # v2 is 404 everywhere — skipped.
         attempts: list[tuple[str, dict]] = [
             (
                 "/dataset",
@@ -887,7 +882,7 @@ class ProjectStorageResolver:
         last_error: Optional[str] = None
         for endpoint, payload in attempts:
             try:
-                resp = await self._dataset_rw_write_request(
+                resp = await domino_request(
                     "POST",
                     endpoint,
                     json=payload,

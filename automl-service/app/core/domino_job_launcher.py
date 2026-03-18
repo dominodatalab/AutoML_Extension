@@ -369,7 +369,7 @@ class DominoJobLauncher:
 
         logger.info("[JOB LAUNCH] POST /api/jobs/v1/jobs payload: %s", json.dumps(payload, default=str))
         try:
-            resp = await self._job_api_request("POST", "/api/jobs/v1/jobs", json=payload)
+            resp = await domino_request("POST", "/api/jobs/v1/jobs", json=payload)
             result = resp.json()
             logger.info("[JOB LAUNCH] Response: %s", json.dumps(result, default=str)[:500])
             return result
@@ -388,7 +388,7 @@ class DominoJobLauncher:
                     self._summarize_error(e),
                 )
                 payload.pop("commitId", None)
-                resp = await self._job_api_request("POST", "/api/jobs/v1/jobs", json=payload)
+                resp = await domino_request("POST", "/api/jobs/v1/jobs", json=payload)
                 return resp.json()
             raise
 
@@ -523,7 +523,7 @@ class DominoJobLauncher:
                 "error": "Domino environment not configured",
             }
         try:
-            resp = await self._job_api_request("GET", f"/api/jobs/beta/jobs/{domino_job_id}")
+            resp = await domino_request("GET", f"/api/jobs/beta/jobs/{domino_job_id}")
             data = resp.json()
             execution_status = self._extract_execution_status(data)
             return {
@@ -542,7 +542,7 @@ class DominoJobLauncher:
             return {"success": False, "error": "Domino environment not configured"}
         try:
             project_id = project_id or resolve_domino_project_id()
-            resp = await self._job_api_request(
+            resp = await domino_request(
                 "POST",
                 "/v4/jobs/stop",
                 json={
