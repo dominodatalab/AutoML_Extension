@@ -883,13 +883,17 @@ class ProjectStorageResolver:
         return None
 
     async def _create_dataset(self, project_id: str) -> DatasetInfo:
-        """POST to create the dataset, trying documented endpoints in order."""
+        """POST to create the dataset, trying known endpoints in order.
+
+        The Domino proxy only routes versioned paths (``/api/datasetrw/v2/...``,
+        ``/api/datasetrw/v1/...``).  The bare ``/api/datasetrw`` path is
+        documented but 404s on the direct host and disconnects via the proxy,
+        so we try the v2 path first (which the proxy can route), then v1.
+        """
         # Each entry is (endpoint, payload).
-        # The non-versioned /api/datasetrw endpoint is the documented create
-        # path and expects "datasetName".  The v1 endpoint uses "name".
         attempts: list[tuple[str, dict]] = [
             (
-                "/api/datasetrw",
+                "/api/datasetrw/v2/datasets",
                 {
                     "datasetName": DATASET_NAME,
                     "projectId": project_id,
@@ -897,7 +901,7 @@ class ProjectStorageResolver:
                 },
             ),
             (
-                "/api/datasetrw",
+                "/api/datasetrw/v2/datasets",
                 {
                     "datasetName": DATASET_NAME,
                     "projectId": project_id,
@@ -927,6 +931,7 @@ class ProjectStorageResolver:
                     "POST",
                     endpoint,
                     json=payload,
+                    max_retries=1,
                 )
                 body = resp.json()
                 ds_id = str(
