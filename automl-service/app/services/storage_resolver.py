@@ -883,25 +883,45 @@ class ProjectStorageResolver:
         return None
 
     async def _create_dataset(self, project_id: str) -> DatasetInfo:
-        """POST to create the dataset using the documented v1 public API."""
-        payloads = [
-            {
-                "name": DATASET_NAME,
-                "projectId": project_id,
-                "description": DATASET_DESCRIPTION,
-            },
-            # Some Domino builds are stricter about optional fields than the
-            # public schema suggests, so retry with the minimum valid payload.
-            {
-                "name": DATASET_NAME,
-                "projectId": project_id,
-            },
+        """POST to create the dataset, trying documented endpoints in order."""
+        # Each entry is (endpoint, payload).
+        # The non-versioned /api/datasetrw endpoint is the documented create
+        # path and expects "datasetName".  The v1 endpoint uses "name".
+        attempts: list[tuple[str, dict]] = [
+            (
+                "/api/datasetrw",
+                {
+                    "datasetName": DATASET_NAME,
+                    "projectId": project_id,
+                    "description": DATASET_DESCRIPTION,
+                },
+            ),
+            (
+                "/api/datasetrw",
+                {
+                    "datasetName": DATASET_NAME,
+                    "projectId": project_id,
+                },
+            ),
+            (
+                "/api/datasetrw/v1/datasets",
+                {
+                    "name": DATASET_NAME,
+                    "projectId": project_id,
+                    "description": DATASET_DESCRIPTION,
+                },
+            ),
+            (
+                "/api/datasetrw/v1/datasets",
+                {
+                    "name": DATASET_NAME,
+                    "projectId": project_id,
+                },
+            ),
         ]
 
-        endpoint = "/api/datasetrw/v1/datasets"
-
         last_error: Optional[str] = None
-        for payload in payloads:
+        for endpoint, payload in attempts:
             try:
                 resp = await self._dataset_rw_write_request(
                     "POST",

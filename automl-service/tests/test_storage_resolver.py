@@ -221,8 +221,8 @@ class TestCreateDataset:
         assert info.name == "automl-extension"
         assert write_request.await_count >= 1
         first_call = write_request.await_args_list[0]
-        assert first_call.args == ("POST", "/api/datasetrw/v1/datasets")
-        assert first_call.kwargs["json"]["name"] == "automl-extension"
+        assert first_call.args == ("POST", "/api/datasetrw")
+        assert first_call.kwargs["json"]["datasetName"] == "automl-extension"
         assert first_call.kwargs["json"]["projectId"] == "proj-1"
 
     @pytest.mark.asyncio
@@ -261,13 +261,15 @@ class TestCreateDataset:
         assert write_request.await_count == 2
         first_call = write_request.await_args_list[0]
         second_call = write_request.await_args_list[1]
+        assert first_call.args == ("POST", "/api/datasetrw")
         assert first_call.kwargs["json"] == {
-            "name": "automl-extension",
+            "datasetName": "automl-extension",
             "projectId": "proj-1",
             "description": "AutoML Extension storage - auto-created by the AutoML App",
         }
+        assert second_call.args == ("POST", "/api/datasetrw")
         assert second_call.kwargs["json"] == {
-            "name": "automl-extension",
+            "datasetName": "automl-extension",
             "projectId": "proj-1",
         }
         find_existing.assert_awaited_once_with("proj-1")
