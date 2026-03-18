@@ -280,6 +280,93 @@ class TestGetRwSnapshotId:
 
 
 # ---------------------------------------------------------------------------
+# Dataset RW write requests
+# ---------------------------------------------------------------------------
+
+
+class TestDatasetRwWriteRequest:
+
+    @pytest.mark.asyncio
+    async def test_prefers_direct_host_then_falls_back_to_default(self):
+        resolver = ProjectStorageResolver()
+        response = MagicMock()
+
+        with patch(
+            "app.services.storage_resolver.resolve_domino_nucleus_host",
+            return_value="http://nucleus-frontend.domino-platform:80",
+        ), patch(
+            "app.services.storage_resolver.domino_request",
+            new_callable=AsyncMock,
+            side_effect=[
+                httpx.RemoteProtocolError("Server disconnected without sending a response."),
+                response,
+            ],
+        ) as domino_request_mock:
+            result = await resolver._dataset_rw_write_request(
+                "POST",
+                "/v4/datasetrw/datasets/ds-123/snapshot/file/start",
+                json={"filePaths": ["uploads/file.csv"]},
+            )
+
+        assert result is response
+        assert len(domino_request_mock.await_args_list) == 2
+
+        first_call = domino_request_mock.await_args_list[0]
+        assert first_call.args == ("POST", "/v4/datasetrw/datasets/ds-123/snapshot/file/start")
+        assert first_call.kwargs["json"] == {"filePaths": ["uploads/file.csv"]}
+        assert first_call.kwargs["base_url"] == "http://nucleus-frontend.domino-platform:80"
+        assert first_call.kwargs["max_retries"] == 0
+
+        second_call = domino_request_mock.await_args_list[1]
+        assert second_call.args == ("POST", "/v4/datasetrw/datasets/ds-123/snapshot/file/start")
+        assert second_call.kwargs["json"] == {"filePaths": ["uploads/file.csv"]}
+        assert second_call.kwargs["base_url"] is None
+        assert "max_retries" not in second_call.kwargs
+
+
+class TestUploadFile:
+
+    @pytest.mark.asyncio
+    async def test_upload_file_uses_dataset_rw_write_helper(self):
+        resolver = ProjectStorageResolver()
+        start_resp = MagicMock()
+        start_resp.json.return_value = "upload-key-123"
+        end_resp = MagicMock()
+
+        with patch.object(
+            resolver,
+            "_dataset_rw_write_request",
+            new_callable=AsyncMock,
+            side_effect=[start_resp, end_resp],
+        ) as write_request, patch.object(
+            resolver,
+            "_upload_chunks",
+            new_callable=AsyncMock,
+        ) as upload_chunks:
+            await resolver.upload_file(
+                "ds-123",
+                "uploads/file.csv",
+                b"hello world",
+            )
+
+        assert write_request.await_args_list[0].args == (
+            "POST",
+            "/v4/datasetrw/datasets/ds-123/snapshot/file/start",
+        )
+        upload_chunks.assert_awaited_once_with(
+            "ds-123",
+            "upload-key-123",
+            "uploads/file.csv",
+            b"hello world",
+            8 * 1024 * 1024,
+        )
+        assert write_request.await_args_list[1].args == (
+            "GET",
+            "/v4/datasetrw/datasets/ds-123/snapshot/file/end/upload-key-123",
+        )
+
+
+# ---------------------------------------------------------------------------
 # list_snapshot_files
 # ---------------------------------------------------------------------------
 

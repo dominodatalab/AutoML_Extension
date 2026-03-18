@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Optional
 
+import httpx
 from fastapi import HTTPException
 
 from app.core.domino_http import (
@@ -214,6 +215,47 @@ class ProjectStorageResolver:
         self._cache = {k: v for k, v in self._cache.items() if v.dataset_id != dataset_id}
         self._rw_cache.pop(dataset_id, None)
         logger.info("Deleted dataset %s", dataset_id)
+
+    async def _dataset_rw_write_request(
+        self,
+        method: str,
+        path: str,
+        **kwargs,
+    ):
+        """Call Dataset RW write endpoints, preferring the direct host first."""
+        last_exc: Optional[Exception] = None
+        base_urls: list[Optional[str]] = []
+        nucleus = _preferred_snapshot_api_base_url()
+        if nucleus:
+            base_urls.append(nucleus)
+        base_urls.append(None)
+
+        for index, base_url in enumerate(base_urls):
+            request_kwargs = dict(kwargs)
+            if base_url is not None:
+                request_kwargs.setdefault("max_retries", 0)
+            try:
+                return await domino_request(
+                    method,
+                    path,
+                    base_url=base_url,
+                    **request_kwargs,
+                )
+            except httpx.HTTPStatusError:
+                raise
+            except Exception as exc:
+                last_exc = exc
+                if index == len(base_urls) - 1:
+                    raise
+                logger.warning(
+                    "Domino Dataset RW %s %s failed via direct host (%s); "
+                    "falling back to the default host",
+                    method,
+                    path,
+                    exc,
+                )
+
+        raise last_exc or RuntimeError(f"Domino Dataset RW {method} {path} failed")
 
     async def download_file(
         self,
@@ -669,7 +711,7 @@ class ProjectStorageResolver:
           3. GET  .../snapshot/file/end/{key} → finalize
         """
         # Step 1: Start upload session
-        resp = await domino_request(
+        resp = await self._dataset_rw_write_request(
             "POST",
             f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/start",
             json={
@@ -691,7 +733,7 @@ class ProjectStorageResolver:
             )
 
             # Step 3: Finalize
-            await domino_request(
+            await self._dataset_rw_write_request(
                 "GET",
                 f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/end/{upload_key}",
             )
@@ -706,7 +748,7 @@ class ProjectStorageResolver:
         except Exception:
             # Cancel on failure
             try:
-                await domino_request(
+                await self._dataset_rw_write_request(
                     "GET",
                     f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/cancel/{upload_key}",
                 )
@@ -746,7 +788,7 @@ class ProjectStorageResolver:
 
             for attempt in range(_UPLOAD_MAX_RETRIES):
                 try:
-                    await domino_request(
+                    await self._dataset_rw_write_request(
                         "POST",
                         f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file",
                         params=chunk_params,
