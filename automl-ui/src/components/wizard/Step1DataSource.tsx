@@ -31,6 +31,24 @@ function Step1DataSource() {
   const datasetLoadError = datasetsError instanceof Error ? datasetsError.message : null
   const selectedDatasetFiles = selectedDatasetDetails?.files || selectedDataset?.files || []
 
+  const getDatasetSummary = (dataset: Dataset): string => {
+    const resolvedDataset = selectedDatasetDetails?.id === dataset.id ? selectedDatasetDetails : dataset
+    const derivedFileCount = resolvedDataset.files?.length || 0
+    const derivedSize = resolvedDataset.files?.reduce((total, file) => total + (file.size || 0), 0) || 0
+    const fileCount = resolvedDataset.file_count > 0 ? resolvedDataset.file_count : derivedFileCount
+    const sizeBytes = resolvedDataset.size_bytes > 0 ? resolvedDataset.size_bytes : derivedSize
+
+    if (fileCount > 0 || sizeBytes > 0) {
+      return `${fileCount} files, ${formatSize(sizeBytes)}`
+    }
+
+    if (selectedDataset?.id === dataset.id && !loadingSelectedDataset) {
+      return 'No supported files found'
+    }
+
+    return 'Browse to inspect files'
+  }
+
   // Fetch preview/schema only for Domino datasets (uploaded files already have columns from upload response)
   const previewFilePath = dataSource?.type === 'domino_dataset' && dataSource?.filePath ? dataSource.filePath : ''
   const { data: previewData, isLoading: loadingPreview } = useDatasetPreview(
@@ -286,7 +304,7 @@ function Step1DataSource() {
                       {dataset.name}
                     </p>
                     <p className="text-sm text-domino-text-secondary">
-                      {dataset.file_count} files, {formatSize(dataset.size_bytes)}
+                      {getDatasetSummary(dataset)}
                     </p>
                   </div>
                   {selectedDataset?.id === dataset.id && (

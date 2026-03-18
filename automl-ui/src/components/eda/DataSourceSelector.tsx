@@ -57,6 +57,26 @@ export function DataSourceSelector({
     maxFiles: 1,
   })
 
+  const getDatasetSummary = (dataset: Dataset): string => {
+    const isSelected = selectedDataset?.id === dataset.id
+    const derivedFileCount = isSelected ? selectedDatasetFiles.length : 0
+    const derivedSize = isSelected
+      ? selectedDatasetFiles.reduce((total, file) => total + (file.size || 0), 0)
+      : 0
+    const fileCount = dataset.file_count > 0 ? dataset.file_count : derivedFileCount
+    const sizeBytes = dataset.size_bytes > 0 ? dataset.size_bytes : derivedSize
+
+    if (fileCount > 0 || sizeBytes > 0) {
+      return `${fileCount} files, ${formatSize(sizeBytes)}`
+    }
+
+    if (isSelected && !loadingSelectedDatasetFiles) {
+      return 'No supported files found'
+    }
+
+    return 'Browse to inspect files'
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex gap-4">
@@ -184,7 +204,7 @@ export function DataSourceSelector({
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-domino-text-primary truncate">{dataset.name}</p>
                     <p className="text-sm text-domino-text-secondary">
-                      {dataset.file_count} files, {formatSize(dataset.size_bytes)}
+                      {getDatasetSummary(dataset)}
                     </p>
                   </div>
                   {selectedDataset?.id === dataset.id && (

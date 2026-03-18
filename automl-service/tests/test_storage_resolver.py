@@ -253,6 +253,38 @@ class TestGetLatestSnapshotId:
 
 
 # ---------------------------------------------------------------------------
+# list_snapshot_files
+# ---------------------------------------------------------------------------
+
+
+class TestListSnapshotFiles:
+
+    @pytest.mark.asyncio
+    async def test_prefers_direct_host_for_snapshot_browsing(self):
+        resolver = ProjectStorageResolver()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"rows": []}
+
+        with patch(
+            "app.services.storage_resolver.resolve_domino_nucleus_host",
+            return_value="http://nucleus-frontend.domino-platform:80",
+        ), patch(
+            "app.services.storage_resolver.domino_request",
+            new_callable=AsyncMock,
+            return_value=mock_resp,
+        ) as domino_request_mock:
+            rows = await resolver.list_snapshot_files("snap-123", path="uploads")
+
+        assert rows == []
+        domino_request_mock.assert_awaited_once_with(
+            "GET",
+            "/v4/datasetrw/files/snap-123",
+            params={"path": "uploads"},
+            base_url="http://nucleus-frontend.domino-platform:80",
+        )
+
+
+# ---------------------------------------------------------------------------
 # _grant_project_access
 # ---------------------------------------------------------------------------
 

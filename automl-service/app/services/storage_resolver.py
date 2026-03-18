@@ -52,6 +52,11 @@ _MOUNT_TEMPLATES = [
 ]
 
 
+def _preferred_snapshot_api_base_url() -> Optional[str]:
+    """Prefer the direct Domino host over the local proxy for snapshot browsing."""
+    return resolve_domino_nucleus_host()
+
+
 @dataclass
 class ProjectPaths:
     """Resolved storage paths for a specific target project."""
@@ -452,6 +457,7 @@ class ProjectStorageResolver:
                 "GET",
                 f"/v4/datasetrw/files/{snapshot_id}",
                 params={"path": path},
+                base_url=_preferred_snapshot_api_base_url(),
             )
             data = resp.json()
             rows = data.get("rows", [])

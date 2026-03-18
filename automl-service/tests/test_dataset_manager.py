@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, PropertyMock, patch
 
 import pytest
 
+from app.api.schemas.dataset import DatasetFileResponse
 from app.core.dataset_manager import DominoDatasetManager
 
 
@@ -113,6 +114,76 @@ class TestApiDatasetSummaries:
         assert response is not None
         assert response.id == "ds-123"
         api_request.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_dataset_handles_wrapped_v1_detail_payload(self):
+        manager = DominoDatasetManager()
+
+        with patch.object(
+            type(manager.settings),
+            "is_domino_environment",
+            new_callable=PropertyMock,
+            return_value=True,
+        ), patch.object(
+            manager,
+            "_api_request",
+            new_callable=AsyncMock,
+            return_value={
+                "dataset": {
+                    "id": "ds-123",
+                    "name": "sales-data",
+                    "description": "Quarterly sales",
+                    "fileCount": 7,
+                    "sizeInBytes": 4096,
+                    "projectId": "proj-1",
+                    "readWriteSnapshotId": "snap-1",
+                }
+            },
+        ):
+            response = await manager.get_dataset("ds-123", include_files=False)
+
+        assert response is not None
+        assert response.id == "ds-123"
+        assert response.file_count == 7
+        assert response.size_bytes == 4096
+
+    @pytest.mark.asyncio
+    async def test_detail_listing_backfills_summary_cache(self):
+        manager = DominoDatasetManager()
+        item = {
+            "datasetId": "ds-123",
+            "datasetName": "sales-data",
+            "description": "Quarterly sales",
+            "projectId": "proj-1",
+            "readWriteSnapshotId": "snap-1",
+        }
+
+        with patch.object(
+            manager,
+            "_list_files_via_snapshot_api",
+            new_callable=AsyncMock,
+            return_value=(
+                [
+                    DatasetFileResponse(
+                        name="uploads/file.csv",
+                        path="/tmp/uploads/file.csv",
+                        size=11,
+                        mounted=False,
+                    )
+                ],
+                11,
+            ),
+        ):
+            response = await manager._api_item_to_dataset_response(
+                item,
+                include_files=True,
+            )
+
+        assert response is not None
+        assert response.file_count == 1
+        assert response.size_bytes == 11
+        assert manager._dataset_item_cache["ds-123"]["fileCount"] == 1
+        assert manager._dataset_item_cache["ds-123"]["sizeInBytes"] == 11
 
 
 class TestSnapshotTraversal:

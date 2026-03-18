@@ -1,5 +1,6 @@
 """Domino dataset management using REST API."""
 
+import asyncio
 import logging
 import os
 import time
@@ -237,7 +238,12 @@ class DominoDatasetManager:
         exists on disk *and* the dataset belongs to the current App project,
         enabling direct reads during training/preview.
         """
-        dataset_id = item.get("datasetId") or item.get("id", "")
+        dataset_id = str(item.get("datasetId") or item.get("id", "") or "")
+        if dataset_id:
+            cached_item = self._dataset_item_cache.get(dataset_id, {})
+            item = {**cached_item, **item}
+            self._dataset_item_cache[dataset_id] = dict(item)
+
         dataset_name = item.get("datasetName") or item.get("name", "")
         if not dataset_name:
             return None
@@ -266,10 +272,10 @@ class DominoDatasetManager:
 
         files: list[DatasetFileResponse] = []
         total_size = 0
+        rw_snapshot_id = item.get("readWriteSnapshotId")
         if include_files:
             # Always list files from the snapshot API — mounted filesystems use
             # read-only snapshots that go stale when files are deleted in Domino.
-            rw_snapshot_id = item.get("readWriteSnapshotId")
             if not rw_snapshot_id and dataset_id:
                 from app.services.storage_resolver import get_storage_resolver
                 rw_snapshot_id = await get_storage_resolver().get_rw_snapshot_id(dataset_id)
@@ -317,15 +323,38 @@ class DominoDatasetManager:
                         )
                         total_size += file_size
 
+        size_bytes = total_size or self._coerce_int(
+            item.get("sizeInBytes", item.get("storageSizeBytes", 0))
+        )
+        file_count = len(files) if files else self._coerce_int(item.get("fileCount", 0))
+
+        if dataset_id:
+            cached_item = dict(self._dataset_item_cache.get(dataset_id, {}))
+            cached_item.update({
+                "datasetId": dataset_id,
+                "datasetName": dataset_name,
+                "name": dataset_name,
+                "description": item.get("description", ""),
+            })
+            if dataset_project_id:
+                cached_item["projectId"] = dataset_project_id
+            if rw_snapshot_id:
+                cached_item["readWriteSnapshotId"] = rw_snapshot_id
+            if size_bytes or "sizeInBytes" not in cached_item:
+                cached_item["sizeInBytes"] = size_bytes
+            if file_count or "fileCount" not in cached_item:
+                cached_item["fileCount"] = file_count
+            self._dataset_item_cache[dataset_id] = cached_item
+
         return DatasetResponse(
             id=dataset_id,
             name=dataset_name,
             path=dataset_path,
             description=item.get("description", ""),
-            size_bytes=total_size or item.get("sizeInBytes", item.get("storageSizeBytes", 0)),
+            size_bytes=size_bytes,
             created_at=item.get("createdAt"),
             updated_at=item.get("lastUpdatedAt", item.get("updatedAt")),
-            file_count=len(files) if files else item.get("fileCount", 0),
+            file_count=file_count,
             files=files,
         )
 
@@ -370,6 +399,8 @@ class DominoDatasetManager:
         # the directory prefix when we prepend ``path``.
         prefix_slash = (path + "/") if path else ""
 
+        subdir_tasks: list[asyncio.Task[tuple[list[DatasetFileResponse], int]]] = []
+
         for entry in entries:
             file_name = entry.get("fileName", "")
             is_dir = entry.get("isDirectory", False)
@@ -381,12 +412,16 @@ class DominoDatasetManager:
 
             if is_dir:
                 subpath = f"{path}/{file_name}" if path else file_name
-                sub_files, sub_size = await self._list_files_via_snapshot_api(
-                    snapshot_id, dataset_name, path=subpath,
-                    dataset_id=dataset_id,
+                subdir_tasks.append(
+                    asyncio.create_task(
+                        self._list_files_via_snapshot_api(
+                            snapshot_id,
+                            dataset_name,
+                            path=subpath,
+                            dataset_id=dataset_id,
+                        )
+                    )
                 )
-                files.extend(sub_files)
-                total_size += sub_size
             elif self._is_supported_file(file_name):
                 rel_path = f"{path}/{file_name}" if path else file_name
                 synthetic_path = f"{synthetic_root}/{dataset_name}/{rel_path}"
@@ -399,6 +434,11 @@ class DominoDatasetManager:
                     )
                 )
                 total_size += size
+
+        if subdir_tasks:
+            for sub_files, sub_size in await asyncio.gather(*subdir_tasks):
+                files.extend(sub_files)
+                total_size += sub_size
 
         return files, total_size
 
@@ -524,6 +564,8 @@ class DominoDatasetManager:
                 cache_hit = result is not None
                 if result is None:
                     result = await self._api_request("GET", f"/api/datasetrw/v1/datasets/{dataset_id}")
+                    if isinstance(result, dict) and isinstance(result.get("dataset"), dict):
+                        result = result["dataset"]
                     cached_id = str(result.get("datasetId", result.get("id", dataset_id)))
                     if cached_id:
                         self._dataset_item_cache[cached_id] = dict(result)
