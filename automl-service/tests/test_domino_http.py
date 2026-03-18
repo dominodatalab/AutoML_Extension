@@ -220,6 +220,45 @@ class TestDominoRequest:
 
         assert len(client_instances) == 1
 
+    @pytest.mark.asyncio
+    async def test_resets_shared_client_after_transport_error(self, monkeypatch):
+        monkeypatch.setenv("DOMINO_API_PROXY", "https://api.test.com")
+
+        client_instances = []
+
+        class FakeClient:
+            is_closed = False
+
+            def __init__(self, **kwargs):
+                self.request_calls = 0
+                client_instances.append(self)
+
+            async def request(self, method, url, **kwargs):
+                self.request_calls += 1
+                if len(client_instances) == 1:
+                    raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+                resp = MagicMock(spec=httpx.Response)
+                resp.status_code = 200
+                resp.raise_for_status = MagicMock()
+                return resp
+
+            async def get(self, url, **kwargs):
+                resp = MagicMock(spec=httpx.Response)
+                resp.status_code = 200
+                resp.text = "token-123"
+                return resp
+
+            async def aclose(self):
+                self.is_closed = True
+
+        with patch("app.core.domino_http.httpx.AsyncClient", FakeClient):
+            with patch("app.core.domino_http.asyncio.sleep", new_callable=AsyncMock):
+                resp = await domino_request("GET", "/api/flaky", max_retries=1)
+
+        assert resp.status_code == 200
+        assert len(client_instances) == 2
+        assert client_instances[0].is_closed is True
+
 
 # ---------------------------------------------------------------------------
 # domino_download — streaming file download

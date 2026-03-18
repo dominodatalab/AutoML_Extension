@@ -74,8 +74,13 @@ async def _get_shared_request_client() -> httpx.AsyncClient:
 
 async def _reset_domino_http_state() -> None:
     """Test helper to clear auth/client caches between cases."""
-    global _shared_request_client
     _invalidate_auth_cache()
+    await _close_shared_request_client()
+
+
+async def _close_shared_request_client() -> None:
+    """Close and clear the shared request client."""
+    global _shared_request_client
     if _shared_request_client is not None and not getattr(_shared_request_client, "is_closed", False):
         close = getattr(_shared_request_client, "aclose", None)
         if close is not None:
@@ -167,22 +172,23 @@ async def domino_request(
     params: Optional[dict[str, Any]] = None,
     files: Optional[dict] = None,
     headers: Optional[dict[str, str]] = None,
+    base_url: Optional[str] = None,
     timeout: float = _DEFAULT_TIMEOUT,
     max_retries: int = _DEFAULT_MAX_RETRIES,
     retry_statuses: tuple[int, ...] = _RETRYABLE_STATUS_CODES,
 ) -> httpx.Response:
     """Send an HTTP request to the Domino API with retry logic.
 
-    Builds the full URL from ``resolve_domino_api_host() + path``, acquires
-    auth headers on each attempt (ephemeral tokens may expire between retries),
-    and retries on transient server errors with exponential backoff.
+    Builds the full URL from ``base_url`` when provided, otherwise from
+    ``resolve_domino_api_host() + path``, acquires auth headers on each
+    attempt (ephemeral tokens may expire between retries), and retries on
+    transient server errors with exponential backoff.
     """
-    base_url = resolve_domino_api_host()
-    url = f"{base_url}{path}"
+    resolved_base_url = (base_url or resolve_domino_api_host()).rstrip("/")
+    url = f"{resolved_base_url}{path}"
     last_exc: Optional[Exception] = None
-    client = await _get_shared_request_client()
-
     for attempt in range(max_retries + 1):
+        client = await _get_shared_request_client()
         auth_headers = await get_domino_auth_headers(force_refresh=attempt > 0)
         merged_headers = {**auth_headers, **(headers or {})}
         try:
@@ -214,6 +220,7 @@ async def domino_request(
             raise
         except Exception as exc:
             last_exc = exc
+            await _close_shared_request_client()
             if attempt < max_retries:
                 backoff = 2**attempt
                 logger.warning(
