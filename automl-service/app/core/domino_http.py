@@ -187,8 +187,9 @@ async def domino_request(
     resolved_base_url = (base_url or resolve_domino_api_host()).rstrip("/")
     url = f"{resolved_base_url}{path}"
     last_exc: Optional[Exception] = None
+    client = await _get_shared_request_client()
+
     for attempt in range(max_retries + 1):
-        client = await _get_shared_request_client()
         auth_headers = await get_domino_auth_headers(force_refresh=attempt > 0)
         merged_headers = {**auth_headers, **(headers or {})}
         try:
@@ -220,7 +221,6 @@ async def domino_request(
             raise
         except Exception as exc:
             last_exc = exc
-            await _close_shared_request_client()
             if attempt < max_retries:
                 backoff = 2**attempt
                 logger.warning(
