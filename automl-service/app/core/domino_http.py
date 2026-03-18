@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 import httpx
 
+from app.core.context.auth import get_request_auth_header
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -25,9 +26,16 @@ async def get_domino_auth_headers() -> dict[str, str]:
     """Build Domino auth headers using the platform priority chain.
 
     Priority:
-    1. Ephemeral token from Domino App/Run sidecar (localhost:8899)
+    0. Get auth header from auth context
+    1. Fallback to the ephemeral token from Domino App/Run sidecar (localhost:8899)
     2. Static API key (DOMINO_API_KEY / DOMINO_USER_API_KEY / token file)
     """
+    # forward the incoming request's auth header if present
+    forwarded_auth = get_request_auth_header()
+    if forwarded_auth:
+        return {"Authorization": forwarded_auth}
+
+    # fallbaack to the ephemeral token from Domino App/Run sidecar
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             # TODO this url must be dynamically resolved

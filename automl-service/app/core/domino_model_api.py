@@ -13,6 +13,7 @@ from datetime import datetime
 import httpx
 
 from app.config import get_settings
+from app.core.context.auth import get_request_auth_header
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,11 @@ class DominoModelAPIClient:
 
         Domino app tokens are short-lived, so we re-acquire from localhost on every call.
         """
+        # Highest priority: propagate inbound Authorization header if present
+        forwarded_auth = get_request_auth_header()
+        if forwarded_auth:
+            return {"Authorization": forwarded_auth}
+
         api_key_override = os.environ.get("API_KEY_OVERRIDE")
         if api_key_override:
             return {"X-Domino-Api-Key": api_key_override}
@@ -143,6 +149,7 @@ class DominoModelAPIClient:
             if json_data is not None:
                 request_headers["Content-Type"] = "application/json"
 
+            # TODO should this use domino_http?
             response = await client.request(
                 method=method,
                 url=path,

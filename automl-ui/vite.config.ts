@@ -12,6 +12,9 @@ export default defineConfig(({ mode }) => {
   // API target - defaults to localhost for local dev, use VITE_API_URL for Domino
   const apiTarget = env.VITE_API_URL || 'http://localhost:8000'
 
+  // JWT to allow authing API requests sent to DOMINO_API_HOST
+  const devAuthToken = env.DEV_ACCESS_TOKEN;
+
   return {
     plugins: [react()],
     base: basePath,
@@ -34,6 +37,21 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
         },
+        '*': {
+		  configure: (proxy, options) => {
+			proxy.on('proxyReq', (proxyReq, req, res) => {
+			  if (devAuthToken) {
+				// Set dev JWT in Authorization header if available
+				proxyReq.setHeader('Authorization', 'Vite-Proxy-Header-Value');
+			  }
+
+			  // Forward existing Authorization headers if exist
+			  if (req.headers['Authorization']) {
+				proxyReq.setHeader('Authorization', req.headers['Authorization']);
+			  }
+          });
+        },
+        }
       },
     },
     preview: {

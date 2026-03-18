@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from app.config import get_settings
+from app.core.context.auth import get_request_auth_header
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,12 @@ async def _get_auth_headers() -> dict[str, str]:
     """Build Domino auth headers using the same priority chain as domino_model_api."""
     import httpx
 
-    # Priority 1: ephemeral token from Domino App/Run sidecar
+    # forward the incoming request's auth header if present
+    forwarded_auth = get_request_auth_header()
+    if forwarded_auth:
+        return {"Authorization": forwarded_auth}
+
+    # fallbaack to the ephemeral token from Domino App/Run sidecar
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             # TODO this url should be dynamically resolved
@@ -73,6 +79,7 @@ async def resolve_project(project_id: str) -> Optional[ProjectInfo]:
     try:
         import httpx
 
+		# TODO should this use domino_http?
         headers = await _get_auth_headers()
         url = f"{api_host}/v4/projects/{project_id}"
 
