@@ -896,9 +896,10 @@ class ProjectStorageResolver:
                     "POST",
                     endpoint,
                     json=payload,
-                    # Fail fast per endpoint — callers (ensure_dataset_exists)
-                    # handle failure gracefully, so avoid long retry waits.
-                    max_retries=0,
+                    # One retry — the first attempt may hit a stale connection
+                    # (Server disconnected), but the client is recreated and
+                    # the second attempt gets a fresh TCP connection.
+                    max_retries=1,
                 )
                 body = resp.json()
                 ds_id = str(
@@ -929,6 +930,14 @@ class ProjectStorageResolver:
                 )
             except httpx.HTTPStatusError as exc:
                 last_error = self._format_http_error(exc)
+                # If the dataset is stuck in deletion, no retry will help —
+                # a Domino admin must complete the purge.
+                if "marked for deletion" in (last_error or ""):
+                    raise RuntimeError(
+                        f"Dataset '{DATASET_NAME}' exists in project {project_id} "
+                        f"but is marked for deletion. A Domino admin must complete "
+                        f"the deletion before the name can be reused."
+                    )
             except Exception as exc:
                 last_error = str(exc)
 
