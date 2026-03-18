@@ -896,6 +896,9 @@ class ProjectStorageResolver:
                     "POST",
                     endpoint,
                     json=payload,
+                    # Fail fast per endpoint — callers (ensure_dataset_exists)
+                    # handle failure gracefully, so avoid long retry waits.
+                    max_retries=0,
                 )
                 body = resp.json()
                 ds_id = str(
