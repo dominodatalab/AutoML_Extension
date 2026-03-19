@@ -16,7 +16,7 @@ from app.core.websocket_manager import get_websocket_manager
 from app.db.database import create_tables
 from app.api.routes import health, jobs, datasets, predictions, profiling, registry, export, deployments
 from app.core.context.auth import set_request_auth_header
-from app.core.context.user import clear_viewing_user, resolve_viewing_user
+from app.core.context.user import clear_viewing_user
 
 logging.basicConfig(
     level=logging.INFO,
@@ -128,24 +128,17 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Only resolve the viewing user (Domino API call) for backend API routes.
-    # Static assets, the SPA shell, config.js, health checks etc. skip this
-    # to avoid unnecessary sidecar calls on every page load.
-    _RESOLVE_USER_PREFIXES = ("/svc/v1/jobs", "/svc/v1/datasets", "/svc/v1/predictions",
-                              "/svc/v1/profiling", "/svc/v1/registry", "/svc/v1/export",
-                              "/svc/v1/deployments", "/svcjob", "/svcdataset", "/svcprofile",
-                              "/svccapabilities", "/svcexport", "/svcpredict", "/svcregistry",
-                              "/svcdeployment")
-
     # Request auth capture: store Authorization header in per-request context
     @app.middleware("http")
     async def capture_auth_header(request: Request, call_next):
         auth_header = request.headers.get("Authorization")
         # Set before handling; ensure cleanup/reset after response
         set_request_auth_header(auth_header)
-        # Resolve viewing user only for API routes that need RBAC.
-        if any(request.url.path.startswith(p) for p in _RESOLVE_USER_PREFIXES):
-            await resolve_viewing_user()
+        # NOTE: resolve_viewing_user() is disabled. The sidecar proxy
+        # returns 500 when it receives the browser's forwarded auth token,
+        # and even when called without auth it returns the App owner's
+        # identity, not the viewing user's. RBAC owner filtering uses the
+        # domino-username header instead (trusted, injected by Domino proxy).
         try:
             response = await call_next(request)
         finally:
