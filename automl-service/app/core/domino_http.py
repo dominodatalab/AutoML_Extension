@@ -15,7 +15,6 @@ import httpx
 
 from app.core.context.auth import get_request_auth_header
 from app.config import get_settings
-from app.api.generated.domino_public_api_client.client import Client as DominoApiClient
 
 logger = logging.getLogger(__name__)
 
@@ -110,28 +109,6 @@ async def get_domino_auth_headers(force_refresh: bool = False) -> dict[str, str]
 
         _invalidate_auth_cache()
         return {}
-
-
-def get_domino_public_api_client_sync() -> DominoApiClient:
-    """Create a Domino Public API client with auth.
-
-    Uses the same exclusive-auth cascade as get_domino_auth_headers:
-    forwarded Authorization OR API key — never both, since the sidecar
-    proxy returns 500 when it receives both headers simultaneously.
-    """
-    forwarded_auth = get_request_auth_header()
-    if forwarded_auth:
-        headers = {"Authorization": forwarded_auth}
-    else:
-        api_key = (
-            os.environ.get("DOMINO_API_KEY")
-            or os.environ.get("DOMINO_USER_API_KEY")
-            or get_settings().effective_api_key
-        )
-        headers = {"X-Domino-Api-Key": api_key} if api_key else {}
-
-    base_url = resolve_domino_api_host()
-    return DominoApiClient(base_url=base_url).with_headers(headers)
 
 
 def resolve_domino_api_host() -> str:
