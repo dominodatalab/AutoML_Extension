@@ -45,6 +45,7 @@ def _mock_job_queue():
         "active": 0,
         "queued": 0,
     })
+    mock_queue.get_total_tracked = MagicMock(return_value=0)
     return mock_queue
 
 
