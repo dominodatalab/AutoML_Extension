@@ -128,8 +128,13 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Paths that skip user resolution (no Domino API call needed)
-    _SKIP_USER_RESOLUTION_PREFIXES = ("/svc/v1/health",)
+    # Only resolve the viewing user (Domino API call) for backend API routes.
+    # Static assets, the SPA shell, config.js, etc. do not need RBAC.
+    _RESOLVE_USER_PREFIXES = ("/svc/v1/jobs", "/svc/v1/datasets", "/svc/v1/predictions",
+                              "/svc/v1/profiling", "/svc/v1/registry", "/svc/v1/export",
+                              "/svc/v1/deployments", "/svcjob", "/svcdataset", "/svcprofile",
+                              "/svccapabilities", "/svcexport", "/svcpredict", "/svcregistry",
+                              "/svcdeployment")
 
     # Request auth capture: store Authorization header in per-request context
     @app.middleware("http")
@@ -137,10 +142,10 @@ def create_app() -> FastAPI:
         auth_header = request.headers.get("Authorization")
         # Set before handling; ensure cleanup/reset after response
         set_request_auth_header(auth_header)
-        # Resolve viewing user for routes that need RBAC; skip for health
-        # checks and other lightweight endpoints to avoid blocking on the
-        # Domino API when it is slow or unreachable.
-        if not any(request.url.path.startswith(p) for p in _SKIP_USER_RESOLUTION_PREFIXES):
+        # Resolve viewing user only for API routes that need RBAC.
+        # Skip for static assets, health checks, and the SPA shell to
+        # avoid hammering the Domino API sidecar on every page load.
+        if any(request.url.path.startswith(p) for p in _RESOLVE_USER_PREFIXES):
             await resolve_viewing_user()
         try:
             response = await call_next(request)
