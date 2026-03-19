@@ -13,7 +13,6 @@ from typing import Any, Optional
 
 import httpx
 
-from app.core.context.auth import get_request_auth_header
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -61,22 +60,19 @@ async def _reset_domino_http_state() -> None:
 
 
 async def get_domino_auth_headers(force_refresh: bool = False) -> dict[str, str]:
-    """Build Domino auth headers using the platform priority chain.
+    """Build Domino auth headers for calls through the sidecar proxy.
 
-    Priority (each level is exclusive — first match wins):
-    1. Forwarded Authorization header from the incoming request (per-user)
-    2. Ephemeral Bearer token from the Domino sidecar (localhost:8899)
-    3. Static API key (DOMINO_API_KEY / DOMINO_USER_API_KEY / token file)
+    The sidecar at localhost:8899 injects its own auth when proxying to
+    Domino.  Forwarding the browser's Authorization header overrides the
+    sidecar's auth and causes 500 errors.  So this function does NOT use
+    the per-request forwarded header — it relies on the sidecar's own
+    token or falls back to a static API key.
 
-    Only one auth mechanism is returned. Sending both Authorization and
-    X-Domino-Api-Key simultaneously causes the sidecar proxy to error.
+    Priority (exclusive — first match wins):
+    1. Ephemeral Bearer token from the Domino sidecar (localhost:8899)
+    2. Static API key (DOMINO_API_KEY / DOMINO_USER_API_KEY / token file)
     """
-    # 1. Forwarded per-request auth header (set by middleware)
-    forwarded_auth = get_request_auth_header()
-    if forwarded_auth:
-        return {"Authorization": forwarded_auth}
-
-    # 2. Cached sidecar token (app-level, safe to cache)
+    # 1. Cached sidecar token (app-level, safe to cache)
     if not force_refresh:
         cached_headers = _get_cached_auth_headers()
         if cached_headers is not None:
