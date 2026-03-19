@@ -755,9 +755,7 @@ def resolve_job_list_filters(
     """Resolve list filter values for status/model/user/project semantics."""
     status_filter = JobStatus(list_request.status) if list_request.status else None
     model_type_filter = ModelType(list_request.model_type) if list_request.model_type else None
-    owner_filter = get_request_owner(None)
 
-    # ignore list request owner
     if list_request.owner is not None:
         owner_filter = list_request.owner if list_request.owner else None
     else:

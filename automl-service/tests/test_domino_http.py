@@ -24,8 +24,11 @@ from app.core.domino_http import (
 
 @pytest.fixture(autouse=True)
 async def reset_domino_http_state():
+    from app.core.context.auth import set_request_auth_header
+    set_request_auth_header(None)
     await _reset_domino_http_state()
     yield
+    set_request_auth_header(None)
     await _reset_domino_http_state()
 
 
@@ -70,12 +73,11 @@ class TestGetDominoAuthHeaders:
     async def test_returns_api_key_when_sidecar_down(self, monkeypatch):
         monkeypatch.setenv("DOMINO_API_KEY", "test-key-123")
         # Mock the sidecar call to fail so we fall through to API key
-        instance = AsyncMock()
-        instance.get = AsyncMock(side_effect=ConnectionError("no sidecar"))
-        with patch(
-            "app.core.domino_http._get_shared_request_client",
-            new=AsyncMock(return_value=instance),
-        ):
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(side_effect=ConnectionError("no sidecar"))
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        with patch("httpx.AsyncClient", return_value=mock_client):
             headers = await get_domino_auth_headers()
         assert headers.get("X-Domino-Api-Key") == "test-key-123"
 
@@ -95,7 +97,7 @@ class TestGetDominoAuthHeaders:
             cfg._settings_instance = old
 
     @pytest.mark.asyncio
-    async def test_reuses_cached_auth_headers_within_ttl(self, monkeypatch):
+    async def test_reuses_cached_sidecar_token_within_ttl(self, monkeypatch):
         monkeypatch.delenv("DOMINO_API_KEY", raising=False)
         monkeypatch.delenv("DOMINO_USER_API_KEY", raising=False)
 
@@ -103,19 +105,19 @@ class TestGetDominoAuthHeaders:
         response.status_code = 200
         response.text = "token-123"
 
-        instance = AsyncMock()
-        instance.get = AsyncMock(return_value=response)
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch(
-            "app.core.domino_http._get_shared_request_client",
-            new=AsyncMock(return_value=instance),
-        ):
+        with patch("httpx.AsyncClient", return_value=mock_client):
             headers_one = await get_domino_auth_headers()
             headers_two = await get_domino_auth_headers()
 
         assert headers_one == {"Authorization": "Bearer token-123"}
         assert headers_two == {"Authorization": "Bearer token-123"}
-        assert instance.get.await_count == 1
+        # Sidecar should only be called once — second call uses cache
+        assert mock_client.get.await_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -188,16 +190,21 @@ class TestDominoRequest:
         assert call_count >= 3
 
     @pytest.mark.asyncio
-    async def test_reuses_shared_client_across_requests(self, monkeypatch):
+    async def test_creates_fresh_client_per_request(self, monkeypatch):
+        """domino_request uses a fresh AsyncClient per call (no shared pool)."""
         monkeypatch.setenv("DOMINO_API_PROXY", "https://api.test.com")
 
         client_instances = []
 
         class FakeClient:
-            is_closed = False
-
             def __init__(self, **kwargs):
                 client_instances.append(self)
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
 
             async def request(self, method, url, **kwargs):
                 resp = MagicMock(spec=httpx.Response)
@@ -205,59 +212,45 @@ class TestDominoRequest:
                 resp.raise_for_status = MagicMock()
                 return resp
 
-            async def get(self, url, **kwargs):
-                resp = MagicMock(spec=httpx.Response)
-                resp.status_code = 200
-                resp.text = "token-123"
-                return resp
-
-            async def aclose(self):
-                self.is_closed = True
-
         with patch("app.core.domino_http.httpx.AsyncClient", FakeClient):
             await domino_request("GET", "/api/first", max_retries=0)
             await domino_request("GET", "/api/second", max_retries=0)
 
-        assert len(client_instances) == 1
+        # Each domino_request call creates a fresh client; get_domino_auth_headers
+        # may also create a client for the sidecar token fetch, so we just verify
+        # that multiple clients are instantiated (no shared pool).
+        assert len(client_instances) >= 2
 
     @pytest.mark.asyncio
-    async def test_resets_shared_client_after_transport_error(self, monkeypatch):
+    async def test_retries_after_transport_error(self, monkeypatch):
+        """domino_request retries on transport errors with a fresh client."""
         monkeypatch.setenv("DOMINO_API_PROXY", "https://api.test.com")
 
-        client_instances = []
+        call_count = 0
 
         class FakeClient:
-            is_closed = False
+            async def __aenter__(self):
+                return self
 
-            def __init__(self, **kwargs):
-                self.request_calls = 0
-                client_instances.append(self)
+            async def __aexit__(self, *args):
+                pass
 
             async def request(self, method, url, **kwargs):
-                self.request_calls += 1
-                if len(client_instances) == 1:
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
                     raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
                 resp = MagicMock(spec=httpx.Response)
                 resp.status_code = 200
                 resp.raise_for_status = MagicMock()
                 return resp
 
-            async def get(self, url, **kwargs):
-                resp = MagicMock(spec=httpx.Response)
-                resp.status_code = 200
-                resp.text = "token-123"
-                return resp
-
-            async def aclose(self):
-                self.is_closed = True
-
         with patch("app.core.domino_http.httpx.AsyncClient", FakeClient):
             with patch("app.core.domino_http.asyncio.sleep", new_callable=AsyncMock):
                 resp = await domino_request("GET", "/api/flaky", max_retries=1)
 
         assert resp.status_code == 200
-        assert len(client_instances) == 2
-        assert client_instances[0].is_closed is True
+        assert call_count == 2
 
 
 # ---------------------------------------------------------------------------

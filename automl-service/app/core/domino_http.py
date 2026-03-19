@@ -27,8 +27,6 @@ _AUTH_CACHE_TTL_SECONDS = 3.0
 _auth_cache_headers: Optional[dict[str, str]] = None
 _auth_cache_expires_at = 0.0
 _auth_lock: Optional[asyncio.Lock] = None
-_shared_request_client: Optional[httpx.AsyncClient] = None
-_shared_request_client_lock: Optional[asyncio.Lock] = None
 
 def get_sync_auth_headers() -> dict[str, str]:
     forwarded_auth = get_request_auth_header()
@@ -53,12 +51,6 @@ def _get_auth_lock() -> asyncio.Lock:
     return _auth_lock
 
 
-def _get_request_client_lock() -> asyncio.Lock:
-    global _shared_request_client_lock
-    if _shared_request_client_lock is None:
-        _shared_request_client_lock = asyncio.Lock()
-    return _shared_request_client_lock
-
 
 def _get_cached_auth_headers() -> Optional[dict[str, str]]:
     if _auth_cache_headers and _auth_cache_expires_at > time.monotonic():
@@ -79,69 +71,53 @@ def _invalidate_auth_cache() -> None:
     _auth_cache_expires_at = 0.0
 
 
-async def _get_shared_request_client() -> httpx.AsyncClient:
-    """Reuse one AsyncClient so recursive API calls share connections."""
-    global _shared_request_client
-    if _shared_request_client is None or getattr(_shared_request_client, "is_closed", False):
-        async with _get_request_client_lock():
-            if _shared_request_client is None or getattr(_shared_request_client, "is_closed", False):
-                _shared_request_client = httpx.AsyncClient()
-    return _shared_request_client
-
-
 async def _reset_domino_http_state() -> None:
-    """Test helper to clear auth/client caches between cases."""
+    """Test helper to clear auth caches between cases."""
     _invalidate_auth_cache()
-    await _close_shared_request_client()
-
-
-async def _close_shared_request_client() -> None:
-    """Close and clear the shared request client."""
-    global _shared_request_client
-    if _shared_request_client is not None and not getattr(_shared_request_client, "is_closed", False):
-        close = getattr(_shared_request_client, "aclose", None)
-        if close is not None:
-            await close()
-    _shared_request_client = None
 
 
 async def get_domino_auth_headers(force_refresh: bool = False) -> dict[str, str]:
     """Build Domino auth headers using the platform priority chain.
 
-    Priority:
-    0. Get auth header from auth context
-    1. Fallback to the ephemeral token from Domino App/Run sidecar (localhost:8899)
-    2. Static API key (DOMINO_API_KEY / DOMINO_USER_API_KEY / token file)
+    Per-request headers (forwarded Authorization, static API key) are always
+    resolved fresh via ``get_sync_auth_headers()`` so that concurrent requests
+    from different users receive the correct identity.
+
+    The sidecar token (localhost:8899) is app-level and safe to cache; it is
+    used as a fallback when no per-request Authorization header is present.
     """
-    # forward the incoming request's auth header if present
+    # Per-request headers — never cached (user-specific)
     headers = get_sync_auth_headers()
 
+    # If the request already carries an Authorization header we don't need
+    # the sidecar token; merge API key (if any) and return immediately.
+    if headers.get("Authorization"):
+        return headers
+
+    # No forwarded auth — try the cached sidecar token
     if not force_refresh:
         cached_headers = _get_cached_auth_headers()
         if cached_headers is not None:
-            return cached_headers
+            return {**headers, **cached_headers}
 
     async with _get_auth_lock():
         if not force_refresh:
             cached_headers = _get_cached_auth_headers()
             if cached_headers is not None:
-                return cached_headers
+                return {**headers, **cached_headers}
 
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.get("http://localhost:8899/access-token", timeout=5.0)
             if resp.status_code == 200 and resp.text.strip():
-                return _cache_auth_headers(
-                    {**headers, "Authorization": f"Bearer {resp.text.strip()}"}
-                )
+                sidecar_headers = {"Authorization": f"Bearer {resp.text.strip()}"}
+                _cache_auth_headers(sidecar_headers)
+                return {**headers, **sidecar_headers}
         except Exception:
             pass
 
-        if headers:
-            return _cache_auth_headers(headers)
-
         _invalidate_auth_cache()
-        return {}
+        return headers
 
 
 def get_domino_public_api_client_sync() -> DominoApiClient:
