@@ -36,10 +36,22 @@ export default defineConfig(({ mode }) => {
           target: apiTarget,
           changeOrigin: true,
           secure: false,
-          headers: {
-            'Authorization': `Bearer ${devAuthToken}`
-          }
         },
+        '*': {
+		  configure: (proxy, options) => {
+			proxy.on('proxyReq', (proxyReq, req, res) => {
+			  if (devAuthToken) {
+				// Set dev JWT in Authorization header if available
+				proxyReq.setHeader('Authorization', 'Vite-Proxy-Header-Value');
+			  }
+
+			  // Forward existing Authorization headers if exist
+			  if (req.headers['Authorization']) {
+				proxyReq.setHeader('Authorization', req.headers['Authorization']);
+			  }
+          });
+        },
+        }
       },
     },
     preview: {

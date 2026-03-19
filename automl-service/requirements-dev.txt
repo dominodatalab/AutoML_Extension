@@ -3,4 +3,4 @@ pytest
 pytest_asyncio
 aiosqlite
 httpx
-openapi-python-client
+

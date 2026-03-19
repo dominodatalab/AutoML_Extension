@@ -21,7 +21,6 @@ from app.api.schemas.job import (
     RegisterModelResponse,
 )
 from app.config import get_settings
-from app.core.context.user import get_viewing_user
 from app.core.dataset_mounts import resolve_dataset_mount_paths
 from app.db.models import Job, JobStatus, ModelType, ProblemType
 from app.db import crud
@@ -75,19 +74,10 @@ def _is_job_name_unique_violation(exc: IntegrityError) -> bool:
 
 
 def get_request_owner(request: Optional[Request]) -> str:
-    """Determine the requesting username using Domino Public API context.
-
-    Priority:
-    - app.core.context.user.get_viewing_user().user_name
-    - 'domino-username' request header (fallback)
-    - 'anonymous' when unavailable
-    """
-    user = get_viewing_user()
-    if user and user.user_name:
-        return user.user_name
-    if request is not None:
-        return request.headers.get("domino-username", "anonymous")
-    return "anonymous"
+    """Extract the requesting username from Domino headers."""
+    if request is None:
+        return "anonymous"
+    return request.headers.get("domino-username", "anonymous")
 
 
 def get_request_project_id(request: Optional[Request]) -> Optional[str]:
@@ -372,6 +362,19 @@ async def create_job_with_context(
     return _attach_external_links(job)
 
 
+async def list_jobs_basic(
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = 100,
+    status: Optional[str] = None,
+) -> list[Job]:
+    """List jobs with optional basic status filtering."""
+    await _sync_active_domino_jobs_for_overview(db)
+    status_filter = JobStatus(status) if status else None
+    jobs = await crud.get_jobs(db, skip=skip, limit=limit, status=status_filter)
+    return list(jobs)
+
+
 async def list_jobs_filtered(
     db: AsyncSession,
     list_request: JobListRequest,
@@ -480,9 +483,7 @@ def resolve_job_list_filters(
     """Resolve list filter values for status/model/user/project semantics."""
     status_filter = JobStatus(list_request.status) if list_request.status else None
     model_type_filter = ModelType(list_request.model_type) if list_request.model_type else None
-    owner_filter = get_request_owner(None)
 
-    # ignore list request owner
     if list_request.owner is not None:
         owner_filter = list_request.owner if list_request.owner else None
     else:

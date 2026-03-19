@@ -35,6 +35,7 @@ from app.services.job_service import (
     get_job_response,
     get_job_status_response,
     get_queue_status as get_queue_status_service,
+    list_jobs_basic,
     list_jobs_filtered,
     preview_cleanup as preview_cleanup_service,
     register_model_for_job,
@@ -63,17 +64,15 @@ async def list_jobs(
     limit: int = 100,
     status: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    request: Request = None,
 ):
-    """List training jobs for the current user by default."""
-    list_request = JobListRequest(skip=skip, limit=limit, status=status or None)
-    jobs = await list_jobs_filtered(db=db, list_request=list_request, request=request)
+    """List all training jobs."""
+    jobs = await list_jobs_basic(db=db, skip=skip, limit=limit, status=status)
 
     return JobListResponse(
         jobs=[JobResponse.model_validate(j) for j in jobs],
         total=len(jobs),
-        skip=list_request.skip,
-        limit=list_request.limit,
+        skip=skip,
+        limit=limit,
     )
 
 

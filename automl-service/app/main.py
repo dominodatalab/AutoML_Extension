@@ -15,7 +15,6 @@ from app.core.websocket_manager import get_websocket_manager
 from app.db.database import create_tables
 from app.api.routes import health, jobs, datasets, predictions, profiling, registry, export, deployments
 from app.core.context.auth import set_request_auth_header
-from app.core.context.user import get_viewing_user
 
 logging.basicConfig(
     level=logging.INFO,
@@ -111,11 +110,9 @@ def create_app() -> FastAPI:
     # Request auth capture: store Authorization header in per-request context
     @app.middleware("http")
     async def capture_auth_header(request: Request, call_next):
-        auth_header = request.headers.get("Authorization")
+        auth_header = request.headers.get("authorization")
         # Set before handling; ensure cleanup/reset after response
         set_request_auth_header(auth_header)
-        # set viewing user
-        get_viewing_user()
         try:
             response = await call_next(request)
         finally:
