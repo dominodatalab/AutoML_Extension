@@ -74,10 +74,21 @@ def _is_job_name_unique_violation(exc: IntegrityError) -> bool:
 
 
 def get_request_owner(request: Optional[Request]) -> str:
-    """Extract the requesting username from Domino headers."""
-    if request is None:
-        return "anonymous"
-    return request.headers.get("domino-username", "anonymous")
+    """Determine the requesting username.
+
+    Priority:
+    - app.core.context.user.get_viewing_user().user_name
+    - 'domino-username' request header (fallback)
+    - 'anonymous' when unavailable
+    """
+    user = get_viewing_user()
+    if user and user.user_name:
+        return user.user_name
+    if request is not None:
+        header_user = request.headers.get("domino-username")
+        if header_user:
+            return header_user
+    return "anonymous"
 
 
 def get_request_project_id(request: Optional[Request]) -> Optional[str]:

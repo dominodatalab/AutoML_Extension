@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.db.database import Base
 from app.db.models import Job, JobLog, JobStatus, ModelType, ProblemType, RegisteredModel
 from app.core.utils import utc_now
+from app.core.context.auth import set_request_auth_header
 
 # ---------------------------------------------------------------------------
 # Dynamic HTML report path — saved to /mnt/artifacts so Domino persists it
@@ -232,6 +233,45 @@ def pytest_html_results_table_row(report, cells):
     """Remove the Links cell to match the header."""
     if cells and len(cells) > 3:
         cells.pop()
+
+
+# ---------------------------------------------------------------------------
+# Global test auth/user context
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def mock_viewing_user(monkeypatch):
+    """Provide a default viewing user for unit tests.
+
+    Many services default to reading the current user from Domino via
+    app.core.context.user.get_viewing_user(). In unit tests (non-integration),
+    there is no Domino environment, so we stub this to a deterministic user.
+
+    Individual tests may override this by re-monkeypatching get_viewing_user.
+    """
+    from app.core.context import user as user_ctx
+
+    def fake_get_viewing_user():
+        return user_ctx.User(id="test-id", user_name="test-user", roles=["SysAdmin", "Practitioner"])
+
+    # Patch at source module
+    monkeypatch.setattr(user_ctx, "get_viewing_user", fake_get_viewing_user, raising=True)
+    # Patch common import sites that bind the function at import-time
+    try:
+        import app.services.job_service as job_service
+        monkeypatch.setattr(job_service, "get_viewing_user", fake_get_viewing_user, raising=True)
+    except Exception:
+        pass
+    try:
+        import app.main as main_mod
+        monkeypatch.setattr(main_mod, "get_viewing_user", fake_get_viewing_user, raising=True)
+    except Exception:
+        pass
+
+    # Also clear any leaked Authorization header between tests
+    set_request_auth_header(None)
+    yield
+    set_request_auth_header(None)
 
 
 # ---------------------------------------------------------------------------
@@ -473,7 +513,7 @@ def make_job():
 # ---------------------------------------------------------------------------
 
 @pytest_asyncio.fixture
-async def app_client(async_engine, tmp_data_dir, monkeypatch):
+async def app_client(async_engine, tmp_data_dir, monkeypatch, mock_viewing_user):
     """Provide an async HTTP test client for the FastAPI app.
 
     Overrides the DB dependency and settings for isolated testing.
@@ -485,6 +525,8 @@ async def app_client(async_engine, tmp_data_dir, monkeypatch):
     monkeypatch.setenv("DATASETS_PATH", str(tmp_data_dir["datasets"]))
     monkeypatch.setenv("TEMP_PATH", str(tmp_data_dir["temp"]))
     monkeypatch.setenv("EDA_RESULTS_PATH", str(tmp_data_dir["eda_results"]))
+
+    mock_viewing_user
 
     # Reset cached settings singleton
     import app.config as config_module
