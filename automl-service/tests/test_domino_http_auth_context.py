@@ -19,4 +19,4 @@ async def test_get_domino_auth_headers_reads_from_request_context(monkeypatch):
 
     # verify that correct headers are read
     headers = await get_domino_auth_headers()
-    assert headers == {"Authorization": "Bearer token-A"}
+    assert headers == {'Authorization': 'Bearer token-A', 'X-Domino-Api-Key': 'unit-test-key'}
