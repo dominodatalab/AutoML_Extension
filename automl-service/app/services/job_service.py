@@ -23,7 +23,6 @@ from app.api.schemas.job import (
     RegisterModelResponse,
 )
 from app.config import get_settings
-from app.core.context.user import get_viewing_user
 from app.core.dataset_mounts import resolve_dataset_mount_paths
 from app.core.leaderboard_utils import normalize_leaderboard_payload, normalize_leaderboard_rows
 from app.db.models import Job, JobStatus, ModelType, ProblemType
@@ -112,19 +111,10 @@ def _is_job_name_unique_violation(exc: IntegrityError) -> bool:
 
 
 def get_request_owner(request: Optional[Request]) -> str:
-    """Determine the requesting username using Domino Public API context.
-
-    Priority:
-    - app.core.context.user.get_viewing_user().user_name
-    - 'domino-username' request header (fallback)
-    - 'anonymous' when unavailable
-    """
-    user = get_viewing_user()
-    if user and user.user_name:
-        return user.user_name
-    if request is not None:
-        return request.headers.get("domino-username", "anonymous")
-    return "anonymous"
+    """Extract the requesting username from Domino headers."""
+    if request is None:
+        return "anonymous"
+    return request.headers.get("domino-username", "anonymous")
 
 
 def get_request_project_id(request: Optional[Request]) -> Optional[str]:
@@ -629,6 +619,18 @@ async def _fail_zombie_local_jobs(db: AsyncSession) -> None:
     except Exception:
         logger.exception("Error checking for zombie local jobs")
 
+
+async def list_jobs_basic(
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = 100,
+    status: Optional[str] = None,
+) -> list[Job]:
+    """List jobs with optional basic status filtering."""
+    await _sync_active_domino_jobs_for_overview(db)
+    status_filter = JobStatus(status) if status else None
+    jobs = await crud.get_jobs(db, skip=skip, limit=limit, status=status_filter)
+    return list(jobs)
 
 
 async def list_jobs_filtered(

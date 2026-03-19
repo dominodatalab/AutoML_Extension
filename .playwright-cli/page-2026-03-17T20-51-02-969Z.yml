@@ -1,0 +1,56 @@
+- main [ref=e4]:
+  - generic [ref=e299]:
+    - navigation [ref=e300]:
+      - link "AutoML" [ref=e301] [cursor=pointer]:
+        - /url: /dashboard
+      - generic [ref=e302]: /
+      - generic [ref=e303]: automl-ui-test
+    - generic [ref=e304]:
+      - 'heading "Run: automl-ui-test" [level=1] [ref=e306]'
+      - generic [ref=e307]:
+        - button "Cancel" [ref=e308] [cursor=pointer]:
+          - img [ref=e309]
+          - text: Cancel
+        - button [ref=e312] [cursor=pointer]:
+          - img [ref=e313]
+    - navigation [ref=e318]:
+      - button "Overview" [ref=e319] [cursor=pointer]
+      - button "Logs" [ref=e320] [cursor=pointer]
+    - generic [ref=e324]: 1%
+    - generic [ref=e327]:
+      - generic [ref=e328]:
+        - heading "Description" [level=3] [ref=e329]
+        - paragraph [ref=e330]: No description available
+      - table [ref=e332]:
+        - rowgroup [ref=e333]:
+          - row "Metadata Value" [ref=e334]:
+            - columnheader "Metadata" [ref=e335]
+            - columnheader "Value" [ref=e336]
+        - rowgroup [ref=e337]:
+          - row "Model type tabular" [ref=e338]:
+            - cell "Model type" [ref=e339]
+            - cell "tabular" [ref=e340]
+          - row "Target column target" [ref=e341]:
+            - cell "Target column" [ref=e342]
+            - cell "target" [ref=e343]
+          - row "Dataset used 2af78f95_automl_sample.csv" [ref=e344]:
+            - cell "Dataset used" [ref=e345]
+            - cell "2af78f95_automl_sample.csv" [ref=e346]:
+              - link "2af78f95_automl_sample.csv" [ref=e347] [cursor=pointer]:
+                - /url: /eda?data_source=upload&file_path=%2FUsers%2Fsubirmansukhani%2FDesktop%2Fauto_ml%2FAutoML_Extension%2Flocal_data%2Fuploads%2F2af78f95_automl_sample.csv
+          - row "Preset medium quality faster train" [ref=e348]:
+            - cell "Preset" [ref=e349]
+            - cell "medium quality faster train" [ref=e350]
+          - row "Time limit 3600s" [ref=e351]:
+            - cell "Time limit" [ref=e352]
+            - cell "3600s" [ref=e353]
+          - row "Created Mar 17, 2026 8:50 PM" [ref=e354]:
+            - cell "Created" [ref=e355]
+            - cell "Mar 17, 2026 8:50 PM" [ref=e356]
+          - row "Status Pending" [ref=e357]:
+            - cell "Status" [ref=e358]
+            - cell "Pending" [ref=e359]:
+              - generic [ref=e360]: Pending
+          - row "Execution target Local" [ref=e361]:
+            - cell "Execution target" [ref=e362]
+            - cell "Local" [ref=e363]

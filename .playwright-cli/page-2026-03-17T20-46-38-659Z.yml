@@ -1,0 +1,48 @@
+- main [ref=e4]:
+  - generic [ref=e55]:
+    - generic [ref=e56]:
+      - navigation [ref=e57]:
+        - link "AutoML" [ref=e58] [cursor=pointer]:
+          - /url: /dashboard
+        - generic [ref=e59]: /
+        - generic [ref=e60]: New training job
+      - generic [ref=e62]:
+        - heading "New training job" [level=1] [ref=e63]
+        - paragraph [ref=e64]: Configure and run an AutoGluon training job
+    - navigation "Progress" [ref=e66]:
+      - list [ref=e67]:
+        - listitem [ref=e68]:
+          - button [ref=e71] [cursor=pointer]
+          - generic [ref=e73]: Data Source
+        - listitem [ref=e74]:
+          - button [disabled] [ref=e79]
+          - generic [ref=e81]: Model Type
+        - listitem [ref=e82]:
+          - button [disabled] [ref=e87]
+          - generic [ref=e89]: Configuration
+        - listitem [ref=e90]:
+          - button [disabled] [ref=e93]
+          - generic [ref=e95]: Review
+    - generic [ref=e97]:
+      - generic [ref=e98]:
+        - heading "Select Data Source" [level=2] [ref=e99]
+        - paragraph [ref=e100]: Upload a file or select from mounted Domino datasets
+      - generic [ref=e101]:
+        - button "Upload File Upload a CSV or Parquet file" [ref=e102] [cursor=pointer]:
+          - img [ref=e103]
+          - paragraph [ref=e105]: Upload File
+          - paragraph [ref=e106]: Upload a CSV or Parquet file
+        - button "Domino Dataset Select from mounted datasets" [ref=e107] [cursor=pointer]:
+          - img [ref=e108]
+          - paragraph [ref=e110]: Domino Dataset
+          - paragraph [ref=e111]: Select from mounted datasets
+      - generic [ref=e113] [cursor=pointer]:
+        - button "Choose File" [ref=e114]
+        - generic [ref=e115]:
+          - img [ref=e116]
+          - paragraph [ref=e118]: Drag or click to upload files
+          - paragraph [ref=e119]: "* Supports CSV and Parquet files"
+          - paragraph [ref=e120]: "* File size may not exceed 550 MB"
+    - generic [ref=e121]:
+      - button "Back" [disabled] [ref=e122]
+      - button "Continue" [disabled] [ref=e123]

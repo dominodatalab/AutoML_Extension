@@ -1,0 +1,44 @@
+- main [ref=e4]:
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - heading "AutoML" [level=1] [ref=e8]
+      - generic [ref=e9]:
+        - link "Explore Data" [ref=e10] [cursor=pointer]:
+          - /url: /eda
+          - button "Explore Data" [ref=e11]:
+            - img [ref=e12]
+            - text: Explore Data
+        - link "New training job" [ref=e14] [cursor=pointer]:
+          - /url: /jobs/new
+          - button "New training job" [ref=e15]
+        - button "Storage cleanup" [ref=e16] [cursor=pointer]:
+          - img [ref=e17]
+          - text: Storage cleanup
+    - generic [ref=e19]:
+      - generic [ref=e20]:
+        - img [ref=e21]
+        - textbox "Search job name" [ref=e23]
+      - button "All statuses" [ref=e25] [cursor=pointer]:
+        - generic [ref=e26]: All statuses
+        - img [ref=e27]
+      - button "All types" [ref=e30] [cursor=pointer]:
+        - generic [ref=e31]: All types
+        - img [ref=e32]
+      - generic [ref=e34]:
+        - button "Table view" [ref=e35] [cursor=pointer]:
+          - img [ref=e36]
+        - button "Card view" [ref=e38] [cursor=pointer]:
+          - img [ref=e39]
+    - generic [ref=e41]:
+      - generic [ref=e42]:
+        - generic [ref=e43]: Name
+        - generic [ref=e44]: Type
+        - generic [ref=e45]: Status
+        - generic [ref=e46]: Best model
+        - generic [ref=e47]: Created
+      - generic [ref=e48]:
+        - img [ref=e50]
+        - paragraph [ref=e52]: Train models to manage and track them through a unified interface.
+        - link "New training job" [ref=e53] [cursor=pointer]:
+          - /url: /jobs/new
+          - button "New training job" [ref=e54]
