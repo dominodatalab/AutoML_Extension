@@ -17,8 +17,7 @@ async def test_get_domino_auth_headers_reads_from_request_context(monkeypatch):
     # set the auth headers (normally done by a middleware)
     set_request_auth_header("Bearer token-A")
 
-    # verify that correct headers are read — both the forwarded auth and the
-    # static API key are included so that Domino receives user identity + app auth
+    # verify forwarded auth is used exclusively (no API key mixed in —
+    # the sidecar proxy returns 500 when it receives both headers)
     headers = await get_domino_auth_headers()
-    assert headers["Authorization"] == "Bearer token-A"
-    assert headers["X-Domino-Api-Key"] == "unit-test-key"
+    assert headers == {"Authorization": "Bearer token-A"}

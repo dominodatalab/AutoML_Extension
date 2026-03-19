@@ -28,21 +28,6 @@ _auth_cache_headers: Optional[dict[str, str]] = None
 _auth_cache_expires_at = 0.0
 _auth_lock: Optional[asyncio.Lock] = None
 
-def get_sync_auth_headers() -> dict[str, str]:
-    forwarded_auth = get_request_auth_header()
-    headers = {}
-    if forwarded_auth:
-        headers = {**headers, **{"Authorization": forwarded_auth}}
-
-    api_key = (
-        os.environ.get("DOMINO_API_KEY")
-        or os.environ.get("DOMINO_USER_API_KEY")
-        or get_settings().effective_api_key
-    )
-    if api_key:
-        headers = {**headers, **{"X-Domino-Api-Key": api_key}}
-
-    return headers
 
 def _get_auth_lock() -> asyncio.Lock:
     global _auth_lock
@@ -79,32 +64,30 @@ async def _reset_domino_http_state() -> None:
 async def get_domino_auth_headers(force_refresh: bool = False) -> dict[str, str]:
     """Build Domino auth headers using the platform priority chain.
 
-    Per-request headers (forwarded Authorization, static API key) are always
-    resolved fresh via ``get_sync_auth_headers()`` so that concurrent requests
-    from different users receive the correct identity.
+    Priority (each level is exclusive — first match wins):
+    1. Forwarded Authorization header from the incoming request (per-user)
+    2. Ephemeral Bearer token from the Domino sidecar (localhost:8899)
+    3. Static API key (DOMINO_API_KEY / DOMINO_USER_API_KEY / token file)
 
-    The sidecar token (localhost:8899) is app-level and safe to cache; it is
-    used as a fallback when no per-request Authorization header is present.
+    Only one auth mechanism is returned. Sending both Authorization and
+    X-Domino-Api-Key simultaneously causes the sidecar proxy to error.
     """
-    # Per-request headers — never cached (user-specific)
-    headers = get_sync_auth_headers()
+    # 1. Forwarded per-request auth header (set by middleware)
+    forwarded_auth = get_request_auth_header()
+    if forwarded_auth:
+        return {"Authorization": forwarded_auth}
 
-    # If the request already carries an Authorization header we don't need
-    # the sidecar token; merge API key (if any) and return immediately.
-    if headers.get("Authorization"):
-        return headers
-
-    # No forwarded auth — try the cached sidecar token
+    # 2. Cached sidecar token (app-level, safe to cache)
     if not force_refresh:
         cached_headers = _get_cached_auth_headers()
         if cached_headers is not None:
-            return {**headers, **cached_headers}
+            return cached_headers
 
     async with _get_auth_lock():
         if not force_refresh:
             cached_headers = _get_cached_auth_headers()
             if cached_headers is not None:
-                return {**headers, **cached_headers}
+                return cached_headers
 
         try:
             async with httpx.AsyncClient() as client:
@@ -112,24 +95,42 @@ async def get_domino_auth_headers(force_refresh: bool = False) -> dict[str, str]
             if resp.status_code == 200 and resp.text.strip():
                 sidecar_headers = {"Authorization": f"Bearer {resp.text.strip()}"}
                 _cache_auth_headers(sidecar_headers)
-                return {**headers, **sidecar_headers}
+                return sidecar_headers
         except Exception:
             pass
 
+        # 3. Static API key as last resort
+        api_key = (
+            os.environ.get("DOMINO_API_KEY")
+            or os.environ.get("DOMINO_USER_API_KEY")
+            or get_settings().effective_api_key
+        )
+        if api_key:
+            return _cache_auth_headers({"X-Domino-Api-Key": api_key})
+
         _invalidate_auth_cache()
-        return headers
+        return {}
 
 
 def get_domino_public_api_client_sync() -> DominoApiClient:
-    """Create a Domino Public API client with auth, which uses the
-    Authorization header if present, fallsback to DOMINO_API_KEY/DOMINO_USER_API_KEY/token file
-    If none is available, none is set.
+    """Create a Domino Public API client with auth.
+
+    Uses the same exclusive-auth cascade as get_domino_auth_headers:
+    forwarded Authorization OR API key — never both, since the sidecar
+    proxy returns 500 when it receives both headers simultaneously.
     """
-    headers = get_sync_auth_headers()
+    forwarded_auth = get_request_auth_header()
+    if forwarded_auth:
+        headers = {"Authorization": forwarded_auth}
+    else:
+        api_key = (
+            os.environ.get("DOMINO_API_KEY")
+            or os.environ.get("DOMINO_USER_API_KEY")
+            or get_settings().effective_api_key
+        )
+        headers = {"X-Domino-Api-Key": api_key} if api_key else {}
 
-    # Base URL
     base_url = resolve_domino_api_host()
-
     return DominoApiClient(base_url=base_url).with_headers(headers)
 
 
