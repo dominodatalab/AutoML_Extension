@@ -33,8 +33,8 @@ def _fetch_user() -> Optional[User]:
     if not isinstance(resp, UserEnvelopeV1):
         raise Exception(str(resp))
 
-    user = resp.user
-    roles: list[str] = u.roles || []
+    u = resp.user
+    roles: list[str] = u.roles or []
     return User(id=u.id, user_name=u.user_name, roles=roles)
 
 
