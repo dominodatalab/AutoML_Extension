@@ -36,14 +36,32 @@ class TestDatasetMountRegex:
         assert m.group("dataset_name") == "my-dataset"
         assert m.group("relative") == "a/b/c/file.parquet"
 
+    def test_matches_mnt_data_path(self):
+        m = _DATASET_MOUNT_RE.match("/mnt/data/automl-extension/uploads/file.csv")
+        assert m is not None
+        assert m.group("dataset_name") == "automl-extension"
+        assert m.group("relative") == "uploads/file.csv"
+
+    def test_matches_mnt_imported_data_path(self):
+        m = _DATASET_MOUNT_RE.match("/mnt/imported/data/my-ds/subdir/file.csv")
+        assert m is not None
+        assert m.group("dataset_name") == "my-ds"
+        assert m.group("relative") == "subdir/file.csv"
+
     def test_no_match_for_other_paths(self):
-        assert _DATASET_MOUNT_RE.match("/mnt/data/automl-extension/uploads/file.csv") is None
+        assert _DATASET_MOUNT_RE.match("/tmp/data/automl-extension/uploads/file.csv") is None
+        assert _DATASET_MOUNT_RE.match("/home/user/data.csv") is None
 
     def test_no_match_without_relative(self):
-        assert _DATASET_MOUNT_RE.match("/domino/datasets/local/automl-extension/") is None
+        # Paths with only a prefix and no dataset_name/relative should not match
+        assert _DATASET_MOUNT_RE.match("/domino/datasets/local") is None
+        assert _DATASET_MOUNT_RE.match("/domino/datasets") is None
+        assert _DATASET_MOUNT_RE.match("/mnt/data") is None
         # Must have content after dataset_name/
         m = _DATASET_MOUNT_RE.match("/domino/datasets/local/automl-extension/f")
         assert m is not None
+        assert m.group("dataset_name") == "automl-extension"
+        assert m.group("relative") == "f"
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +120,7 @@ class TestEnsureLocalFileDownload:
 
         mock_info = MagicMock()
         mock_info.dataset_id = "ds-abc-123"
+        mock_info.name = "automl-extension"
 
         mock_resolver = MagicMock()
         mock_resolver.get_dataset_info = AsyncMock(return_value=mock_info)
@@ -128,6 +147,7 @@ class TestEnsureLocalFileDownload:
 
         mock_info = MagicMock()
         mock_info.dataset_id = "ds-abc-123"
+        mock_info.name = "automl-extension"
 
         mock_resolver = MagicMock()
         mock_resolver.get_dataset_info = AsyncMock(return_value=mock_info)
@@ -173,40 +193,37 @@ class TestEnsureLocalFileDownload:
         assert result == file_path
 
     @pytest.mark.asyncio
-    async def test_falls_back_to_resolve_or_create(self, tmp_path):
-        """When get_dataset_info returns None, tries _resolve_or_create."""
+    async def test_falls_back_to_dataset_name_lookup(self, tmp_path):
+        """When get_dataset_info returns None, falls back to name-based lookup."""
         file_path = "/domino/datasets/local/automl-extension/uploads/train.csv"
-
-        mock_info = MagicMock()
-        mock_info.dataset_id = "ds-new-123"
 
         mock_resolver = MagicMock()
         mock_resolver.get_dataset_info = AsyncMock(return_value=None)
-        mock_resolver._resolve_or_create = AsyncMock(return_value=mock_info)
         mock_resolver.download_file = AsyncMock(return_value=str(tmp_path / "cached.csv"))
 
         mock_settings = MagicMock()
         mock_settings.temp_path = str(tmp_path)
 
+        # Mock _resolve_dataset_id_by_name to return a dataset ID
         with patch("app.core.utils.remap_shared_path", return_value=file_path), \
              patch("app.services.storage_resolver.get_storage_resolver", return_value=mock_resolver), \
-             patch("app.config.get_settings", return_value=mock_settings):
+             patch("app.config.get_settings", return_value=mock_settings), \
+             patch("app.core.utils._resolve_dataset_id_by_name", new_callable=AsyncMock, return_value="ds-new-123"):
             result = await ensure_local_file(file_path, project_id="proj-1")
 
-        mock_resolver._resolve_or_create.assert_called_once_with("proj-1")
         mock_resolver.download_file.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_returns_original_when_resolve_fails(self):
-        """When both get_dataset_info and _resolve_or_create fail, returns original."""
+        """When both get_dataset_info and name lookup fail, returns original."""
         file_path = "/domino/datasets/local/automl-extension/uploads/train.csv"
 
         mock_resolver = MagicMock()
         mock_resolver.get_dataset_info = AsyncMock(return_value=None)
-        mock_resolver._resolve_or_create = AsyncMock(side_effect=RuntimeError("fail"))
 
         with patch("app.core.utils.remap_shared_path", return_value=file_path), \
-             patch("app.services.storage_resolver.get_storage_resolver", return_value=mock_resolver):
+             patch("app.services.storage_resolver.get_storage_resolver", return_value=mock_resolver), \
+             patch("app.core.utils._resolve_dataset_id_by_name", new_callable=AsyncMock, return_value=None):
             result = await ensure_local_file(file_path, project_id="proj-1")
 
         assert result == file_path

@@ -38,6 +38,7 @@ class TestTrainingJobLaunchCommand:
         monkeypatch.setenv("DOMINO_PROJECT_OWNER", "testowner")
         monkeypatch.setenv("DOMINO_PROJECT_NAME", "testproject")
         monkeypatch.setenv("DOMINO_API_HOST", "https://domino.example.com")
+        monkeypatch.setenv("DOMINO_API_KEY", "fake-test-key")
         monkeypatch.setenv("AUTOML_SERVICE_DIR", "automl-service")
 
         import app.config as config_module
@@ -48,7 +49,7 @@ class TestTrainingJobLaunchCommand:
         async def mock_domino_request(method, path, **kwargs):
             resp = MagicMock()
             resp.status_code = 200
-            if method == "POST" and "jobs/start" in path:
+            if method == "POST" and ("jobs/start" in path or path == "/api/jobs/v1/jobs"):
                 captured_payloads.append(kwargs.get("json", {}))
                 resp.json.return_value = {"id": "domino-job-abc"}
             elif "hardwareTiers" in path:
@@ -95,7 +96,7 @@ class TestTrainingJobLaunchCommand:
 
         # Verify the command sent to Domino
         assert len(captured_payloads) == 1
-        command = captured_payloads[0]["commandToRun"]
+        command = captured_payloads[0].get("commandToRun") or captured_payloads[0]["runCommand"]
         assert "--database-url" in command
         assert "--job-id" in command
         assert "--job-config" in command
@@ -111,6 +112,7 @@ class TestTrainingJobLaunchCommand:
         monkeypatch.setenv("DOMINO_PROJECT_OWNER", "testowner")
         monkeypatch.setenv("DOMINO_PROJECT_NAME", "testproject")
         monkeypatch.setenv("DOMINO_API_HOST", "https://domino.example.com")
+        monkeypatch.setenv("DOMINO_API_KEY", "fake-test-key")
         monkeypatch.setenv("AUTOML_SERVICE_DIR", "automl-service")
 
         import app.config as config_module
@@ -121,7 +123,7 @@ class TestTrainingJobLaunchCommand:
         async def mock_domino_request(method, path, **kwargs):
             resp = MagicMock()
             resp.status_code = 200
-            if method == "POST" and "jobs/start" in path:
+            if method == "POST" and ("jobs/start" in path or path == "/api/jobs/v1/jobs"):
                 captured_payloads.append(kwargs.get("json", {}))
                 resp.json.return_value = {"id": "domino-job-def"}
             elif "hardwareTiers" in path:
@@ -159,7 +161,7 @@ class TestTrainingJobLaunchCommand:
         )
         assert resp.status_code == 200, resp.text
 
-        command = captured_payloads[0]["commandToRun"]
+        command = captured_payloads[0].get("commandToRun") or captured_payloads[0]["runCommand"]
 
         # Extract the --job-config value from the shell-quoted command.
         # The command format: python ... --job-config '<json>' ...
@@ -193,6 +195,7 @@ class TestAsyncEdaLaunchCommand:
         monkeypatch.setenv("DOMINO_PROJECT_OWNER", "testowner")
         monkeypatch.setenv("DOMINO_PROJECT_NAME", "testproject")
         monkeypatch.setenv("DOMINO_API_HOST", "https://domino.example.com")
+        monkeypatch.setenv("DOMINO_API_KEY", "fake-test-key")
         monkeypatch.setenv("AUTOML_SERVICE_DIR", "automl-service")
 
         import app.config as config_module
@@ -203,7 +206,7 @@ class TestAsyncEdaLaunchCommand:
         async def mock_domino_request(method, path, **kwargs):
             resp = MagicMock()
             resp.status_code = 200
-            if method == "POST" and "jobs/start" in path:
+            if method == "POST" and ("jobs/start" in path or path == "/api/jobs/v1/jobs"):
                 captured_payloads.append(kwargs.get("json", {}))
                 resp.json.return_value = {"id": "domino-eda-abc"}
             elif "hardwareTiers" in path:
@@ -245,7 +248,7 @@ class TestAsyncEdaLaunchCommand:
         assert body["domino_job_id"] == "domino-eda-abc"
 
         assert len(captured_payloads) == 1
-        command = captured_payloads[0]["commandToRun"]
+        command = captured_payloads[0].get("commandToRun") or captured_payloads[0]["runCommand"]
         assert "--database-url" in command
         assert "--request-id" in command
         assert "--file-path" in command
