@@ -323,10 +323,12 @@ Derived defaults:
 See the individual service directories automl-service, automl-ui READMEs for installation instructions.
 
 ## development
-You can develop this application locally by setting some environment variables and running the dev servers.
+You can develop this application locally by setting some environment variables, and running scripts and the dev servers.
 
 ```sh
 source .env-dev # see .env-dev-example
+# generate api client
+cd automl-service && ./scripts/download_public_api_client.sh &&  ./scripts/generate_public_api_client
 
 # run dev servers, option A
 FRONTEND_PORT=3000 BACKEND_PORT=8000 ./app.sh --frontend
