@@ -396,10 +396,12 @@ class TestResolveJobListFilters:
         _, model_type, *_ = resolve_job_list_filters(lr, None)
         assert model_type == ModelType.TIMESERIES
 
-    def test_owner_from_list_request(self):
+    def test_owner_always_from_header_ignores_body(self):
+        """Client-supplied owner is ignored — always uses domino-username header."""
         lr = _make_list_request(owner="alice")
-        _, _, owner, *_ = resolve_job_list_filters(lr, None)
-        assert owner == "alice"
+        request = _fake_request(headers={"domino-username": "bob"})
+        _, _, owner, *_ = resolve_job_list_filters(lr, request)
+        assert owner == "bob"
 
     def test_owner_from_http_request_header(self):
         lr = _make_list_request()
@@ -407,8 +409,9 @@ class TestResolveJobListFilters:
         _, _, owner, *_ = resolve_job_list_filters(lr, request)
         assert owner == "bob"
 
-    def test_owner_explicit_empty_string_gives_none(self):
-        lr = _make_list_request(owner="")
+    def test_owner_none_without_request(self):
+        """Without HTTP request, owner filter is None (local dev)."""
+        lr = _make_list_request(owner="alice")
         _, _, owner, *_ = resolve_job_list_filters(lr, None)
         assert owner is None
 

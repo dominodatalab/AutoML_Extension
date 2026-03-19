@@ -204,9 +204,9 @@ async def register_model(request: RegisterModelRequest, db: AsyncSession = Depen
 
 @router.get("/models", response_model=List[LocalModelInfo])
 @handle_errors("Error listing models")
-async def list_registered_models(db: AsyncSession = Depends(get_db), *, project_id: Optional[str] = None):
+async def list_registered_models(db: AsyncSession = Depends(get_db), *, project_id: Optional[str] = None, owner: Optional[str] = None):
     """List all registered models from local database."""
-    models = await crud.get_registered_models(db, project_id=project_id)
+    models = await crud.get_registered_models(db, project_id=project_id, owner=owner)
     result = []
     for m in models:
         # Get job info to add model_path and model_type

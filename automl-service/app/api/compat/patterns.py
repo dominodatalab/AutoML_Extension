@@ -38,14 +38,14 @@ def _make_endpoint(mod, fn, cls=None, keys=None, use_db=False, db_first=False, m
         elif k is not None:
             # Pattern 3/5: key-extraction
             if needs_request:
-                # Function takes (*args, http_request: Request) — e.g. quick_profile
+                # Function takes (*args, http_request/request: Request)
                 async def endpoint(request: Request, body: dict = Body(default={})):
                     func = lazy_import(m, f)
                     args = [body.get(*key) for key in k]
                     if use_db:
                         async with get_db_session() as db:
                             if db_first:
-                                return await func(db, *args, request)
+                                return await func(db, *args, request=request)
                             return await func(*args, request, db)
                     return await func(*args, request)
             else:
@@ -64,8 +64,9 @@ def _make_endpoint(mod, fn, cls=None, keys=None, use_db=False, db_first=False, m
                 async def endpoint(request: Request):
                     func = lazy_import(m, f)
                     project_id = request.headers.get("X-Project-Id")
+                    owner = request.headers.get("domino-username")
                     async with get_db_session() as db:
-                        return await func(db, project_id=project_id)
+                        return await func(db, project_id=project_id, owner=owner)
             else:
                 async def endpoint():
                     func = lazy_import(m, f)
@@ -108,7 +109,7 @@ def register_pattern_routes(app: FastAPI) -> None:
     post_request = [
         ("/svcpredict", "app.api.routes.predictions", "predict", "PredictRequest"),
         ("/svcpredictbatch", "app.api.routes.predictions", "batch_predict", "BatchPredictRequest"),
-        ("/svcprofileasyncstatus", "app.api.routes.profiling", "get_profile_async_status", "AsyncProfileStatusRequest"),
+        # NOTE: svcprofileasyncstatus moved to post_request_with_http for owner enforcement.
         ("/svctransitionstage", "app.api.routes.registry", "transition_model_stage", "TransitionStageRequest"),
         ("/svcupdatedescription", "app.api.routes.registry", "update_model_description", "UpdateDescriptionRequest"),
         ("/svcmodelcard", "app.api.routes.registry", "generate_model_card", "ModelCardRequest"),
@@ -128,6 +129,7 @@ def register_pattern_routes(app: FastAPI) -> None:
         ("/svcsuggesttarget", "app.api.routes.profiling", "suggest_target_column", "ProfileRequest"),
         ("/svcprofiletimeseries", "app.api.routes.profiling", "profile_timeseries", "TimeSeriesProfileRequest"),
         ("/svcprofileasyncstart", "app.api.routes.profiling", "start_profile_async", "AsyncProfileStartRequest"),
+        ("/svcprofileasyncstatus", "app.api.routes.profiling", "get_profile_async_status", "AsyncProfileStatusRequest"),
     ]
 
     for path, mod, fn, cls in post_request_with_http:
@@ -173,7 +175,7 @@ def register_pattern_routes(app: FastAPI) -> None:
         ("/svcexportdeploymentzip", "app.api.routes.export", "export_deployment_zip", "DeploymentZipRequest", False),
         ("/svclearningcurves", "app.api.routes.export", "get_learning_curves", "LearningCurvesRequest", False),
         ("/svcexportnotebook", "app.api.routes.export", "export_notebook", "ExportNotebookRequest", False),
-        ("/svcjobcleanup", "app.api.compat.adapters.jobs", "bulk_cleanup", "CleanupRequest", True),
+        # NOTE: /svcjobcleanup moved to custom_jobs.py for owner enforcement.
         ("/svcregistermodel", "app.api.routes.registry", "register_model", "RegisterModelRequest", False),
     ]
 
@@ -181,23 +183,19 @@ def register_pattern_routes(app: FastAPI) -> None:
         app.post(path)(_make_endpoint(mod, fn, cls=cls, use_db=True, project_scoped=scoped))
 
     # Pattern 5: POST body.get(keys) + DB -> func(db, *args) [service direct]
+    # Owner-enforced routes pass needs_request=True so the Request is forwarded
+    # to the service layer for domino-username ownership checks.
     post_keys_db_first = [
-        ("/svcjobget", "app.services.job_service", "get_job_response", [("job_id",)]),
-        ("/svcjobcancel", "app.services.job_service", "cancel_job", [("job_id",)]),
-        ("/svcjobdelete", "app.services.job_service", "delete_job", [("job_id",)]),
-        ("/svcjobstatus", "app.services.job_service", "get_job_status_response", [("job_id",)]),
-        ("/svcjobmetrics", "app.services.job_service", "get_job_metrics_response", [("job_id",)]),
-        ("/svcjobprogress", "app.services.job_service", "get_job_progress_response", [("job_id",)]),
-        ("/svcjobbulkdelete", "app.services.job_service", "bulk_delete_jobs", [("job_ids",)]),
+        ("/svcjobget", "app.services.job_service", "get_job_response", [("job_id",)], True),
+        ("/svcjobcancel", "app.services.job_service", "cancel_job", [("job_id",)], True),
+        ("/svcjobdelete", "app.services.job_service", "delete_job", [("job_id",)], True),
+        ("/svcjobstatus", "app.services.job_service", "get_job_status_response", [("job_id",)], True),
+        ("/svcjobmetrics", "app.services.job_service", "get_job_metrics_response", [("job_id",)], True),
+        ("/svcjobprogress", "app.services.job_service", "get_job_progress_response", [("job_id",)], True),
+        ("/svcjobbulkdelete", "app.services.job_service", "bulk_delete_jobs", [("job_ids",)], False),
     ]
 
-    for path, mod, fn, keys in post_keys_db_first:
-        app.post(path)(_make_endpoint(mod, fn, keys=keys, use_db=True, db_first=True))
+    for path, mod, fn, keys, req in post_keys_db_first:
+        app.post(path)(_make_endpoint(mod, fn, keys=keys, use_db=True, db_first=True, needs_request=req))
 
-    # Pattern 5b: POST body.get(keys) + DB -> func(*args, db) [adapter with logic]
-    post_keys_db = [
-        ("/svcjoblogs", "app.api.compat.adapters.jobs", "get_job_logs", [("job_id",), ("limit", 100)]),
-    ]
-
-    for path, mod, fn, keys in post_keys_db:
-        app.post(path)(_make_endpoint(mod, fn, keys=keys, use_db=True))
+    # NOTE: /svcjoblogs moved to custom_jobs.py for owner enforcement.

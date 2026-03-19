@@ -21,10 +21,14 @@ class EDAJobStore:
         request_id: str,
         mode: str,
         request_payload: dict[str, Any],
+        owner: Optional[str] = None,
+        project_id: Optional[str] = None,
     ) -> dict[str, Any]:
         from app.db import crud
 
-        eda = await crud.create_eda_request(db, request_id, mode, request_payload)
+        eda = await crud.create_eda_request(
+            db, request_id, mode, request_payload, owner=owner, project_id=project_id,
+        )
         return self._to_dict(eda)
 
     async def get_request(self, db, request_id: str) -> Optional[dict[str, Any]]:
@@ -86,6 +90,8 @@ class EDAJobStore:
             "request_id": eda.id,
             "status": eda.status,
             "mode": eda.mode,
+            "owner": getattr(eda, "owner", None),
+            "project_id": getattr(eda, "project_id", None),
             "domino_job_id": eda.domino_job_id,
             "domino_job_status": eda.domino_job_status,
             "domino_job_url": getattr(eda, "domino_job_url", None),

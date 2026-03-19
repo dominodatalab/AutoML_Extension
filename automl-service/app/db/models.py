@@ -127,6 +127,8 @@ class EDAResult(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)  # request_id UUID
     status: Mapped[str] = mapped_column(String(20), default="pending")  # pending, running, completed, failed
     mode: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # tabular, timeseries
+    owner: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    project_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     domino_job_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     domino_job_status: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     domino_job_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)

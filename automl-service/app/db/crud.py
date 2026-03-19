@@ -413,13 +413,16 @@ async def get_registered_model(
 async def get_registered_models(
     db: AsyncSession,
     project_id: Optional[str] = None,
+    owner: Optional[str] = None,
 ) -> Sequence[RegisteredModel]:
-    """Get all registered models, optionally filtered by project via job FK."""
+    """Get all registered models, optionally filtered by project/owner via job FK."""
     query = select(RegisteredModel)
-    if project_id:
-        query = query.join(Job, RegisteredModel.job_id == Job.id).where(
-            Job.project_id == project_id
-        )
+    if project_id or owner:
+        query = query.join(Job, RegisteredModel.job_id == Job.id)
+        if project_id:
+            query = query.where(Job.project_id == project_id)
+        if owner:
+            query = query.where(Job.owner == owner)
     query = query.order_by(desc(RegisteredModel.created_at))
     result = await db.execute(query)
     return result.scalars().all()
@@ -454,6 +457,7 @@ async def get_jobs_for_cleanup(
     statuses: list[JobStatus],
     older_than_days: Optional[int] = None,
     project_id: Optional[str] = None,
+    owner: Optional[str] = None,
 ) -> Sequence[Job]:
     """Get jobs matching statuses and optional age filter, ordered by created_at."""
     query = select(Job).where(Job.status.in_(statuses))
@@ -462,6 +466,8 @@ async def get_jobs_for_cleanup(
         query = query.where(Job.created_at < cutoff)
     if project_id:
         query = query.where(Job.project_id == project_id)
+    if owner:
+        query = query.where(Job.owner == owner)
     return (await db.execute(query.order_by(Job.created_at))).scalars().all()
 
 
@@ -477,7 +483,12 @@ async def count_job_logs(db: AsyncSession, job_id: str) -> int:
 
 
 async def create_eda_request(
-    db: AsyncSession, request_id: str, mode: str, request_payload: dict
+    db: AsyncSession,
+    request_id: str,
+    mode: str,
+    request_payload: dict,
+    owner: Optional[str] = None,
+    project_id: Optional[str] = None,
 ) -> EDAResult:
     """Create a new EDA request record."""
     eda = EDAResult(
@@ -485,6 +496,8 @@ async def create_eda_request(
         status="pending",
         mode=mode,
         request_payload=json.dumps(request_payload),
+        owner=owner,
+        project_id=project_id,
     )
     db.add(eda)
     await db.commit()
@@ -493,10 +506,13 @@ async def create_eda_request(
 
 
 async def get_eda_request(
-    db: AsyncSession, request_id: str
+    db: AsyncSession, request_id: str, owner: Optional[str] = None,
 ) -> Optional[EDAResult]:
-    """Get an EDA request by ID."""
-    result = await db.execute(select(EDAResult).where(EDAResult.id == request_id))
+    """Get an EDA request by ID, optionally scoped to owner."""
+    query = select(EDAResult).where(EDAResult.id == request_id)
+    if owner:
+        query = query.where(EDAResult.owner == owner)
+    result = await db.execute(query)
     return result.scalar_one_or_none()
 
 

@@ -454,16 +454,21 @@ async def start_profile_async(request: AsyncProfileStartRequest, http_request: R
     settings = get_settings()
     request_id = str(uuid4())
 
+    # Resolve project and owner context
+    project_id = http_request.headers.get("X-Project-Id") if http_request else None
+    owner = http_request.headers.get("domino-username") if http_request else None
+
     async with get_db_session() as db:
         await store.create_request(
             db,
             request_id=request_id,
             mode=request.mode,
             request_payload=request.model_dump(exclude_none=True),
+            owner=owner,
+            project_id=project_id,
         )
 
     # Resolve project context for dataset pre-creation and job launch
-    project_id = http_request.headers.get("X-Project-Id") if http_request else None
 
     # Pre-create the automl-extension dataset so the EDA Domino Job
     # boots with the mount already available for writing results.
@@ -523,14 +528,20 @@ async def start_profile_async(request: AsyncProfileStartRequest, http_request: R
     )
 
 
-async def _build_async_status_response(request_id: str) -> AsyncProfileStatusResponse:
-    """Load async EDA status from database."""
+async def _build_async_status_response(request_id: str, owner: Optional[str] = None) -> AsyncProfileStatusResponse:
+    """Load async EDA status from database.
+
+    When *owner* is provided, only returns results owned by that user.
+    """
     store = get_eda_job_store()
     launcher = get_domino_job_launcher()
 
     async with get_db_session() as db:
         metadata = await store.get_request(db, request_id)
         if metadata is None:
+            raise HTTPException(status_code=404, detail=f"Async profile request not found: {request_id}")
+        # Enforce owner-based access (use 404 to avoid leaking existence)
+        if owner and owner != "anonymous" and metadata.get("owner") and metadata["owner"] != owner:
             raise HTTPException(status_code=404, detail=f"Async profile request not found: {request_id}")
 
         result_payload = await store.get_result(db, request_id)
@@ -604,13 +615,15 @@ async def _build_async_status_response(request_id: str) -> AsyncProfileStatusRes
 
 @router.post("/profile/async/status", response_model=AsyncProfileStatusResponse)
 @handle_errors("Async profiling status error")
-async def get_profile_async_status(request: AsyncProfileStatusRequest):
+async def get_profile_async_status(request: AsyncProfileStatusRequest, http_request: Request = None):
     """Poll async EDA job status/result."""
-    return await _build_async_status_response(request.request_id)
+    owner = http_request.headers.get("domino-username") if http_request else None
+    return await _build_async_status_response(request.request_id, owner=owner)
 
 
 @router.get("/profile/async/{request_id}", response_model=AsyncProfileStatusResponse)
 @handle_errors("Async profiling status error")
-async def get_profile_async_status_get(request_id: str):
+async def get_profile_async_status_get(request_id: str, request: Request = None):
     """GET variant for async EDA status polling."""
-    return await _build_async_status_response(request_id)
+    owner = request.headers.get("domino-username") if request else None
+    return await _build_async_status_response(request_id, owner=owner)

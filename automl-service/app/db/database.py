@@ -66,6 +66,9 @@ async def run_migrations():
         ("jobs", "auto_register", "BOOLEAN DEFAULT 0"),
         ("jobs", "register_name", "VARCHAR(255)"),
         ("jobs", "diagnostics_data", "JSON"),
+        # EDA owner/project scoping for RBAC
+        ("eda_results", "owner", "VARCHAR(255)"),
+        ("eda_results", "project_id", "VARCHAR(255)"),
     ]
 
     async with engine.begin() as conn:
