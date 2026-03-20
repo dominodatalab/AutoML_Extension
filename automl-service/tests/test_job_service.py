@@ -607,8 +607,26 @@ class TestExtractMetricsLeaderboard:
 class TestGetRequestOwner:
     """Tests for get_request_owner."""
 
+    def test_header_preferred_over_viewing_user(self, monkeypatch):
+        # domino-username header takes priority even when viewing user exists
+        from app.core.context.user import User
+        monkeypatch.setattr(
+            "app.services.job_service.get_viewing_user",
+            lambda: User(id="u1", user_name="app-owner", roles=[]),
+        )
+        req = _fake_request(headers={"domino-username": "charlie"})
+        assert get_request_owner(req) == "charlie"
+
+    def test_falls_back_to_viewing_user_when_no_header(self, monkeypatch):
+        from app.core.context.user import User
+        monkeypatch.setattr(
+            "app.services.job_service.get_viewing_user",
+            lambda: User(id="u1", user_name="app-owner", roles=[]),
+        )
+        req = _fake_request(headers={})
+        assert get_request_owner(req) == "app-owner"
+
     def test_from_header_when_no_viewing_user(self, monkeypatch):
-        # Without a viewing user available, header should be used
         monkeypatch.setattr(
             "app.services.job_service.get_viewing_user", lambda: None
         )

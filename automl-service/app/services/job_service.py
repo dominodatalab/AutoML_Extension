@@ -115,17 +115,22 @@ def get_request_owner(request: Optional[Request]) -> str:
     """Determine the requesting username.
 
     Priority:
-    - app.core.context.user.get_viewing_user().user_name
-    - 'domino-username' request header (fallback)
+    - 'domino-username' request header (trusted, injected by Domino proxy)
+    - app.core.context.user.get_viewing_user().user_name (sidecar fallback)
     - 'anonymous' when unavailable
+
+    The domino-username header is preferred because in the App context the
+    sidecar always returns the App owner's identity, not the actual viewing
+    user's.  The header is injected by the Domino proxy and correctly
+    identifies the browser user.
     """
-    user = get_viewing_user()
-    if user and user.user_name:
-        return user.user_name
     if request is not None:
         header_user = request.headers.get("domino-username")
         if header_user:
             return header_user
+    user = get_viewing_user()
+    if user and user.user_name:
+        return user.user_name
     return "anonymous"
 
 
