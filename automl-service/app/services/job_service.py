@@ -282,17 +282,28 @@ def _log_background_sync_result(task: asyncio.Task, label: str) -> None:
         logger.exception("Background sync task failed: %s", label)
 
 
-async def _run_overview_sync_background() -> None:
-    """Execute overview sync in a detached DB session."""
+async def _run_overview_sync_background(auth_token: Optional[str] = None) -> None:
+    """Execute overview sync in a detached DB session.
+
+    Restores the caller's auth token so Domino API calls run as the
+    requesting user, not the App owner.
+    """
+    from app.core.context.auth import set_request_auth_header
     from app.dependencies import get_db_session
 
-    async with get_db_session() as db:
-        await _sync_active_domino_jobs_for_overview(db)
+    set_request_auth_header(auth_token)
+    try:
+        async with get_db_session() as db:
+            await _sync_active_domino_jobs_for_overview(db)
+    finally:
+        set_request_auth_header(None)
 
 
 async def _schedule_overview_domino_sync() -> None:
     """Start a throttled background overview sync if one is not already running."""
     global _overview_sync_task, _overview_sync_started_at
+
+    from app.core.context.auth import get_request_auth_header
 
     async with _background_sync_lock:
         now = monotonic()
@@ -301,8 +312,13 @@ async def _schedule_overview_domino_sync() -> None:
         if now - _overview_sync_started_at < _OVERVIEW_SYNC_MIN_INTERVAL_SECONDS:
             return
 
+        # Capture the requesting user's token before detaching the task.
+        auth_token = get_request_auth_header()
+
         _overview_sync_started_at = now
-        _overview_sync_task = asyncio.create_task(_run_overview_sync_background())
+        _overview_sync_task = asyncio.create_task(
+            _run_overview_sync_background(auth_token=auth_token)
+        )
         _overview_sync_task.add_done_callback(
             lambda task: _log_background_sync_result(task, "overview")
         )
@@ -311,19 +327,29 @@ async def _schedule_overview_domino_sync() -> None:
 async def _run_job_sync_background(
     job_id: str,
     sync_terminal_metadata: bool,
+    auth_token: Optional[str] = None,
 ) -> None:
-    """Execute a detached Domino sync for a single job."""
+    """Execute a detached Domino sync for a single job.
+
+    Restores the caller's auth token so Domino API calls run as the
+    requesting user, not the App owner.
+    """
+    from app.core.context.auth import set_request_auth_header
     from app.dependencies import get_db_session
 
-    async with get_db_session() as db:
-        job = await crud.get_job(db, job_id)
-        if not job:
-            return
-        await _sync_domino_job_state(
-            db,
-            job,
-            sync_terminal_metadata=sync_terminal_metadata,
-        )
+    set_request_auth_header(auth_token)
+    try:
+        async with get_db_session() as db:
+            job = await crud.get_job(db, job_id)
+            if not job:
+                return
+            await _sync_domino_job_state(
+                db,
+                job,
+                sync_terminal_metadata=sync_terminal_metadata,
+            )
+    finally:
+        set_request_auth_header(None)
 
 
 async def _schedule_job_domino_sync(
@@ -337,6 +363,8 @@ async def _schedule_job_domino_sync(
     if not job.domino_job_id:
         return
 
+    from app.core.context.auth import get_request_auth_header
+
     async with _background_sync_lock:
         now = monotonic()
         active_task = _job_sync_tasks.get(job.id)
@@ -345,11 +373,15 @@ async def _schedule_job_domino_sync(
         if now - _job_sync_started_at.get(job.id, 0.0) < _JOB_SYNC_MIN_INTERVAL_SECONDS:
             return
 
+        # Capture the requesting user's token before detaching the task.
+        auth_token = get_request_auth_header()
+
         _job_sync_started_at[job.id] = now
         task = asyncio.create_task(
             _run_job_sync_background(
                 job.id,
                 sync_terminal_metadata=sync_terminal_metadata,
+                auth_token=auth_token,
             )
         )
         _job_sync_tasks[job.id] = task
