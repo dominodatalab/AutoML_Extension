@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
 from app.config import get_settings
+from app.core.authorization import current_user_can_modify_storage
 from app.dependencies import get_db
 
 router = APIRouter()
@@ -65,6 +66,7 @@ async def get_capabilities():
         "mlflow_tracking": not standalone,
         "model_registry": not standalone,
         "model_deployment": not standalone,
+        "storage_cleanup": current_user_can_modify_storage(),
     }
 
 

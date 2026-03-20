@@ -8,6 +8,8 @@ Covers:
 
 import pytest
 
+from app.core.context import user as user_ctx
+
 pytestmark = pytest.mark.domino
 
 
@@ -116,3 +118,33 @@ async def test_user_endpoint_contains_project_fields(app_client):
     assert "project_name" in body
     assert "project_owner" in body
     assert "is_domino_environment" in body
+
+
+def _set_viewing_user_roles(monkeypatch, roles: list[str]):
+    """Override the viewing user returned by the user context."""
+    def fake_get_viewing_user():
+        return user_ctx.User(id="test-id", user_name="test-user", roles=roles)
+
+    monkeypatch.setattr(user_ctx, "get_viewing_user", fake_get_viewing_user, raising=True)
+
+
+@pytest.mark.asyncio
+async def test_capabilities_include_storage_cleanup_for_sysadmin(app_client):
+    """Storage cleanup capability should follow the SysAdmin storage policy."""
+    response = await app_client.get("/svc/v1/health/capabilities")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["storage_cleanup"] is True
+
+
+@pytest.mark.asyncio
+async def test_capabilities_disable_storage_cleanup_for_non_sysadmin(app_client, monkeypatch):
+    """Roles without storage-modify permission should not receive capability."""
+    _set_viewing_user_roles(monkeypatch, ["Practitioner"])
+
+    response = await app_client.get("/svc/v1/health/capabilities")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["storage_cleanup"] is False

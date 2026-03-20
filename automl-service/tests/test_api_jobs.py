@@ -17,6 +17,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.core.context import user as user_ctx
+
 pytestmark = pytest.mark.domino
 
 
@@ -47,6 +49,14 @@ def _mock_job_queue():
     })
     mock_queue.get_total_tracked = MagicMock(return_value=0)
     return mock_queue
+
+
+def _set_viewing_user_roles(monkeypatch, roles: list[str]):
+    """Override the viewing user returned by the user context."""
+    def fake_get_viewing_user():
+        return user_ctx.User(id="test-id", user_name="test-user", roles=roles)
+
+    monkeypatch.setattr(user_ctx, "get_viewing_user", fake_get_viewing_user, raising=True)
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +128,57 @@ async def test_create_timeseries_job_missing_time_column(app_client):
         response = await app_client.post("/svc/v1/jobs", json=payload)
 
     assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        ("get", "/svc/v1/jobs/cleanup/preview", None),
+        ("post", "/svc/v1/jobs/cleanup", {"statuses": ["failed"], "include_orphans": False}),
+        ("post", "/svc/v1/jobs/cleanup/orphans", None),
+        ("post", "/svcjobcleanuppreview", {}),
+        ("post", "/svcjobcleanup", {"statuses": ["failed"], "include_orphans": False}),
+        ("post", "/svcjoborphans", {}),
+        ("post", "/svcjobcleanuporphans", {}),
+    ],
+)
+async def test_cleanup_routes_allow_sysadmin(app_client, monkeypatch, method, path, payload):
+    """Cleanup endpoints succeed for SysAdmin users."""
+    _set_viewing_user_roles(monkeypatch, ["SysAdmin"])
+
+    if method == "get":
+        response = await app_client.get(path)
+    else:
+        response = await app_client.post(path, json=payload)
+
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        ("get", "/svc/v1/jobs/cleanup/preview", None),
+        ("post", "/svc/v1/jobs/cleanup", {"statuses": ["failed"], "include_orphans": False}),
+        ("post", "/svc/v1/jobs/cleanup/orphans", None),
+        ("post", "/svcjobcleanuppreview", {}),
+        ("post", "/svcjobcleanup", {"statuses": ["failed"], "include_orphans": False}),
+        ("post", "/svcjoborphans", {}),
+        ("post", "/svcjobcleanuporphans", {}),
+    ],
+)
+async def test_cleanup_routes_reject_non_sysadmin(app_client, monkeypatch, method, path, payload):
+    """Cleanup endpoints reject non-SysAdmin users."""
+    _set_viewing_user_roles(monkeypatch, ["Practitioner"])
+
+    if method == "get":
+        response = await app_client.get(path)
+    else:
+        response = await app_client.post(path, json=payload)
+
+    assert response.status_code == 403
+    assert "modify storage" in response.json()["detail"].lower()
 
 
 # ---------------------------------------------------------------------------

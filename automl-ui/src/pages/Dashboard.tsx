@@ -9,10 +9,12 @@ import { JobTableView } from '../components/dashboard/JobTableView'
 import { JobCardView } from '../components/dashboard/JobCardView'
 import { BulkActionBar } from '../components/dashboard/BulkActionBar'
 import { StorageCleanupDialog } from '../components/dashboard/StorageCleanupDialog'
+import { useCapabilities } from '../hooks/useCapabilities'
 
 type ViewMode = 'table' | 'card'
 
 function Dashboard() {
+  const { storageCleanup } = useCapabilities()
   const [viewMode, setViewMode] = useState<ViewMode>('table')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('')
@@ -49,6 +51,12 @@ function Dashboard() {
   useEffect(() => {
     setSelectedIds(new Set())
   }, [search, statusFilter, typeFilter, viewMode])
+
+  useEffect(() => {
+    if (!storageCleanup && storageCleanupOpen) {
+      setStorageCleanupOpen(false)
+    }
+  }, [storageCleanup, storageCleanupOpen])
 
   // Prune selection to only include visible job IDs
   useEffect(() => {
@@ -123,6 +131,7 @@ function Dashboard() {
         onTypeFilterChange={setTypeFilter}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
+        showStorageCleanup={storageCleanup}
         onStorageCleanupClick={() => setStorageCleanupOpen(true)}
       />
 
@@ -200,10 +209,12 @@ function Dashboard() {
         </div>
       )}
 
-      <StorageCleanupDialog
-        isOpen={storageCleanupOpen}
-        onClose={() => setStorageCleanupOpen(false)}
-      />
+      {storageCleanup && (
+        <StorageCleanupDialog
+          isOpen={storageCleanupOpen}
+          onClose={() => setStorageCleanupOpen(false)}
+        />
+      )}
     </div>
   )
 }

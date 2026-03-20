@@ -27,6 +27,9 @@ python-dotenv>=1.0.0
 # HTTP client
 httpx>=0.26.0
 
+# Authorization
+casbin>=1.36.0
+
 # Statistical analysis
 statsmodels>=0.14.0
 
