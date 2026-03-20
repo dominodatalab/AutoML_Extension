@@ -49,6 +49,23 @@ class JobQueueManager:
                 )
                 logger.info(f"Recovering interrupted job: {job.id} ({job.name})")
 
+            # Fail Domino jobs stuck in RUNNING (external process died)
+            stuck_domino_jobs = await crud.get_jobs_by_statuses(
+                db,
+                [JobStatus.RUNNING],
+                execution_target="domino_job",
+            )
+            for job in stuck_domino_jobs:
+                if job.started_at and (utc_now() - job.started_at).total_seconds() > 3600:
+                    await crud.update_job_status(
+                        db, job.id, JobStatus.FAILED,
+                        error_message="Domino job appears stuck — marked failed on restart",
+                        completed_at=utc_now(),
+                    )
+                    logger.warning(
+                        f"Marked stuck Domino job as FAILED: {job.id} ({job.name})"
+                    )
+
             # Re-enqueue all PENDING jobs in FIFO order
             pending_jobs = await crud.get_jobs_by_statuses(
                 db,

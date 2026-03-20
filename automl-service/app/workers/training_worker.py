@@ -4,12 +4,13 @@ import asyncio
 import json
 import logging
 import os
+import types
 from typing import Any, Dict, Optional
 
 from app.config import get_settings
 from app.db.database import async_session_maker
 from app.db import crud
-from app.db.models import JobStatus
+from app.db.models import JobStatus, ModelType, ProblemType
 from app.core.autogluon_runner import AutoGluonRunner
 from app.api.schemas.job import AdvancedAutoGluonConfig as AdvancedConfig
 from app.core.experiment_tracker import ExperimentTracker
@@ -17,9 +18,24 @@ from app.core.dataset_manager import DominoDatasetManager
 from app.core.domino_registry import get_domino_registry
 from app.core.model_diagnostics import get_model_diagnostics
 from app.core.model_loader import load_predictor, load_dataframe
-from app.core.utils import remap_shared_path, utc_now
+from app.core.utils import (
+    ensure_local_file,
+    extract_dataset_relative_path,
+    remap_shared_path,
+    utc_now,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _deserialize_job_config(config_dict: dict) -> types.SimpleNamespace:
+    """Restore a serialized job config dict into a namespace with enum fields."""
+    obj = types.SimpleNamespace(**config_dict)
+    if isinstance(obj.model_type, str):
+        obj.model_type = ModelType(obj.model_type)
+    if obj.problem_type is not None and isinstance(obj.problem_type, str):
+        obj.problem_type = ProblemType(obj.problem_type)
+    return obj
 
 
 async def _check_cancelled(job_id: str, db_session: Optional[Any] = None) -> None:
@@ -47,6 +63,73 @@ def parse_advanced_config(config_dict: Dict[str, Any]) -> AdvancedConfig:
         return AdvancedConfig()
 
     return AdvancedConfig.model_validate(config_dict)
+
+
+def _ensure_feature_importance_diagnostics(
+    diagnostics_data: Optional[Dict[str, Any]],
+    training_result: Dict[str, Any],
+    model_path: Optional[str],
+    model_type: str,
+) -> tuple[Optional[Dict[str, Any]], Optional[list[dict[str, Any]]]]:
+    """Ensure diagnostics include feature importance when training computed it."""
+    resolved_diagnostics = diagnostics_data or {}
+    stored_result = resolved_diagnostics.get("get_feature_importance") or {}
+    stored_features = stored_result.get("features")
+    if stored_features:
+        return resolved_diagnostics, stored_features
+
+    trainer_features = training_result.get("feature_importance")
+    if trainer_features:
+        resolved_diagnostics["get_feature_importance"] = {
+            "model_path": model_path,
+            "model_type": model_type,
+            "method": stored_result.get("method", "trainer"),
+            "features": trainer_features,
+            "error": None,
+        }
+        return resolved_diagnostics, trainer_features
+
+    return diagnostics_data, None
+
+
+async def _resolve_training_data_path(
+    job: Any,
+    dataset_manager: DominoDatasetManager,
+) -> tuple[str, str]:
+    """Resolve the exact data file to train against for a job."""
+    project_id = getattr(job, "project_id", None)
+
+    if job.data_source != "domino_dataset":
+        data_path = remap_shared_path(job.file_path)
+        data_path = await ensure_local_file(data_path, project_id)
+        return data_path, f"Using uploaded file: {data_path}"
+
+    selected_file_path = getattr(job, "file_path", None)
+    selected_relative_path = extract_dataset_relative_path(selected_file_path)
+
+    if selected_file_path:
+        preferred_path = remap_shared_path(selected_file_path)
+        local_preferred_path = await ensure_local_file(preferred_path, project_id)
+        if os.path.exists(local_preferred_path):
+            return local_preferred_path, f"Using Domino dataset file: {local_preferred_path}"
+
+        logger.warning(
+            "Selected dataset file path was unavailable for job %s; "
+            "falling back to dataset_id lookup (dataset_id=%s, file_path=%s)",
+            getattr(job, "id", "unknown"),
+            job.dataset_id,
+            selected_file_path,
+        )
+
+    data_path = await dataset_manager.get_dataset_file_path(
+        job.dataset_id,
+        file_name=selected_relative_path,
+    )
+    data_path = await ensure_local_file(data_path, project_id)
+
+    if selected_relative_path:
+        return data_path, f"Using Domino dataset file: {selected_relative_path}"
+    return data_path, f"Using Domino dataset: {job.dataset_id}"
 
 
 class TrainingProgressReporter:
@@ -121,7 +204,7 @@ class TrainingProgressReporter:
         )
 
 
-async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]] = None):
+async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]] = None, job_config: Optional[Dict[str, Any]] = None):
     """
     Run a training job in the background with Domino experiment tracking.
 
@@ -132,11 +215,15 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
 
     async with async_session_maker() as db:
         try:
-            # Get job from database
-            job = await crud.get_job(db, job_id)
-            if not job:
-                logger.error(f"Job not found: {job_id}")
-                return
+            # Use CLI-provided config when available, fall back to DB read
+            if job_config:
+                job = _deserialize_job_config(job_config)
+                logger.info("Using job config from CLI args (skipped DB read)")
+            else:
+                job = await crud.get_job(db, job_id)
+                if not job:
+                    logger.error(f"Job not found: {job_id}")
+                    return
 
             await _check_cancelled(job_id, db)
 
@@ -160,14 +247,12 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
             logger.info(f"[TRAINING DEBUG] Job file_path: {job.file_path}")
             logger.info(f"[TRAINING DEBUG] Job dataset_id: {job.dataset_id}")
 
-            if job.data_source == "domino_dataset":
-                data_path = await dataset_manager.get_dataset_file_path(job.dataset_id)
-                await crud.add_job_log(db, job_id, f"Using Domino dataset: {job.dataset_id}")
-            else:
-                data_path = remap_shared_path(job.file_path)
-                await crud.add_job_log(db, job_id, f"Using uploaded file: {data_path}")
+            data_path, data_path_log = await _resolve_training_data_path(
+                job,
+                dataset_manager,
+            )
+            await crud.add_job_log(db, job_id, data_path_log)
 
-            # TODO this log message is INFO but it claims it's DEBUG?
             logger.info(f"[TRAINING DEBUG] Resolved data_path: {data_path}")
             await crud.add_job_log(db, job_id, f"[DEBUG] Data path resolved to: {data_path}", "INFO")
 
@@ -255,12 +340,35 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
 
             await progress_reporter.on_progress_update(10, "Loading data")
 
-            # Parse timeseries config
+            # Parse timeseries config and feature columns
             timeseries_config = None
+            feature_columns = None
             if job.autogluon_config:
                 if "timeseries" in job.autogluon_config:
                     timeseries_config = job.autogluon_config["timeseries"]
                     logger.info(f"[TRAINING] Parsed timeseries config: {timeseries_config}")
+                if "feature_columns" in job.autogluon_config:
+                    feature_columns = job.autogluon_config["feature_columns"]
+                    logger.info(f"[TRAINING] Using feature columns: {feature_columns}")
+
+            # Resolve project-scoped storage for model output
+            models_path = None
+            temp_path = None
+            if job.project_id and not settings.standalone_mode:
+                try:
+                    from app.services.storage_resolver import get_storage_resolver
+
+                    project_paths = await get_storage_resolver().resolve_project_paths(
+                        job.project_id
+                    )
+                    models_path = project_paths.models_path
+                    os.makedirs(models_path, exist_ok=True)
+                    temp_path = project_paths.temp_path
+                    os.makedirs(temp_path, exist_ok=True)
+                except Exception as e:
+                    logger.warning(
+                        "Could not resolve project storage, using default: %s", e
+                    )
 
             # Run training with advanced config
             result = await runner.run_training(
@@ -277,6 +385,9 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                 eval_metric=job.eval_metric,
                 advanced_config=adv_config,
                 timeseries_config=timeseries_config,
+                feature_columns=feature_columns,
+                models_path=models_path,
+                temp_path=temp_path,
             )
 
             await crud.add_job_log(db, job_id, "Training completed successfully")
@@ -299,19 +410,27 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
             if tracker:
                 tracker.end_run(status="FINISHED")
 
-            # Generate feature importance
+            # Pre-compute all diagnostics while model is on disk (in the Job).
+            # The App may not have the dataset mounted, so we store these in the
+            # DB and serve them directly from there.
+            diagnostics_data = None
             feature_importance = None
             try:
                 diagnostics = get_model_diagnostics()
-                fi_result = diagnostics.get_feature_importance(
+                diagnostics_data = diagnostics.compute_all_diagnostics(
                     model_path=result.get("model_path"),
                     model_type=job.model_type.value,
-                    data_path=data_path
+                    data_path=data_path,
                 )
-                if fi_result.get("features"):
-                    feature_importance = fi_result["features"]
             except Exception as e:
-                logger.warning(f"Could not generate feature importance: {e}")
+                logger.warning(f"Could not pre-compute diagnostics: {e}")
+
+            diagnostics_data, feature_importance = _ensure_feature_importance_diagnostics(
+                diagnostics_data=diagnostics_data,
+                training_result=result,
+                model_path=result.get("model_path"),
+                model_type=job.model_type.value,
+            )
 
             # Get the predictor for hyperparameter extraction
             predictor = None
@@ -367,6 +486,7 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                     model_path=model_path,
                     predictor=predictor,
                     test_data=test_data,
+                    temp_path=temp_path,
                 )
 
                 await crud.add_job_log(db, job_id, f"Model runs logged to MLflow experiment")
@@ -391,6 +511,7 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                 model_path=result["model_path"],
                 experiment_run_id=run_id,
                 experiment_name=experiment_name,
+                diagnostics_data=diagnostics_data,
             )
 
             # Final progress update: complete
@@ -428,6 +549,7 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
                         experiment_name=experiment_name,  # Use same experiment as training
                         project_id=job.project_id,
                         project_name=job.project_name,
+                        temp_path=temp_path,
                     )
                     if reg_result.get("success"):
                         await crud.add_job_log(
@@ -520,6 +642,19 @@ async def register_trained_model(
         if not job.model_path:
             raise ValueError(f"Job has no model path: {job_id}")
 
+        # Resolve temp_path from project storage or fall back to settings
+        temp_path = None
+        if job.project_id and not get_settings().standalone_mode:
+            try:
+                from app.services.storage_resolver import get_storage_resolver
+
+                project_paths = await get_storage_resolver().resolve_project_paths(
+                    job.project_id
+                )
+                temp_path = project_paths.temp_path
+            except Exception:
+                pass
+
         # Use Domino registry
         registry = get_domino_registry()
 
@@ -550,6 +685,7 @@ async def register_trained_model(
             metrics=job.metrics if hasattr(job, 'metrics') and job.metrics else {},
             params=job_info,
             experiment_name=exp_name,  # Use same experiment as training
+            temp_path=temp_path,
         )
 
         if not result.get("success"):

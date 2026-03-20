@@ -1,8 +1,6 @@
 """Base trainer class with shared configuration and utilities."""
 
 import logging
-from typing import Optional
-
 import pandas as pd
 
 # Canonical type definitions live in the Pydantic schemas.
