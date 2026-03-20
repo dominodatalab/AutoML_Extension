@@ -28,7 +28,7 @@ def _truncate(text: str, limit: int = _MAX_BODY_LOG) -> str:
 
 def _safe_headers(headers: dict) -> dict:
     """Redact sensitive header values."""
-    sensitive = {"authorization", "cookie", "x-api-key", "domino-api-key"}
+    sensitive = {"authorization", "cookie", "x-api-key", "x-domino-api-key"}
     return {
         k: ("***" if k.lower() in sensitive else v)
         for k, v in headers.items()
