@@ -42,20 +42,29 @@ async def get_domino_auth_headers() -> dict[str, str]:
     """Build Domino auth headers using the platform priority chain.
 
     Priority:
-    1. Get auth headers from request from auth context
-    2. Fallback to the ephemeral token from Domino App/Run sidecar (localhost:8899)
+    1. Forwarded user token from the incoming request (per-request context)
+    2. Ephemeral token from the Domino App/Run sidecar (localhost:8899)
+    3. Static API key (DOMINO_API_KEY / DOMINO_USER_API_KEY)
+
+    When a forwarded user token is present, it is preserved so that
+    outbound Domino API calls (datasetrw, jobs, model registry) run as
+    the visiting user, not the App owner.  The sidecar token is only
+    used as a fallback when no user token was forwarded (e.g. background
+    tasks, health checks).
     """
     headers = get_sync_auth_headers()
 
-    # fallbaack to the ephemeral token from Domino App/Run sidecar
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            # TODO this url must be dynamically resolved
-            resp = await client.get("http://localhost:8899/access-token")
-        if resp.status_code == 200 and resp.text.strip():
-            headers["Authorization"] = f"Bearer {resp.text.strip()}"
-    except Exception:
-        pass
+    # Only fetch the sidecar token when no user token was forwarded.
+    # The forwarded token carries the visiting user's identity; overwriting
+    # it with the sidecar token would make all API calls run as the App owner.
+    if "Authorization" not in headers:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get("http://localhost:8899/access-token")
+            if resp.status_code == 200 and resp.text.strip():
+                headers["Authorization"] = f"Bearer {resp.text.strip()}"
+        except Exception:
+            pass
 
     return headers
 
