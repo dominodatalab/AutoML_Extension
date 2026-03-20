@@ -1,4 +1,6 @@
 import asyncio
+from typing import Optional
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -29,9 +31,9 @@ async def test_parallel_requests_use_distinct_auth_values(monkeypatch, tmp_path)
 
     app = create_app()
 
-    hits: list[str | None] = []
+    hits: list[Optional[str]] = []
 
-    def consumer() -> str | None:
+    def consumer() -> Optional[str]:
         val = get_request_auth_header()
         hits.append(val)
         return val

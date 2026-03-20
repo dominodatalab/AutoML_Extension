@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -15,6 +16,7 @@ from app.core.websocket_manager import get_websocket_manager
 from app.db.database import create_tables
 from app.api.routes import health, jobs, datasets, predictions, profiling, registry, export, deployments
 from app.core.context.auth import set_request_auth_header
+from app.core.context.user import clear_viewing_user
 
 logging.basicConfig(
     level=logging.INFO,
@@ -77,6 +79,18 @@ async def lifespan(app: FastAPI):
     os.makedirs(os.path.join(settings.datasets_path, "uploads"), exist_ok=True)
     logger.info(f"Required directories created (uploads: {settings.uploads_path})")
 
+    from app.core.utils import cleanup_dataset_cache
+    deleted = cleanup_dataset_cache(os.path.join(settings.temp_path, "dataset_cache"))
+    if deleted:
+        logger.info("Cleaned up %d stale cached dataset files", deleted)
+
+    from app.dependencies import get_db_session as _get_db_session
+    async with _get_db_session() as db:
+        from app.db.crud import delete_stale_eda_results
+        eda_deleted = await delete_stale_eda_results(db, max_age_hours=72)
+        if eda_deleted:
+            logger.info("Cleaned up %d stale EDA results", eda_deleted)
+
     from app.core.job_queue import get_job_queue
     queue = get_job_queue()
     await queue.startup()
@@ -98,6 +112,13 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Debug request/response logging (AUTOML_DEBUG_LOGGING=true)
+    if settings.debug_logging:
+        from app.api.middleware import DebugLoggingMiddleware
+        app.add_middleware(DebugLoggingMiddleware)
+        logging.getLogger("automl.debug").setLevel(logging.DEBUG)
+        logger.info("Debug request/response logging ENABLED (AUTOML_DEBUG_LOGGING=true)")
+
     # CORS
     app.add_middleware(
         CORSMiddleware,
@@ -113,11 +134,17 @@ def create_app() -> FastAPI:
         auth_header = request.headers.get("authorization")
         # Set before handling; ensure cleanup/reset after response
         set_request_auth_header(auth_header)
+        # NOTE: resolve_viewing_user() is disabled. The sidecar proxy
+        # returns 500 when it receives the browser's forwarded auth token,
+        # and even when called without auth it returns the App owner's
+        # identity, not the viewing user's. RBAC owner filtering uses the
+        # domino-username header instead (trusted, injected by Domino proxy).
         try:
             response = await call_next(request)
         finally:
             # Clear after request finishes to avoid any cross-request leakage
             set_request_auth_header(None)
+            clear_viewing_user()
         return response
 
     # Exception handlers
@@ -187,7 +214,7 @@ def create_app() -> FastAPI:
                     await websocket.send_json({
                         "type": "initial",
                         "job_id": job_id,
-                        **(progress.dict() if hasattr(progress, 'dict') else progress)
+                        **jsonable_encoder(progress)
                     })
                 except Exception as e:
                     await websocket.send_json({
