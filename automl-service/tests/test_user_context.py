@@ -116,6 +116,8 @@ async def test_per_request_user_context_isolation_via_api(app_client, monkeypatc
         else:
             return _make_user_envelope("u-2", "bob", roles=["Viewer"])   # second request
 
+    # Avoid real host resolution — the generated client needs a base_url
+    monkeypatch.setattr(user_ctx, "get_domino_public_api_client_sync", lambda: object())
     monkeypatch.setattr(users_api.get_current_user, "sync", fake_sync)
 
     # First request has owner alice

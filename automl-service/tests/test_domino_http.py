@@ -14,7 +14,6 @@ import httpx
 import pytest
 
 from app.core.domino_http import (
-    _reset_domino_http_state,
     domino_download,
     domino_request,
     get_domino_auth_headers,
@@ -26,10 +25,8 @@ from app.core.domino_http import (
 async def reset_domino_http_state():
     from app.core.context.auth import set_request_auth_header
     set_request_auth_header(None)
-    await _reset_domino_http_state()
     yield
     set_request_auth_header(None)
-    await _reset_domino_http_state()
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +94,8 @@ class TestGetDominoAuthHeaders:
             cfg._settings_instance = old
 
     @pytest.mark.asyncio
-    async def test_reuses_cached_sidecar_token_within_ttl(self, monkeypatch):
+    async def test_sidecar_token_fetched_each_call(self, monkeypatch):
+        """After removing caching, each call to get_domino_auth_headers fetches fresh."""
         monkeypatch.delenv("DOMINO_API_KEY", raising=False)
         monkeypatch.delenv("DOMINO_USER_API_KEY", raising=False)
 
@@ -114,10 +112,10 @@ class TestGetDominoAuthHeaders:
             headers_one = await get_domino_auth_headers()
             headers_two = await get_domino_auth_headers()
 
-        assert headers_one == {"Authorization": "Bearer token-123"}
-        assert headers_two == {"Authorization": "Bearer token-123"}
-        # Sidecar should only be called once — second call uses cache
-        assert mock_client.get.await_count == 1
+        assert headers_one["Authorization"] == "Bearer token-123"
+        assert headers_two["Authorization"] == "Bearer token-123"
+        # Sidecar is called each time (no caching in stateless auth)
+        assert mock_client.get.await_count == 2
 
 
 # ---------------------------------------------------------------------------
