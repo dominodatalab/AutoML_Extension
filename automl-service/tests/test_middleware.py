@@ -52,7 +52,7 @@ class TestSafeHeaders:
             "authorization": "Bearer secret",
             "cookie": "session=abc",
             "x-api-key": "key123",
-            "domino-api-key": "domkey",
+            "x-domino-api-key": "domkey",
         }
         result = _safe_headers(headers)
         for key in headers:
