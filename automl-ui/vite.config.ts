@@ -77,7 +77,7 @@ export default defineConfig(({ mode }) => {
     define: {
       'import.meta.env.VITE_API_URL': JSON.stringify(apiTarget),
       'import.meta.env.VITE_BASE_PATH': JSON.stringify(basePath),
-      'import.meta.env.VITE_DEV_DOMINO_API_HOST': !isProduction ? JSON.stringify(env.DOMINO_API_HOST || '') : '',
+      'import.meta.env.VITE_DEV_DOMINO_API_HOST': JSON.stringify(!isProduction ? env.DOMINO_API_HOST || '' : '')
     },
   }
 })
