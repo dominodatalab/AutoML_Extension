@@ -31,6 +31,9 @@ export default defineConfig(({ mode }) => {
           target: apiTarget,
           changeOrigin: true,
           secure: false,
+          headers: {
+            'Authorization': `Bearer ${devAuthToken}`
+          }
         },
         '/svc': {
           target: apiTarget,
