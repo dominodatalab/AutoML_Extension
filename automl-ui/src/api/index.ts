@@ -1,15 +1,82 @@
 import { getBasePath } from '../utils/basePath'
+import { debug } from '../utils/logger'
+
+const PROJECT_ID_PARAM_KEYS = ['projectId', 'project_id'] as const
+
+function getProjectIdFromParams(params: URLSearchParams): string | undefined {
+  for (const key of PROJECT_ID_PARAM_KEYS) {
+    const value = params.get(key)
+    if (value) return value
+  }
+  return undefined
+}
 
 /**
- * Read projectId from URL query parameter (?projectId=...).
- * Returns the value when present, undefined otherwise.
+ * Extract projectId/project_id from a Location-like object (search then hash).
  */
-function getProjectIdFromUrl(): string | undefined {
+function extractProjectId(loc: { search: string; hash: string }): string | undefined {
+  const fromSearch = getProjectIdFromParams(new URLSearchParams(loc.search))
+  if (fromSearch) return fromSearch
+
+  if (loc.hash) {
+    const fromHash = getProjectIdFromParams(new URLSearchParams(loc.hash.slice(1)))
+    if (fromHash) return fromHash
+  }
+  return undefined
+}
+
+/**
+ * Read projectId from the URL.
+ *
+ * Domino loads Apps in an iframe whose src is a clean internal URL with
+ * no query params or hash. The user's projectId lives on the *parent*
+ * frame's URL, so we check:
+ *   1. Current iframe URL (query string, then hash)
+ *   2. Parent frame URL (same-origin only; query string, then hash)
+ */
+export function getProjectIdFromUrl(): string | undefined {
   try {
-    const params = new URLSearchParams(window.location.search)
-    return params.get('projectId') ?? undefined
+    // 1. Current frame
+    const fromSelf = extractProjectId(window.location)
+    if (fromSelf) return fromSelf
+
+    // 2. Parent frame (Domino iframe is same-origin)
+    if (window.parent && window.parent !== window) {
+      try {
+        const fromParent = extractProjectId(window.parent.location)
+        if (fromParent) return fromParent
+      } catch {
+        // Cross-origin — ignore
+      }
+    }
+
+    return undefined
   } catch {
     return undefined
+  }
+}
+
+// Capture projectId eagerly at module load time so it survives React Router
+// navigation that may strip query params from window.location.
+let _cachedProjectId: string | undefined = getProjectIdFromUrl()
+
+console.log('[ApiClient] module load — href:', window.location.href, 'parentHref:', (() => { try { return window.parent?.location?.href } catch { return '(cross-origin)' } })(), 'cachedProjectId:', _cachedProjectId)
+
+/**
+ * Resolve the current project ID.
+ * Priority: explicit override > cached value from initial URL > live URL.
+ */
+export function getProjectId(): string | undefined {
+  return _cachedProjectId || getProjectIdFromUrl()
+}
+
+/**
+ * Allow external code (e.g. React components with useSearchParams) to
+ * persist the project ID so it survives across navigations.
+ */
+export function setProjectId(id: string | undefined) {
+  if (id) {
+    _cachedProjectId = id
   }
 }
 
@@ -43,11 +110,6 @@ class ApiClient {
     this.defaultHeaders = {
       'Content-Type': 'application/json',
     }
-
-    const projectId = getProjectIdFromUrl()
-    if (projectId) {
-      this.defaultHeaders['X-Project-Id'] = projectId
-    }
   }
 
   private async request<T>(
@@ -68,14 +130,19 @@ class ApiClient {
       fullUrl = `/api/v1/${cleanEndpoint}`
     }
 
+    const projectId = getProjectId()
+
     // Add query params
-    if (config?.params) {
+    if (config?.params || projectId) {
       const searchParams = new URLSearchParams()
-      Object.entries(config.params).forEach(([key, value]) => {
+      Object.entries(config?.params || {}).forEach(([key, value]) => {
         if (value !== undefined) {
           searchParams.append(key, String(value))
         }
       })
+      if (projectId && !searchParams.has('projectId') && !searchParams.has('project_id')) {
+        searchParams.append('project_id', projectId)
+      }
       const queryString = searchParams.toString()
       if (queryString) {
         fullUrl += `?${queryString}`
@@ -83,6 +150,14 @@ class ApiClient {
     }
 
     const headers: Record<string, string> = { ...this.defaultHeaders }
+
+    // Dynamically resolve project ID on every request so it works even
+    // when the module loaded before query params were available, or after
+    // React Router navigation strips them from the URL.
+    if (projectId) {
+      headers['X-Project-Id'] = projectId
+    }
+
     const fetchConfig: RequestInit = {
       method,
       headers,
@@ -98,8 +173,12 @@ class ApiClient {
       }
     }
 
+    const startTime = performance.now()
+    debug.request(method, fullUrl, data, headers)
+
     try {
       const response = await fetch(fullUrl, fetchConfig)
+      const elapsed = performance.now() - startTime
 
       if (!response.ok) {
         // Check if response is HTML (common when Domino intercepts)
@@ -107,6 +186,7 @@ class ApiClient {
         if (contentType.includes('text/html')) {
           console.error(`[API] Received HTML response instead of JSON for ${fullUrl}`)
           console.error('[API] This usually means Domino is intercepting the request')
+          debug.error(method, fullUrl, `HTML response (status ${response.status})`, elapsed)
           throw new Error(`API returned HTML instead of JSON (status ${response.status}). Check if endpoint exists.`)
         }
         const errorData = await response.json().catch(() => ({}))
@@ -122,12 +202,14 @@ class ApiClient {
           message = errorData.detail || errorData.error || response.statusText || 'An error occurred'
         }
         console.error('API Error:', message)
+        debug.error(method, fullUrl, { status: response.status, message, errorData }, elapsed)
         const error = new Error(message)
         ;(error as any).status = response.status
         throw error
       }
 
       if (response.status === 204) {
+        debug.response(method, fullUrl, 204, '(no content)', elapsed)
         return { data: {} as T }
       }
 
@@ -136,13 +218,19 @@ class ApiClient {
       if (contentType.includes('text/html')) {
         const htmlPreview = await response.text()
         console.error(`[API] Received HTML instead of JSON for ${fullUrl}:`, htmlPreview.substring(0, 200))
+        debug.error(method, fullUrl, `HTML response: ${htmlPreview.substring(0, 200)}`, elapsed)
         throw new Error('API returned HTML instead of JSON')
       }
 
       const responseData = await response.json()
+      debug.response(method, fullUrl, response.status, responseData, elapsed)
       return { data: responseData }
     } catch (error) {
-      console.error(`[API] Error for ${fullUrl}:`, error)
+      const elapsed = performance.now() - startTime
+      if (!debug.enabled) {
+        console.error(`[API] Error for ${fullUrl}:`, error)
+      }
+      debug.error(method, fullUrl, error, elapsed)
       throw error
     }
   }

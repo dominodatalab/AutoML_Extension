@@ -1,7 +1,9 @@
 """Health check endpoints."""
 
 import os
-from fastapi import APIRouter, Depends, Request
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
@@ -65,6 +67,28 @@ async def get_capabilities():
         "mlflow_tracking": not standalone,
         "model_registry": not standalone,
         "model_deployment": not standalone,
+        "dataset_storage": not standalone,
+    }
+
+
+@router.get("/storage")
+async def storage_status(project_id: Optional[str] = Query(None)):
+    """Check dataset mount status for a project."""
+    settings = get_settings()
+    if settings.standalone_mode or not project_id:
+        return {
+            "dataset_mount_active": False,
+            "standalone": settings.standalone_mode,
+        }
+
+    from app.services.storage_resolver import get_storage_resolver
+
+    resolver = get_storage_resolver()
+    mounted, mount_path = await resolver.check_project_storage(project_id)
+    return {
+        "dataset_mount_active": mounted,
+        "restart_required": not mounted,
+        "mount_path": mount_path,
     }
 
 

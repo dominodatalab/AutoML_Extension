@@ -1,10 +1,11 @@
 """Data profiling endpoints."""
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.core.data_profiler import get_data_profiler
@@ -13,6 +14,8 @@ from app.core.eda_job_store import get_eda_job_store
 from app.core.ts_profiler import get_ts_profiler
 from app.api.error_handler import handle_errors
 from app.config import get_settings
+from app.core.utils import ensure_local_file
+from app.dependencies import get_db_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -91,13 +94,17 @@ class TargetSuggestionsResponse(BaseModel):
 
 @router.post("/profile", response_model=ProfileResponse)
 @handle_errors("Profiling error")
-async def profile_data(request: ProfileRequest):
+async def profile_data(request: ProfileRequest, http_request: Request):
     """Generate a comprehensive profile of a data file."""
+    project_id = http_request.headers.get("X-Project-Id")
+    resolved_path = await ensure_local_file(request.file_path, project_id)
+
     profiler = get_data_profiler()
 
     try:
-        profile = profiler.profile_file(
-            file_path=request.file_path,
+        profile = await asyncio.to_thread(
+            profiler.profile_file,
+            file_path=resolved_path,
             sample_size=request.sample_size,
             sampling_strategy=request.sampling_strategy,
             stratify_column=request.stratify_column,
@@ -117,19 +124,30 @@ async def profile_data(request: ProfileRequest):
 
 @router.post("/profile/suggest-target", response_model=TargetSuggestionsResponse)
 @handle_errors("Error suggesting targets")
-async def suggest_target_column(request: ProfileRequest):
+async def suggest_target_column(request: ProfileRequest, http_request: Request):
     """Suggest potential target columns based on data profile."""
+    project_id = http_request.headers.get("X-Project-Id")
+    resolved_path = await ensure_local_file(request.file_path, project_id)
+
     profiler = get_data_profiler()
 
     try:
-        profile = profiler.profile_file(
-            file_path=request.file_path,
-            sample_size=request.sample_size,
-            sampling_strategy=request.sampling_strategy,
-            stratify_column=request.stratify_column,
-        )
+        if request.sampling_strategy == "full":
+            profile = await asyncio.to_thread(
+                profiler.profile_file,
+                file_path=resolved_path,
+                sample_size=request.sample_size,
+                sampling_strategy=request.sampling_strategy,
+                stratify_column=request.stratify_column,
+            )
+        else:
+            profile = await asyncio.to_thread(
+                profiler.profile_sample_file,
+                file_path=resolved_path,
+                sample_size=request.sample_size,
+            )
 
-        suggestions = profiler.suggest_target_column(profile)
+        suggestions = await asyncio.to_thread(profiler.suggest_target_column, profile)
 
         return TargetSuggestionsResponse(
             suggestions=[TargetSuggestion(**s) for s in suggestions]
@@ -141,11 +159,18 @@ async def suggest_target_column(request: ProfileRequest):
 
 @router.post("/profile/quick")
 @handle_errors("Quick profile error")
-async def quick_profile(file_path: str):
+async def quick_profile(file_path: str, http_request: Request):
     """Get a quick profile summary (faster than full profile)."""
+    project_id = http_request.headers.get("X-Project-Id")
+    resolved_path = await ensure_local_file(file_path, project_id)
+
     profiler = get_data_profiler()
 
-    profile = profiler.profile_file(file_path, sample_size=1000)
+    profile = await asyncio.to_thread(
+        profiler.quick_profile_file,
+        resolved_path,
+        1000,
+    )
 
     # Return simplified summary
     return {
@@ -167,25 +192,6 @@ async def quick_profile(file_path: str):
             if r["type"] == "target"
         ][:3]
     }
-
-
-@router.post("/profile/column/{column_name}")
-@handle_errors("Column profile error")
-async def profile_column(file_path: str, column_name: str):
-    """Get detailed profile for a specific column."""
-    profiler = get_data_profiler()
-
-    try:
-        profile = profiler.profile_file(file_path, sample_size=10000)
-
-        for col in profile["columns"]:
-            if col["name"] == column_name:
-                return col
-
-        raise HTTPException(status_code=404, detail=f"Column not found: {column_name}")
-
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
 
 
 @router.get("/profile/metrics")
@@ -394,13 +400,17 @@ class AsyncProfileStatusResponse(BaseModel):
 
 @router.post("/profile/timeseries", response_model=TimeSeriesProfileResponse)
 @handle_errors("Time series profiling error")
-async def profile_timeseries(request: TimeSeriesProfileRequest):
+async def profile_timeseries(request: TimeSeriesProfileRequest, http_request: Request):
     """Generate a comprehensive time series profile."""
+    project_id = http_request.headers.get("X-Project-Id")
+    resolved_path = await ensure_local_file(request.file_path, project_id)
+
     profiler = get_ts_profiler()
 
     try:
-        result = profiler.profile_timeseries_file(
-            file_path=request.file_path,
+        result = await asyncio.to_thread(
+            profiler.profile_timeseries_file,
+            file_path=resolved_path,
             time_column=request.time_column,
             target_column=request.target_column,
             id_column=request.id_column,
@@ -429,8 +439,10 @@ async def profile_timeseries(request: TimeSeriesProfileRequest):
 
 @router.post("/profile/async/start", response_model=AsyncProfileStartResponse)
 @handle_errors("Async profiling start error")
-async def start_profile_async(request: AsyncProfileStartRequest):
+async def start_profile_async(request: AsyncProfileStartRequest, http_request: Request):
     """Start async EDA profiling as an external Domino Job."""
+    import asyncio
+
     if request.mode == "timeseries":
         if not request.time_column or not request.target_column:
             raise HTTPException(
@@ -441,11 +453,38 @@ async def start_profile_async(request: AsyncProfileStartRequest):
     store = get_eda_job_store()
     settings = get_settings()
     request_id = str(uuid4())
-    store.create_request(
-        request_id=request_id,
-        mode=request.mode,
-        request_payload=request.model_dump(exclude_none=True),
-    )
+
+    # Resolve project and owner context
+    project_id = http_request.headers.get("X-Project-Id") if http_request else None
+    owner = http_request.headers.get("domino-username") if http_request else None
+
+    async with get_db_session() as db:
+        await store.create_request(
+            db,
+            request_id=request_id,
+            mode=request.mode,
+            request_payload=request.model_dump(exclude_none=True),
+            owner=owner,
+            project_id=project_id,
+        )
+
+    # Resolve project context for dataset pre-creation and job launch
+
+    # Pre-create the automl-extension dataset so the EDA Domino Job
+    # boots with the mount already available for writing results.
+    if project_id and not settings.standalone_mode:
+        try:
+            from app.services.storage_resolver import get_storage_resolver
+
+            await asyncio.wait_for(
+                get_storage_resolver().ensure_dataset_exists(project_id),
+                timeout=30.0,
+            )
+        except (asyncio.TimeoutError, Exception):
+            logger.warning(
+                "Pre-launch dataset creation failed for EDA job in project %s; job proceeds anyway",
+                project_id,
+            )
 
     launcher = get_domino_job_launcher()
     launch_result = await launcher.start_eda_job(
@@ -461,20 +500,24 @@ async def start_profile_async(request: AsyncProfileStartRequest):
         rolling_window=request.rolling_window,
         hardware_tier_name=request.domino_hardware_tier_name or settings.domino_eda_hardware_tier_name,
         environment_id=request.domino_environment_id or settings.domino_eda_environment_id,
+        project_id=project_id,
     )
     if not launch_result.get("success"):
         error_message = launch_result.get("error", "Failed to launch async profiling job")
-        store.update_request(request_id, status="failed", error=error_message)
+        async with get_db_session() as db:
+            await store.update_request(db, request_id, status="failed", error=error_message)
         raise HTTPException(status_code=502, detail=error_message)
 
-    store.update_request(
-        request_id,
-        status="running",
-        domino_job_id=launch_result.get("domino_job_id"),
-        domino_job_status=launch_result.get("domino_job_status", "Submitted"),
-        domino_job_url=launch_result.get("domino_job_url"),
-        error=None,
-    )
+    async with get_db_session() as db:
+        await store.update_request(
+            db,
+            request_id,
+            status="running",
+            domino_job_id=launch_result.get("domino_job_id"),
+            domino_job_status=launch_result.get("domino_job_status", "Submitted"),
+            domino_job_url=launch_result.get("domino_job_url"),
+            error=None,
+        )
     return AsyncProfileStartResponse(
         request_id=request_id,
         status="running",
@@ -485,18 +528,25 @@ async def start_profile_async(request: AsyncProfileStartRequest):
     )
 
 
-async def _build_async_status_response(request_id: str) -> AsyncProfileStatusResponse:
-    """Load async EDA status from file-backed metadata/results."""
+async def _build_async_status_response(request_id: str, owner: Optional[str] = None) -> AsyncProfileStatusResponse:
+    """Load async EDA status from database.
+
+    When *owner* is provided, only returns results owned by that user.
+    """
     store = get_eda_job_store()
     launcher = get_domino_job_launcher()
 
-    metadata = store.get_request(request_id)
-    if metadata is None:
-        raise HTTPException(status_code=404, detail=f"Async profile request not found: {request_id}")
+    async with get_db_session() as db:
+        metadata = await store.get_request(db, request_id)
+        if metadata is None:
+            raise HTTPException(status_code=404, detail=f"Async profile request not found: {request_id}")
+        # Enforce owner-based access (use 404 to avoid leaking existence)
+        if owner and owner != "anonymous" and metadata.get("owner") and metadata["owner"] != owner:
+            raise HTTPException(status_code=404, detail=f"Async profile request not found: {request_id}")
 
-    result_payload = store.get_result(request_id)
-    if result_payload and metadata.get("status") != "completed":
-        metadata = store.update_request(request_id, status="completed", error=None) or metadata
+        result_payload = await store.get_result(db, request_id)
+        if result_payload and metadata.get("status") != "completed":
+            metadata = await store.update_request(db, request_id, status="completed", error=None) or metadata
 
     if result_payload:
         return AsyncProfileStatusResponse(
@@ -517,10 +567,12 @@ async def _build_async_status_response(request_id: str) -> AsyncProfileStatusRes
         if domino_status_result.get("success"):
             latest_domino_status = domino_status_result.get("domino_job_status")
             if latest_domino_status and latest_domino_status != domino_job_status:
-                metadata = store.update_request(
-                    request_id,
-                    domino_job_status=latest_domino_status,
-                ) or metadata
+                async with get_db_session() as db:
+                    metadata = await store.update_request(
+                        db,
+                        request_id,
+                        domino_job_status=latest_domino_status,
+                    ) or metadata
                 domino_job_status = latest_domino_status
 
             if latest_domino_status and latest_domino_status.lower() in {
@@ -531,21 +583,25 @@ async def _build_async_status_response(request_id: str) -> AsyncProfileStatusRes
                 "cancelled",
             }:
                 error_message = f"Domino profiling job ended with status: {latest_domino_status}"
-                metadata = store.update_request(
-                    request_id,
-                    status="failed",
-                    error=error_message,
-                ) or metadata
+                async with get_db_session() as db:
+                    metadata = await store.update_request(
+                        db,
+                        request_id,
+                        status="failed",
+                        error=error_message,
+                    ) or metadata
                 status = "failed"
 
     if status == "failed":
+        async with get_db_session() as db:
+            error_from_db = await store.get_error(db, request_id)
         return AsyncProfileStatusResponse(
             request_id=request_id,
             status="failed",
             mode=metadata.get("mode"),
             domino_job_id=metadata.get("domino_job_id"),
             domino_job_status=metadata.get("domino_job_status"),
-            error=metadata.get("error") or store.get_error(request_id) or "Async profiling failed",
+            error=metadata.get("error") or error_from_db or "Async profiling failed",
         )
 
     return AsyncProfileStatusResponse(
@@ -559,13 +615,15 @@ async def _build_async_status_response(request_id: str) -> AsyncProfileStatusRes
 
 @router.post("/profile/async/status", response_model=AsyncProfileStatusResponse)
 @handle_errors("Async profiling status error")
-async def get_profile_async_status(request: AsyncProfileStatusRequest):
+async def get_profile_async_status(request: AsyncProfileStatusRequest, http_request: Request = None):
     """Poll async EDA job status/result."""
-    return await _build_async_status_response(request.request_id)
+    owner = http_request.headers.get("domino-username") if http_request else None
+    return await _build_async_status_response(request.request_id, owner=owner)
 
 
 @router.get("/profile/async/{request_id}", response_model=AsyncProfileStatusResponse)
 @handle_errors("Async profiling status error")
-async def get_profile_async_status_get(request_id: str):
+async def get_profile_async_status_get(request_id: str, request: Request = None):
     """GET variant for async EDA status polling."""
-    return await _build_async_status_response(request_id)
+    owner = request.headers.get("domino-username") if request else None
+    return await _build_async_status_response(request_id, owner=owner)

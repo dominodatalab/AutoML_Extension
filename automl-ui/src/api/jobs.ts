@@ -8,12 +8,6 @@ interface JobListResponse {
   limit: number
 }
 
-interface JobMetricsResponse {
-  id: string
-  metrics: Record<string, unknown> | null
-  leaderboard: Record<string, unknown>[] | null
-}
-
 export interface JobStatusResponse {
   id: string
   status: string
@@ -63,11 +57,6 @@ export async function getJob(jobId: string): Promise<Job> {
 
 export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
   const response = await api.post<JobStatusResponse>('/jobstatus', { job_id: jobId })
-  return response.data
-}
-
-export async function getJobMetrics(jobId: string): Promise<JobMetricsResponse> {
-  const response = await api.post<JobMetricsResponse>('/jobmetrics', { job_id: jobId })
   return response.data
 }
 

@@ -2,6 +2,7 @@ export interface DatasetFile {
   name: string
   size: number
   path: string
+  mounted?: boolean
 }
 
 export interface Dataset {
@@ -34,4 +35,14 @@ export interface FileUploadResponse {
   file_size: number
   columns: string[]
   row_count: number
+  dataset_id?: string
+  snapshot_file_path?: string
+  snapshot_verified?: boolean
+}
+
+export interface SnapshotVerifyResponse {
+  verified: boolean
+  dataset_id: string
+  file_path: string
+  snapshot_status?: string
 }

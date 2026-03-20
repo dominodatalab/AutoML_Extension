@@ -5,7 +5,6 @@ import json
 import logging
 import shutil
 from typing import Any, Dict, List, Optional
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -13,9 +12,8 @@ logger = logging.getLogger(__name__)
 class ModelExporter:
     """Handles model export to various formats for deployment."""
 
-    def __init__(self, output_dir: str = "/tmp/model_exports"):
-        self.output_dir = output_dir
-        os.makedirs(output_dir, exist_ok=True)
+    def __init__(self):
+        pass
 
     @staticmethod
     def _remove_path_if_exists(path: str) -> None:
@@ -24,6 +22,22 @@ class ModelExporter:
             os.unlink(path)
         elif os.path.isdir(path):
             shutil.rmtree(path)
+
+    def generate_deployment_files(self, model_type: str) -> Dict[str, str]:
+        """Generate deployment text files in memory (no disk I/O).
+
+        Returns a dict of {filename: content} for inference.py, requirements.txt,
+        Dockerfile, and model_metadata.json.
+        """
+        metadata = json.dumps(
+            {"model_type": model_type, "framework": "autogluon"}, indent=2
+        )
+        return {
+            "inference.py": self._generate_inference_script(model_type),
+            "requirements.txt": self._generate_requirements(model_type),
+            "Dockerfile": self._generate_dockerfile(model_type),
+            "model_metadata.json": metadata,
+        }
 
     def export_for_deployment(
         self,
