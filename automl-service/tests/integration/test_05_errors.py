@@ -7,8 +7,6 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
-# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
-@pytest.mark.skip(reason="DOM-75049: integration tests disabled in sandbox")
 class TestJobErrors:
     """Error handling for job-related endpoints."""
 
@@ -97,8 +95,6 @@ class TestJobErrors:
         assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
 
 
-# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
-@pytest.mark.skip(reason="DOM-75049: integration tests disabled in sandbox")
 class TestProfilingErrors:
     """Error handling for profiling endpoints."""
 
@@ -127,8 +123,6 @@ class TestProfilingErrors:
         assert resp.status_code in (400, 404, 422, 500)
 
 
-# See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
-@pytest.mark.skip(reason="DOM-75049: integration tests disabled in sandbox")
 class TestRegistryErrors:
     """Error handling for registry endpoints."""
 

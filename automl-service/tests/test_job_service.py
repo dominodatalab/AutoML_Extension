@@ -352,8 +352,6 @@ class TestBuildJobModel:
 class TestResolveExecutionTarget:
     """Tests for resolve_execution_target."""
 
-    # See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
-    @pytest.mark.skip(reason="DOM-75049: unstable in sandbox")
     def test_local_default(self):
         req = _make_create_request()
         assert resolve_execution_target(req) == "local"
@@ -366,8 +364,6 @@ class TestResolveExecutionTarget:
         req = _make_create_request(run_as_domino_job=True)
         assert resolve_execution_target(req) == "domino_job"
 
-    # See DOM-75049: https://dominodatalab.atlassian.net/browse/DOM-75049
-    @pytest.mark.skip(reason="DOM-75049: unstable in sandbox")
     def test_legacy_flag_false_stays_local(self):
         req = _make_create_request(run_as_domino_job=False)
         assert resolve_execution_target(req) == "local"
