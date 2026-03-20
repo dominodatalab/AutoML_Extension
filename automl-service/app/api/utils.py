@@ -1,12 +1,28 @@
 """Shared utilities for API route handlers."""
 
+import os
 from typing import Optional, Tuple
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.utils import remap_shared_path
 from app.db import crud
+
+
+def resolve_request_project_id(request: Optional[Request]) -> Optional[str]:
+    """Resolve project context from request metadata with environment fallback."""
+    if request is not None:
+        header_project_id = request.headers.get("X-Project-Id")
+        if header_project_id:
+            return header_project_id
+
+        for query_key in ("projectId", "project_id"):
+            query_project_id = request.query_params.get(query_key)
+            if query_project_id:
+                return query_project_id
+
+    return os.environ.get("DOMINO_PROJECT_ID") or None
 
 
 async def get_job_paths(
