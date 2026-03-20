@@ -4,7 +4,6 @@ data/datasets/uploads/
 data/temp/
 **/**/local_data/
 automl-service/mlruns/
-automl-service/app/api/generated/
 **/*/mlflow.db
 
 # Database
