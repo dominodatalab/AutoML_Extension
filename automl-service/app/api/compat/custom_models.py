@@ -17,8 +17,9 @@ def register_custom_model_routes(app: FastAPI) -> None:
     @app.get("/svcmodels")
     async def svc_list_models(request: Request):
         project_id = request.headers.get("X-Project-Id")
+        owner = request.headers.get("domino-username")
         async with get_db_session() as db:
-            return await list_registered_models_response(db, project_id=project_id)
+            return await list_registered_models_response(db, project_id=project_id, owner=owner)
 
     @app.get("/svcdeployments")
     async def svc_list_deployments():

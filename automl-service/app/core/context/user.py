@@ -38,6 +38,11 @@ def _fetch_user() -> Optional[User]:
     return User(id=u.id, user_name=u.user_name, roles=roles)
 
 
+def clear_viewing_user() -> None:
+    """Clear the cached user so the next request starts fresh."""
+    _user_ctx.set(None)
+
+
 def get_viewing_user() -> Optional[User]:
     """Get the current request's user, fetching once per context."""
     cached = _user_ctx.get()
