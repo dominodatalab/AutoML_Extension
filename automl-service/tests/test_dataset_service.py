@@ -10,6 +10,7 @@ Covers:
 
 import math
 import os
+from unittest.mock import AsyncMock
 
 import numpy as np
 import pandas as pd
@@ -22,6 +23,7 @@ from app.services.dataset_service import (
     _safe_int,
     build_preview_payload,
     coerce_preview_response,
+    list_datasets_response,
     normalize_preview_pagination,
 )
 
@@ -358,3 +360,25 @@ class TestCoercePreviewResponse:
 
         result = coerce_preview_response(DualModel())
         assert result["dataset_id"] == "from-model-dump"
+
+
+class TestListDatasetsResponse:
+    """Verify dataset list orchestration flags are forwarded correctly."""
+
+    @pytest.mark.asyncio
+    async def test_forwards_include_files_flag_to_dataset_manager(self):
+        manager = AsyncMock()
+        manager.list_datasets.return_value = []
+
+        response = await list_datasets_response(
+            manager,
+            project_id="proj-1",
+            include_files=False,
+        )
+
+        manager.list_datasets.assert_awaited_once_with(
+            project_id="proj-1",
+            include_files=False,
+        )
+        assert response.total == 0
+        assert response.datasets == []
