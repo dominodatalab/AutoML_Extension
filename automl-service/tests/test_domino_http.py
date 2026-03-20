@@ -94,8 +94,8 @@ class TestGetDominoAuthHeaders:
             cfg._settings_instance = old
 
     @pytest.mark.asyncio
-    async def test_sidecar_token_fetched_each_call(self, monkeypatch):
-        """After removing caching, each call to get_domino_auth_headers fetches fresh."""
+    async def test_sidecar_token_used_when_no_forwarded_token(self, monkeypatch):
+        """When no user token is forwarded, sidecar token is fetched."""
         monkeypatch.delenv("DOMINO_API_KEY", raising=False)
         monkeypatch.delenv("DOMINO_USER_API_KEY", raising=False)
 
@@ -109,13 +109,30 @@ class TestGetDominoAuthHeaders:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-            headers_one = await get_domino_auth_headers()
-            headers_two = await get_domino_auth_headers()
+            headers = await get_domino_auth_headers()
 
-        assert headers_one["Authorization"] == "Bearer token-123"
-        assert headers_two["Authorization"] == "Bearer token-123"
-        # Sidecar is called each time (no caching in stateless auth)
-        assert mock_client.get.await_count == 2
+        assert headers["Authorization"] == "Bearer token-123"
+        assert mock_client.get.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_sidecar_skipped_when_forwarded_token_present(self, monkeypatch):
+        """When a user token is forwarded, sidecar is NOT called."""
+        from app.core.context.auth import set_request_auth_header
+
+        monkeypatch.delenv("DOMINO_API_KEY", raising=False)
+        monkeypatch.delenv("DOMINO_USER_API_KEY", raising=False)
+        set_request_auth_header("Bearer user-token-abc")
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            headers = await get_domino_auth_headers()
+
+        assert headers["Authorization"] == "Bearer user-token-abc"
+        # Sidecar should NOT have been called
+        assert mock_client.get.await_count == 0
 
 
 # ---------------------------------------------------------------------------
