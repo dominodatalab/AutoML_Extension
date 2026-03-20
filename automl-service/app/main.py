@@ -132,34 +132,11 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def capture_auth_header(request: Request, call_next):
         auth_header = request.headers.get("authorization")
-        # TODO(debug): remove after verifying Extension JWT behavior
-        if auth_header and request.url.path.startswith("/svc"):
-            import base64, json as _json
-            try:
-                payload_b64 = auth_header.split(".")[1]
-                payload_b64 += "=" * (4 - len(payload_b64) % 4)
-                claims = _json.loads(base64.urlsafe_b64decode(payload_b64))
-                logger.info(
-                    "[AUTH DEBUG] path=%s domino-username=%s jwt.sub=%s jwt.aud=%s jwt.azp=%s jwt.exp=%s token_len=%d",
-                    request.url.path,
-                    request.headers.get("domino-username", "?"),
-                    claims.get("sub", "?"),
-                    claims.get("aud", "?"),
-                    claims.get("azp", "?"),
-                    claims.get("exp", "?"),
-                    len(auth_header),
-                )
-            except Exception:
-                logger.info("[AUTH DEBUG] path=%s has auth header (%d chars) but could not decode JWT", request.url.path, len(auth_header))
-        elif not auth_header and request.url.path.startswith("/svc"):
-            logger.info("[AUTH DEBUG] path=%s NO Authorization header. domino-username=%s", request.url.path, request.headers.get("domino-username", "?"))
-        # Set before handling; ensure cleanup/reset after response
+        # Store the forwarded token so outbound Domino API calls
+        # (datasetrw, jobs, registry) run as the visiting user.
+        # The sidecar token is only used as fallback when no user token
+        # is present (background tasks, health checks).
         set_request_auth_header(auth_header)
-        # NOTE: resolve_viewing_user() is disabled. The sidecar proxy
-        # returns 500 when it receives the browser's forwarded auth token,
-        # and even when called without auth it returns the App owner's
-        # identity, not the viewing user's. RBAC owner filtering uses the
-        # domino-username header instead (trusted, injected by Domino proxy).
         try:
             response = await call_next(request)
         finally:
