@@ -216,9 +216,10 @@ def build_job_model(
     project_id: Optional[str],
     project_name: Optional[str],
     project_owner: Optional[str] = None,
+    execution_target: Optional[str] = None,
 ) -> Job:
     """Build a Job ORM model from request and resolved context."""
-    execution_target = "domino_job"
+    model_execution_target = execution_target or "domino_job"
 
     return Job(
         name=job_name,
@@ -244,7 +245,7 @@ def build_job_model(
         auto_register=job_request.auto_register,
         register_name=job_request.register_name,
         status=JobStatus.PENDING,
-        execution_target=execution_target,
+        execution_target=model_execution_target,
         autogluon_config=build_autogluon_config(job_request),
     )
 
@@ -259,7 +260,9 @@ async def _count_active_domino_jobs(db: AsyncSession) -> int:
 
 def resolve_execution_target(job_request: JobCreateRequest) -> str:
     """Resolve training execution target, supporting legacy and explicit flags."""
-    return "domino_job"
+    if job_request.execution_target == "domino_job" or job_request.run_as_domino_job:
+        return "domino_job"
+    return "local"
 
 
 async def create_job_with_context(
@@ -323,6 +326,7 @@ async def create_job_with_context(
         project_id=project_id,
         project_name=project_name,
         project_owner=project_owner,
+        execution_target=execution_target,
     )
     try:
         job = await crud.create_job(db, job)

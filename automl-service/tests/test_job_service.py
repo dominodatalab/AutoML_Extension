@@ -677,7 +677,7 @@ class TestQueueCapacity:
         return MagicMock(**defaults)
 
     @pytest.mark.asyncio
-    async def test_local_queue_full_returns_429(self, db_session):
+    async def test_local_queue_full_returns_429(self, db_session, mock_viewing_user):
         mock_viewing_user
         req = _make_create_request()
         with (

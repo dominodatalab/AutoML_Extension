@@ -25,6 +25,7 @@ pytestmark = pytest.mark.domino
 # ---------------------------------------------------------------------------
 
 VALID_TABULAR_JOB = {
+    "execution_target": "local",
     "name": "test-tabular-job",
     "model_type": "tabular",
     "data_source": "upload",
