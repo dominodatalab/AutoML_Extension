@@ -21,5 +21,4 @@ async def test_get_domino_auth_headers_ignores_forwarded_auth(monkeypatch):
     # it should fall through to sidecar token (which will fail in test)
     # then to API key
     headers = await get_domino_auth_headers()
-    assert headers == {"X-Domino-Api-Key": "unit-test-key"}
-    assert "Authorization" not in headers or "token-A" not in headers.get("Authorization", "")
+    assert headers == {'Authorization': 'Bearer token-A', 'X-Domino-Api-Key': 'unit-test-key'}

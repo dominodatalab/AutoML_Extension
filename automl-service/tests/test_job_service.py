@@ -377,7 +377,8 @@ class TestResolveExecutionTarget:
 class TestResolveJobListFilters:
     """Tests for resolve_job_list_filters."""
 
-    def test_all_none_without_request(self):
+    def test_all_none_without_request(self, mock_viewing_user):
+        mock_viewing_user
         lr = _make_list_request()
         status, model_type, owner, pid, pname = resolve_job_list_filters(lr, None)
         assert status is None
@@ -386,41 +387,55 @@ class TestResolveJobListFilters:
         assert pid is None
         assert pname is None
 
-    def test_status_filter_parsed(self):
+    def test_status_filter_parsed(self, mock_viewing_user):
+        mock_viewing_user
         lr = _make_list_request(status="completed")
         status, *_ = resolve_job_list_filters(lr, None)
         assert status == JobStatus.COMPLETED
 
-    def test_model_type_filter_parsed(self):
+    def test_model_type_filter_parsed(self, mock_viewing_user):
+        mock_viewing_user
         lr = _make_list_request(model_type="timeseries")
         _, model_type, *_ = resolve_job_list_filters(lr, None)
         assert model_type == ModelType.TIMESERIES
 
-    def test_owner_always_from_header_ignores_body(self):
+    def test_owner_always_from_header_ignores_body(self, mock_viewing_user):
         """Client-supplied owner is ignored — always uses domino-username header."""
+        mock_viewing_user
         lr = _make_list_request(owner="alice")
         request = _fake_request(headers={"domino-username": "bob"})
         _, _, owner, *_ = resolve_job_list_filters(lr, request)
         assert owner == "bob"
 
-    def test_owner_from_http_request_header(self):
+    def test_owner_from_http_request_header(self, monkeypatch):
+        from app.core.context import user as user_ctx
+
+        def fake_get_viewing_user():
+            return user_ctx.User(id="test-id", user_name="bob", roles=["SysAdmin", "Practitioner"])
+
+        import app.services.job_service as job_service
+        monkeypatch.setattr(job_service, "get_viewing_user", fake_get_viewing_user, raising=True)
+
         lr = _make_list_request()
         request = _fake_request(headers={"domino-username": "bob"})
         _, _, owner, *_ = resolve_job_list_filters(lr, request)
         assert owner == "bob"
 
-    def test_owner_none_without_request(self):
+    def test_owner_none_without_request(self, mock_viewing_user):
         """Without HTTP request, owner filter is None (local dev)."""
+        mock_viewing_user
         lr = _make_list_request(owner="alice")
         _, _, owner, *_ = resolve_job_list_filters(lr, None)
         assert owner is None
 
-    def test_project_name_filter(self):
+    def test_project_name_filter(self, mock_viewing_user):
+        mock_viewing_user
         lr = _make_list_request(project_name="my-proj")
         *_, pname = resolve_job_list_filters(lr, None)
         assert pname == "my-proj"
 
-    def test_project_id_filter(self):
+    def test_project_id_filter(self, mock_viewing_user):
+        mock_viewing_user
         lr = _make_list_request(project_id="pid-42")
         _, _, _, pid, _ = resolve_job_list_filters(lr, None)
         assert pid == "pid-42"
@@ -592,15 +607,25 @@ class TestExtractMetricsLeaderboard:
 class TestGetRequestOwner:
     """Tests for get_request_owner."""
 
-    def test_from_header(self):
+    def test_from_header_when_no_viewing_user(self, monkeypatch):
+        # Without a viewing user available, header should be used
+        monkeypatch.setattr(
+            "app.services.job_service.get_viewing_user", lambda: None
+        )
         req = _fake_request(headers={"domino-username": "charlie"})
         assert get_request_owner(req) == "charlie"
 
-    def test_missing_header_returns_anonymous(self):
+    def test_missing_header_returns_anonymous_when_no_viewing_user(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.services.job_service.get_viewing_user", lambda: None
+        )
         req = _fake_request(headers={})
         assert get_request_owner(req) == "anonymous"
 
-    def test_none_request_returns_anonymous(self):
+    def test_none_request_returns_anonymous_when_no_viewing_user(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.services.job_service.get_viewing_user", lambda: None
+        )
         assert get_request_owner(None) == "anonymous"
 
 
@@ -655,7 +680,8 @@ class TestQueueCapacity:
         return MagicMock(**defaults)
 
     @pytest.mark.asyncio
-    async def test_local_queue_full_returns_429(self, db_session):
+    async def test_local_queue_full_returns_429(self, db_session, mock_viewing_user):
+        mock_viewing_user
         req = _make_create_request()
         with (
             patch("app.core.job_queue.get_job_queue") as mock_queue,
@@ -670,7 +696,8 @@ class TestQueueCapacity:
             assert "local" in exc_info.value.detail.lower()
 
     @pytest.mark.asyncio
-    async def test_domino_queue_full_returns_429(self, db_session):
+    async def test_domino_queue_full_returns_429(self, db_session, mock_viewing_user):
+        mock_viewing_user
         req = _make_create_request(execution_target="domino_job")
         with (
             patch(
@@ -688,8 +715,9 @@ class TestQueueCapacity:
             assert "domino" in exc_info.value.detail.lower()
 
     @pytest.mark.asyncio
-    async def test_local_queue_under_limit_proceeds(self, db_session):
+    async def test_local_queue_under_limit_proceeds(self, db_session, mock_viewing_user):
         """When the local queue is under the limit, the job should be created."""
+        mock_viewing_user
         req = _make_create_request()
         with (
             patch("app.core.job_queue.get_job_queue") as mock_queue,
@@ -710,8 +738,9 @@ class TestQueueCapacity:
             assert result is not None
 
     @pytest.mark.asyncio
-    async def test_bad_input_returns_400_not_429(self, db_session):
+    async def test_bad_input_returns_400_not_429(self, db_session, mock_viewing_user):
         """Validation errors (400) should fire before capacity checks (429)."""
+        mock_viewing_user
         req = _make_create_request(data_source="domino_dataset", dataset_id=None)
         # Even if queue is "full", bad input gets 400
         with pytest.raises(HTTPException) as exc_info:

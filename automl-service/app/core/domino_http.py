@@ -8,11 +8,12 @@ modules that call Domino platform APIs.
 import asyncio
 import logging
 import os
-import time
 from typing import Any, Optional
 
 import httpx
 
+from app.api.generated.domino_public_api_client.client import Client as DominoApiClient
+from app.core.context.auth import get_request_auth_header
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -20,92 +21,55 @@ logger = logging.getLogger(__name__)
 _RETRYABLE_STATUS_CODES = (408, 502, 503, 504)
 _DEFAULT_MAX_RETRIES = 4
 _DEFAULT_TIMEOUT = 30.0
-_AUTH_CACHE_TTL_SECONDS = 3.0
 
-_auth_cache_headers: Optional[dict[str, str]] = None
-_auth_cache_expires_at = 0.0
-_auth_lock: Optional[asyncio.Lock] = None
+def get_sync_auth_headers() -> dict[str, str]:
+    forwarded_auth = get_request_auth_header()
+    headers = {}
+    if forwarded_auth:
+        headers["Authorization"] = forwarded_auth
 
+    api_key = (
+        os.environ.get("DOMINO_API_KEY")
+        or os.environ.get("DOMINO_USER_API_KEY")
+        or get_settings().effective_api_key
+    )
+    if api_key:
+        headers["X-Domino-Api-Key"] = api_key
 
-def _get_auth_lock() -> asyncio.Lock:
-    global _auth_lock
-    if _auth_lock is None:
-        _auth_lock = asyncio.Lock()
-    return _auth_lock
+    return headers
 
+async def get_domino_auth_headers() -> dict[str, str]:
+    """Build Domino auth headers using the platform priority chain.
 
-
-def _get_cached_auth_headers() -> Optional[dict[str, str]]:
-    if _auth_cache_headers and _auth_cache_expires_at > time.monotonic():
-        return dict(_auth_cache_headers)
-    return None
-
-
-def _cache_auth_headers(headers: dict[str, str]) -> dict[str, str]:
-    global _auth_cache_headers, _auth_cache_expires_at
-    _auth_cache_headers = dict(headers)
-    _auth_cache_expires_at = time.monotonic() + _AUTH_CACHE_TTL_SECONDS
-    return dict(headers)
-
-
-def _invalidate_auth_cache() -> None:
-    global _auth_cache_headers, _auth_cache_expires_at
-    _auth_cache_headers = None
-    _auth_cache_expires_at = 0.0
-
-
-async def _reset_domino_http_state() -> None:
-    """Test helper to clear auth caches between cases."""
-    _invalidate_auth_cache()
-
-
-async def get_domino_auth_headers(force_refresh: bool = False) -> dict[str, str]:
-    """Build Domino auth headers for calls through the sidecar proxy.
-
-    The sidecar at localhost:8899 injects its own auth when proxying to
-    Domino.  Forwarding the browser's Authorization header overrides the
-    sidecar's auth and causes 500 errors.  So this function does NOT use
-    the per-request forwarded header — it relies on the sidecar's own
-    token or falls back to a static API key.
-
-    Priority (exclusive — first match wins):
-    1. Ephemeral Bearer token from the Domino sidecar (localhost:8899)
-    2. Static API key (DOMINO_API_KEY / DOMINO_USER_API_KEY / token file)
+    Priority:
+    1. Get auth headers from request from auth context
+    2. Fallback to the ephemeral token from Domino App/Run sidecar (localhost:8899)
     """
-    # 1. Cached sidecar token (app-level, safe to cache)
-    if not force_refresh:
-        cached_headers = _get_cached_auth_headers()
-        if cached_headers is not None:
-            return cached_headers
+    headers = get_sync_auth_headers()
 
-    async with _get_auth_lock():
-        if not force_refresh:
-            cached_headers = _get_cached_auth_headers()
-            if cached_headers is not None:
-                return cached_headers
+    # fallbaack to the ephemeral token from Domino App/Run sidecar
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            # TODO this url must be dynamically resolved
+            resp = await client.get("http://localhost:8899/access-token")
+        if resp.status_code == 200 and resp.text.strip():
+            headers["Authorization"] = f"Bearer {resp.text.strip()}"
+    except Exception:
+        pass
 
-        try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.get("http://localhost:8899/access-token", timeout=5.0)
-            if resp.status_code == 200 and resp.text.strip():
-                sidecar_headers = {"Authorization": f"Bearer {resp.text.strip()}"}
-                _cache_auth_headers(sidecar_headers)
-                return sidecar_headers
-        except Exception:
-            pass
+    return headers
 
-        # 3. Static API key as last resort
-        api_key = (
-            os.environ.get("DOMINO_API_KEY")
-            or os.environ.get("DOMINO_USER_API_KEY")
-            or get_settings().effective_api_key
-        )
-        if api_key:
-            return _cache_auth_headers({"X-Domino-Api-Key": api_key})
+def get_domino_public_api_client_sync() -> DominoApiClient:
+    """Create a Domino Public API client with auth, which uses the
+    Authorization header if present, fallsback to DOMINO_API_KEY/DOMINO_USER_API_KEY/token file
+    If none is available, none is set.
+    """
+    headers = get_sync_auth_headers()
 
-        _invalidate_auth_cache()
-        return {}
+    # Base URL
+    base_url = resolve_domino_api_host()
 
+    return DominoApiClient(base_url=base_url).with_headers(headers)
 
 def resolve_domino_api_host() -> str:
     """Resolve the Domino API base URL.
@@ -167,7 +131,7 @@ async def domino_request(
     last_exc: Optional[Exception] = None
 
     for attempt in range(max_retries + 1):
-        auth_headers = await get_domino_auth_headers(force_refresh=attempt > 0)
+        auth_headers = await get_domino_auth_headers()
         merged_headers = {**auth_headers, **(headers or {})}
         try:
             # Fresh client per request — the Domino App proxy closes idle
