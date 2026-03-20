@@ -85,6 +85,7 @@ class Job(Base):
     metrics: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     leaderboard: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     model_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    diagnostics_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     # Experiment tracking
     experiment_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -117,6 +118,25 @@ class JobLog(Base):
     level: Mapped[str] = mapped_column(String(20), default="INFO")
     message: Mapped[str] = mapped_column(Text, nullable=False)
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+
+class EDAResult(Base):
+    """Async EDA job state and results."""
+    __tablename__ = "eda_results"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)  # request_id UUID
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending, running, completed, failed
+    mode: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # tabular, timeseries
+    owner: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    project_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    domino_job_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    domino_job_status: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    domino_job_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    request_payload: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON string
+    result_payload: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON string (large)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 
 
 class RegisteredModel(Base):
