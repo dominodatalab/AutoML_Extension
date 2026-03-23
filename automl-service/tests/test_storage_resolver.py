@@ -86,7 +86,7 @@ class TestDownloadFile:
         assert "/v4/datasetrw/snapshot/" in call_path
 
     @pytest.mark.asyncio
-    async def test_falls_back_when_snapshot_endpoint_fails(self, tmp_path):
+    async def test_falls_back_to_nucleus_when_proxy_fails(self, tmp_path):
         resolver = ProjectStorageResolver()
         dest = str(tmp_path / "output.csv")
         call_count = 0
@@ -95,10 +95,11 @@ class TestDownloadFile:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
+                # First call via proxy fails
                 raise httpx.HTTPStatusError(
                     "Not Found", request=MagicMock(), response=MagicMock(status_code=404)
                 )
-            # Second call succeeds (Bearer auth fallback on same v4 endpoint)
+            # Second call via nucleus succeeds
 
         with patch.object(
             resolver, "_get_latest_snapshot_id", new_callable=AsyncMock, return_value="snap-1"
@@ -106,11 +107,13 @@ class TestDownloadFile:
             resolver, "get_rw_snapshot_id", new_callable=AsyncMock, return_value="rw-snap-1"
         ), patch(
             "app.services.storage_resolver.domino_download", side_effect=fake_download
+        ), patch(
+            "app.services.storage_resolver.resolve_domino_nucleus_host", return_value="http://nucleus:80"
         ):
             result = await resolver.download_file("ds-123", "uploads/file.csv", dest)
 
         assert result == dest
-        assert call_count == 2
+        assert call_count == 2  # proxy failed, nucleus succeeded
 
     @pytest.mark.asyncio
     async def test_download_without_latest_snapshot(self, tmp_path):
