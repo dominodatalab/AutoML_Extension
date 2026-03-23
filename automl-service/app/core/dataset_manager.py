@@ -6,8 +6,12 @@ import os
 import time
 from typing import Any, Optional
 
-import httpx
-
+from app.api.generated.domino_public_api_client.api.dataset_rw import (
+    get_dataset as get_dataset_api,
+)
+from app.api.generated.domino_public_api_client.models.dataset_rw_envelope_v1 import (
+    DatasetRwEnvelopeV1,
+)
 from app.config import get_settings
 from app.api.schemas.dataset import (
     DatasetFileResponse,
@@ -16,7 +20,7 @@ from app.api.schemas.dataset import (
     DatasetSchemaResponse,
 )
 from app.core.dataset_mounts import resolve_dataset_mount_paths
-from app.core.domino_http import domino_request
+from app.core.domino_http import get_domino_public_api_client_sync
 from app.core.tabular_data import read_tabular_preview, read_tabular_schema
 from app.services.domino_dataset_api import list_project_datasets
 
@@ -97,15 +101,18 @@ class DominoDatasetManager:
                 )
         return normalized
 
-    async def _api_request(self, method: str, endpoint: str, **kwargs) -> dict:
-        """Make a request to the Domino API using the shared auth chain.
+    @staticmethod
+    def _fetch_dataset_details(dataset_id: str) -> dict:
+        """Fetch a single dataset via the generated Domino API client.
 
-        Uses ``domino_request`` which forwards the visiting user's token
-        for proper authorization, falling back to the sidecar token for
-        background tasks.
+        Returns the inner dataset dict (camelCase keys) on success, or
+        an empty dict if the dataset was not found / API returned an error.
         """
-        resp = await domino_request(method, endpoint, **kwargs)
-        return resp.json() if resp.text else {}
+        client = get_domino_public_api_client_sync()
+        result = get_dataset_api.sync(dataset_id, client=client)
+        if isinstance(result, DatasetRwEnvelopeV1):
+            return result.dataset.to_dict()
+        return {}
 
     async def list_datasets(
         self,
@@ -521,15 +528,15 @@ class DominoDatasetManager:
         if dataset_id.startswith("domino:"):
             return self._get_mounted_dataset(dataset_id.replace("domino:", ""))
 
-        # Domino dataset - use REST API
+        # Domino dataset - use generated API client
         if self.settings.is_domino_environment:
             try:
                 result = self._dataset_item_cache.get(dataset_id)
                 cache_hit = result is not None
                 if result is None:
-                    result = await self._api_request("GET", f"/api/datasetrw/v1/datasets/{dataset_id}")
-                    if isinstance(result, dict) and isinstance(result.get("dataset"), dict):
-                        result = result["dataset"]
+                    result = self._fetch_dataset_details(dataset_id)
+                    if not result:
+                        return None
                     cached_id = str(result.get("datasetId", result.get("id", dataset_id)))
                     if cached_id:
                         self._dataset_item_cache[cached_id] = dict(result)
@@ -548,10 +555,6 @@ class DominoDatasetManager:
                         elapsed_ms,
                     )
                     return dataset
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 404:
-                    return None
-                logger.error(f"HTTP error getting dataset: {e.response.status_code}")
             except Exception as e:
                 logger.error(f"Failed to get dataset details: {e}")
 

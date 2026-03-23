@@ -24,9 +24,22 @@ from typing import Optional
 import httpx
 from fastapi import HTTPException
 
+from app.api.generated.domino_public_api_client.api.dataset_rw import (
+    get_dataset_snapshots,
+)
+from app.api.generated.domino_public_api_client.models.paginated_snapshot_envelope_v1 import (
+    PaginatedSnapshotEnvelopeV1,
+)
+from app.api.generated.domino_public_api_client.models.snapshot_details_v1 import (
+    SnapshotDetailsV1,
+)
+from app.api.generated.domino_public_api_client.models.snapshot_details_v1_status import (
+    SnapshotDetailsV1Status,
+)
 from app.core.domino_http import (
     domino_download,
     domino_request,
+    get_domino_public_api_client_sync,
     resolve_domino_api_host,
     resolve_domino_nucleus_host,
 )
@@ -337,29 +350,36 @@ class ProjectStorageResolver:
             f"Failed to download '{file_path}' from dataset {dataset_id}: {last_error}"
         )
 
+    @staticmethod
+    def _list_snapshots_typed(
+        dataset_id: str,
+        *,
+        limit: int | None = None,
+    ) -> list[SnapshotDetailsV1]:
+        """List snapshots for a dataset using the generated API client.
+
+        Returns typed ``SnapshotDetailsV1`` objects.  Returns an empty list
+        on any error so callers can fall through gracefully.
+        """
+        client = get_domino_public_api_client_sync()
+        kwargs: dict = {}
+        if limit is not None:
+            kwargs["limit"] = limit
+        result = get_dataset_snapshots.sync(dataset_id, client=client, **kwargs)
+        if isinstance(result, PaginatedSnapshotEnvelopeV1):
+            return list(result.snapshots)
+        return []
+
     async def get_latest_snapshot_status(self, dataset_id: str) -> Optional[str]:
         """Return the status of the latest snapshot for a dataset.
-
-        Uses ``GET /api/datasetrw/v1/datasets/{id}/snapshots`` which returns
-        ``{"snapshots": [{"id": ..., "status": "active"|"pending"|...}]}``.
 
         Returns the status string (``"active"``, ``"pending"``, ``"copying"``,
         ``"failed"``, etc.) or ``None`` if no snapshot exists.
         """
         try:
-            resp = await domino_request(
-                "GET",
-                f"/api/datasetrw/v1/datasets/{dataset_id}/snapshots",
-                params={"limit": 1},
-            )
-            data = resp.json()
-            snapshots = data.get("snapshots") or []
+            snapshots = self._list_snapshots_typed(dataset_id, limit=1)
             if snapshots:
-                snapshot = snapshots[0]
-                # The v1 response wraps as {"snapshot": {...}} — unwrap if needed
-                if "snapshot" in snapshot and isinstance(snapshot["snapshot"], dict):
-                    snapshot = snapshot["snapshot"]
-                return snapshot.get("status")
+                return str(snapshots[0].status.value)
         except Exception:
             logger.debug("Failed to get snapshot status for dataset %s", dataset_id, exc_info=True)
         return None
@@ -385,25 +405,13 @@ class ProjectStorageResolver:
         if rw_sid:
             return rw_sid
 
-        # Fallback: retry the v1 snapshots endpoint via the default host
-        # (proxy).  The non-versioned /api/datasetrw/datasets/{id} and
-        # /api/datasetrw/snapshots/{id} endpoints are 404 on this Domino
-        # version, so we skip them.
+        # Fallback: retry the v1 snapshots endpoint (same generated client).
         try:
-            resp = await domino_request(
-                "GET",
-                f"/api/datasetrw/v1/datasets/{dataset_id}/snapshots",
-            )
-            data = resp.json()
-            snapshots = data.get("snapshots") or []
+            snapshots = self._list_snapshots_typed(dataset_id)
             for s in snapshots:
-                if "snapshot" in s and isinstance(s["snapshot"], dict):
-                    s = s["snapshot"]
-                if s.get("isReadWrite") or s.get("status") == "active":
-                    rw_sid = str(s.get("id") or s.get("snapshotId") or "")
-                    if rw_sid:
-                        self._backfill_rw_cache(dataset_id, rw_sid)
-                        return rw_sid
+                if s.status == SnapshotDetailsV1Status.ACTIVE:
+                    self._backfill_rw_cache(dataset_id, s.id)
+                    return s.id
         except Exception:
             logger.debug(
                 "Failed to list v1 snapshots for dataset %s",
@@ -424,23 +432,14 @@ class ProjectStorageResolver:
     async def _resolve_rw_snapshot_v1(self, dataset_id: str) -> Optional[str]:
         """Try the v1 snapshots endpoint to find the RW snapshot ID."""
         try:
-            resp = await domino_request(
-                "GET",
-                f"/api/datasetrw/v1/datasets/{dataset_id}/snapshots",
-            )
-            data = resp.json()
-            snapshots = data.get("snapshots") or []
+            snapshots = self._list_snapshots_typed(dataset_id)
             for s in snapshots:
-                if "snapshot" in s and isinstance(s["snapshot"], dict):
-                    s = s["snapshot"]
-                if s.get("isReadWrite") or s.get("status") == "active":
-                    rw_sid = str(s.get("id") or s.get("snapshotId") or "")
-                    if rw_sid:
-                        logger.debug(
-                            "Resolved RW snapshot %s for dataset %s via v1 API",
-                            rw_sid, dataset_id,
-                        )
-                        return rw_sid
+                if s.status == SnapshotDetailsV1Status.ACTIVE:
+                    logger.debug(
+                        "Resolved RW snapshot %s for dataset %s via v1 API",
+                        s.id, dataset_id,
+                    )
+                    return s.id
         except Exception:
             logger.debug(
                 "Failed to resolve RW snapshot via v1 for dataset %s",
@@ -621,19 +620,9 @@ class ProjectStorageResolver:
     async def _get_latest_snapshot_id(self, dataset_id: str) -> Optional[str]:
         """Return the latest snapshot ID for a dataset, or None."""
         try:
-            resp = await domino_request(
-                "GET",
-                f"/api/datasetrw/v1/datasets/{dataset_id}/snapshots",
-                params={"limit": 1},
-            )
-            data = resp.json()
-            snapshots = data.get("snapshots") or []
+            snapshots = self._list_snapshots_typed(dataset_id, limit=1)
             if snapshots:
-                s = snapshots[0]
-                # Unwrap v1 envelope if present
-                if "snapshot" in s and isinstance(s["snapshot"], dict):
-                    s = s["snapshot"]
-                return str(s.get("id") or s.get("snapshotId") or "")
+                return snapshots[0].id
         except Exception:
             logger.debug("Failed to get snapshot ID for dataset %s", dataset_id, exc_info=True)
         return None
