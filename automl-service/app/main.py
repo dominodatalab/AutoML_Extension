@@ -80,9 +80,12 @@ async def lifespan(app: FastAPI):
     logger.info(f"Required directories created (uploads: {settings.uploads_path})")
 
     from app.core.utils import cleanup_dataset_cache
-    deleted = cleanup_dataset_cache(os.path.join(settings.temp_path, "dataset_cache"))
+    deleted = cleanup_dataset_cache(
+        os.path.join(settings.temp_path, "dataset_cache"),
+        max_age_hours=settings.dataset_cache_ttl_hours,
+    )
     if deleted:
-        logger.info("Cleaned up %d stale cached dataset files", deleted)
+        logger.info("Cleaned up %d stale cached dataset files (TTL=%dh)", deleted, settings.dataset_cache_ttl_hours)
 
     from app.dependencies import get_db_session as _get_db_session
     async with _get_db_session() as db:
