@@ -218,21 +218,30 @@ async def upload_file(
     """
     from app.config import get_settings as _get_settings
 
+    settings = _get_settings()
     project_id = _resolve_project_id(request)
 
-    if project_id and not _get_settings().standalone_mode:
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    file_ext = os.path.splitext(file.filename)[1].lower()
+    if file_ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type not supported. Allowed: {list(ALLOWED_UPLOAD_EXTENSIONS)}",
+        )
+
+    max_bytes = settings.max_upload_size_mb * 1024 * 1024
+    content = await file.read()
+    if len(content) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File size ({len(content) / (1024 * 1024):.1f} MB) exceeds "
+                   f"the {settings.max_upload_size_mb} MB limit",
+        )
+
+    if project_id and not settings.standalone_mode:
         # --- Domino dataset upload path (in-memory) ---
-        if not file.filename:
-            raise HTTPException(status_code=400, detail="No file provided")
-
-        file_ext = os.path.splitext(file.filename)[1].lower()
-        if file_ext not in ALLOWED_UPLOAD_EXTENSIONS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"File type not supported. Allowed: {list(ALLOWED_UPLOAD_EXTENSIONS)}",
-            )
-
-        content = await file.read()
 
         safe_filename = f"{str(uuid.uuid4())[:8]}_{file.filename}"
 
