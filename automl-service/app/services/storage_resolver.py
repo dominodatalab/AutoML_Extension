@@ -22,6 +22,8 @@ from functools import lru_cache
 from typing import Optional
 
 import httpx
+from fastapi import HTTPException
+
 from app.api.generated.domino_public_api_client.api.dataset_rw import (
     get_dataset_snapshots,
 )
@@ -35,8 +37,10 @@ from app.api.generated.domino_public_api_client.models.snapshot_details_v1_statu
     SnapshotDetailsV1Status,
 )
 from app.core.domino_http import (
+    domino_download,
     domino_request,
     get_domino_public_api_client_sync,
+    resolve_domino_api_host,
     resolve_domino_nucleus_host,
 )
 from app.services.domino_dataset_api import (
@@ -109,6 +113,80 @@ class ProjectStorageResolver:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    async def ensure_project_storage(self, project_id: str) -> str:
+        """Return a writable mount path for the project's automl-extension dataset.
+
+        Creates the dataset if it does not exist.  Raises ``RuntimeError``
+        if creation fails or the mount cannot be located.
+        """
+        if project_id in self._cache and self._cache[project_id].mount_path:
+            return self._cache[project_id].mount_path  # type: ignore[return-value]
+
+        info = await self._resolve_or_create(project_id)
+        mount = self._probe_mount(info.name)
+        if mount:
+            info.mount_path = mount
+            self._cache[project_id] = info
+            return mount
+
+        raise RuntimeError(
+            f"Dataset '{info.name}' (id={info.dataset_id}) exists in project "
+            f"{project_id} but no local mount was found.  The App may need to "
+            f"be restarted with the dataset attached, or sharing may be required."
+        )
+
+    async def resolve_project_paths(self, project_id: str) -> ProjectPaths:
+        """Resolve storage paths for a target project.
+
+        Raises ``HTTPException(503)`` if the dataset exists but is not
+        mounted (a restart is required to pick up the new mount).
+        """
+        from app.config import get_settings
+
+        settings = get_settings()
+        if settings.standalone_mode:
+            return ProjectPaths(
+                project_id=project_id,
+                mount_path=settings.models_path.rsplit("/", 1)[0],  # parent of models/
+                models_path=settings.models_path,
+                uploads_path=settings.uploads_path,
+                eda_results_path=settings.eda_results_path,
+                temp_path=os.path.join(
+                    settings.models_path.rsplit("/", 1)[0], "temp"
+                ),
+            )
+
+        info = await self._resolve_or_create(project_id)
+        mount = self._probe_mount(info.name)
+        if not mount:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Dataset '{info.name}' exists but is not mounted. "
+                       f"Please restart the app.",
+            )
+        return ProjectPaths(
+            project_id=project_id,
+            mount_path=mount,
+            models_path=os.path.join(mount, "models"),
+            uploads_path=os.path.join(mount, "uploads"),
+            eda_results_path=os.path.join(mount, "eda_results"),
+            temp_path=os.path.join(mount, "temp"),
+        )
+
+    async def check_project_storage(
+        self, project_id: str
+    ) -> tuple[bool, Optional[str]]:
+        """Check mount status without raising.
+
+        Returns ``(mounted, mount_path_or_none)``.
+        """
+        try:
+            info = await self._resolve_or_create(project_id)
+        except Exception:
+            return False, None
+        mount = self._probe_mount(info.name)
+        return (mount is not None), mount
 
     async def ensure_dataset_exists(self, project_id: str) -> Optional[DatasetInfo]:
         """Pre-create the automl-extension dataset in a project (best-effort).
@@ -210,6 +288,67 @@ class ProjectStorageResolver:
                 )
 
         raise last_exc or RuntimeError(f"Domino Dataset RW {method} {path} failed")
+
+    async def download_file(
+        self,
+        dataset_id: str,
+        file_path: str,
+        dest_path: str,
+    ) -> str:
+        """Download a single file from a dataset to *dest_path*.
+
+        Tries snapshot-based and direct download endpoints in order.
+        The v4 raw endpoint with API key auth is tried first as it is the
+        most reliable for cross-project dataset downloads.
+        Returns *dest_path* on success, raises on failure.
+        """
+        snapshot_id = await self._get_latest_snapshot_id(dataset_id)
+        rw_snapshot_id = await self.get_rw_snapshot_id(dataset_id)
+
+        from urllib.parse import quote
+
+        endpoints: list[str] = []
+
+        if rw_snapshot_id:
+            encoded_path = quote(file_path, safe="")
+            endpoints.append(
+                f"/v4/datasetrw/snapshot/{rw_snapshot_id}/file/raw"
+                f"?path={encoded_path}&download=true"
+            )
+
+        # Try each endpoint via the default host (proxy), then fall back
+        # to the nucleus-frontend host directly (proxy may 404 for
+        # cross-project dataset file downloads).
+        base_urls = [None]  # None = default (proxy-first)
+        nucleus = resolve_domino_nucleus_host()
+        if nucleus:
+            base_urls.append(nucleus)
+
+        last_error: Optional[Exception] = None
+        for base_url in base_urls:
+            for endpoint in endpoints:
+                try:
+                    await domino_download(
+                        endpoint, dest_path,
+                        base_url=base_url,
+                    )
+                    logger.info(
+                        "Downloaded '%s' from dataset %s via %s (host=%s)",
+                        file_path, dataset_id, endpoint,
+                        base_url or "default",
+                    )
+                    return dest_path
+                except Exception as exc:
+                    last_error = exc
+                    logger.debug(
+                        "Download failed on %s (host=%s): %s",
+                        endpoint, base_url or "default", exc,
+                    )
+                    continue
+
+        raise RuntimeError(
+            f"Failed to download '{file_path}' from dataset {dataset_id}: {last_error}"
+        )
 
     @staticmethod
     def _list_snapshots_typed(
@@ -353,6 +492,98 @@ class ProjectStorageResolver:
             )
             return []
 
+    async def download_directory(
+        self,
+        dataset_id: str,
+        remote_path: str,
+        dest_dir: str,
+    ) -> str:
+        """Download an entire directory tree from a dataset to *dest_dir*.
+
+        Recursively lists files in the snapshot and downloads each one.
+        Returns *dest_dir* on success, raises on failure.
+        """
+        rw_id = await self.get_rw_snapshot_id(dataset_id)
+        if not rw_id:
+            raise RuntimeError(
+                f"No RW snapshot found for dataset {dataset_id}"
+            )
+
+        await self._download_dir_recursive(
+            dataset_id, rw_id, remote_path, dest_dir
+        )
+        return dest_dir
+
+    async def _download_dir_recursive(
+        self,
+        dataset_id: str,
+        snapshot_id: str,
+        remote_path: str,
+        local_dir: str,
+    ) -> None:
+        """Recursively list and download files from a snapshot directory.
+
+        Uses the already-resolved *snapshot_id* (the RW snapshot) to
+        download each file directly via the v4 raw endpoint, avoiding
+        the per-file ``get_rw_snapshot_id`` resolution overhead.
+        """
+        from urllib.parse import quote
+
+        os.makedirs(local_dir, exist_ok=True)
+        entries = await self.list_snapshot_files(snapshot_id, path=remote_path)
+
+        prefix_slash = (remote_path + "/") if remote_path else ""
+
+        for entry in entries:
+            name = entry.get("fileName", "")
+            if not name:
+                continue
+
+            # The v4 files API may return full paths (e.g. "models/job_xxx/
+            # learner.pkl") or just basenames ("learner.pkl").  Normalise to
+            # an absolute remote path and a local basename.
+            if name.startswith(prefix_slash):
+                remote_child = name
+                basename = name[len(prefix_slash):]
+            elif "/" not in name:
+                remote_child = f"{prefix_slash}{name}"
+                basename = name
+            else:
+                remote_child = name
+                basename = name.rsplit("/", 1)[-1]
+
+            local_child = os.path.join(local_dir, basename)
+
+            if entry.get("isDirectory"):
+                await self._download_dir_recursive(
+                    dataset_id, snapshot_id, remote_child, local_child
+                )
+            else:
+                # Download directly via the v4 raw endpoint using the
+                # already-known snapshot_id — no per-file API resolution.
+                encoded = quote(remote_child, safe="")
+                endpoint = (
+                    f"/v4/datasetrw/snapshot/{snapshot_id}/file/raw"
+                    f"?path={encoded}&download=true"
+                )
+                try:
+                    await domino_download(
+                        endpoint, local_child,
+                    )
+                    logger.debug(
+                        "Downloaded '%s' via v4 raw endpoint", remote_child,
+                    )
+                except Exception:
+                    # Fall back to the full download_file with endpoint
+                    # cascade (handles edge cases like missing snapshots).
+                    logger.debug(
+                        "v4 raw download failed for '%s', falling back",
+                        remote_child, exc_info=True,
+                    )
+                    await self.download_file(
+                        dataset_id, remote_child, local_child
+                    )
+
     async def delete_snapshot_files(
         self,
         snapshot_id: str,
@@ -395,6 +626,13 @@ class ProjectStorageResolver:
         except Exception:
             logger.debug("Failed to get snapshot ID for dataset %s", dataset_id, exc_info=True)
         return None
+
+    def invalidate(self, project_id: Optional[str] = None) -> None:
+        """Clear cached info for one or all projects."""
+        if project_id:
+            self._cache.pop(project_id, None)
+        else:
+            self._cache.clear()
 
     async def upload_file(
         self,
