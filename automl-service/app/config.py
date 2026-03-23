@@ -120,6 +120,9 @@ class Settings(BaseSettings):
     mlflow_tracking_uri: Optional[str] = None
     mlflow_tracking_token: Optional[str] = None  # MLFLOW_TRACKING_TOKEN
 
+    # Upload limits
+    max_upload_size_mb: int = 550  # AUTOML_MAX_UPLOAD_SIZE_MB
+
     # Training defaults
     default_time_limit: int = 3600
     default_job_list_limit: int = 100
