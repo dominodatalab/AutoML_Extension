@@ -331,13 +331,11 @@ class TestGetLatestSnapshotId:
     @pytest.mark.asyncio
     async def test_returns_snapshot_id(self):
         resolver = ProjectStorageResolver()
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"snapshots": [{"id": "snap-42"}]}
+        mock_snapshot = MagicMock()
+        mock_snapshot.id = "snap-42"
 
-        with patch(
-            "app.services.storage_resolver.domino_request",
-            new_callable=AsyncMock,
-            return_value=mock_resp,
+        with patch.object(
+            ProjectStorageResolver, "_list_snapshots_typed", return_value=[mock_snapshot]
         ):
             sid = await resolver._get_latest_snapshot_id("ds-123")
 
@@ -346,13 +344,9 @@ class TestGetLatestSnapshotId:
     @pytest.mark.asyncio
     async def test_returns_none_when_no_snapshots(self):
         resolver = ProjectStorageResolver()
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = []
 
-        with patch(
-            "app.services.storage_resolver.domino_request",
-            new_callable=AsyncMock,
-            return_value=mock_resp,
+        with patch.object(
+            ProjectStorageResolver, "_list_snapshots_typed", return_value=[]
         ):
             sid = await resolver._get_latest_snapshot_id("ds-123")
 
@@ -362,8 +356,9 @@ class TestGetLatestSnapshotId:
     async def test_returns_none_on_error(self):
         resolver = ProjectStorageResolver()
 
-        with patch(
-            "app.services.storage_resolver.domino_request",
+        with patch.object(
+            ProjectStorageResolver,
+            "_list_snapshots_typed",
             side_effect=Exception("network error"),
         ):
             sid = await resolver._get_latest_snapshot_id("ds-123")
