@@ -1,9 +1,11 @@
-"""Tests for app.services.storage_resolver (viewing layer).
+"""Tests for app.services.storage_resolver.
 
 Covers:
+- download_file() — endpoint probing and delegation to domino_download
 - _find_existing() — dataset listing and matching
-- get_rw_snapshot_id() — RW snapshot resolution
-- list_snapshot_files() — snapshot file browsing
+- _create_dataset() — creation with payload variants
+- _get_latest_snapshot_id() — snapshot lookup
+- upload_file() — chunked upload workflow
 - _extract_dataset_list() — v2 response unwrapping
 """
 
@@ -108,6 +110,173 @@ class TestFindExisting:
 
 
 # ---------------------------------------------------------------------------
+# _create_dataset
+# ---------------------------------------------------------------------------
+
+
+class TestCreateDataset:
+
+    @pytest.mark.asyncio
+    async def test_uses_dataset_rw_write_helper(self):
+        resolver = ProjectStorageResolver()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "dataset": {
+                "id": "ds-created",
+                "name": "automl-extension",
+            }
+        }
+
+        with patch(
+            "app.services.storage_resolver.domino_request",
+            new_callable=AsyncMock,
+            return_value=mock_resp,
+        ) as mock_request:
+            info = await resolver._create_dataset("proj-1")
+
+        assert info.dataset_id == "ds-created"
+        assert info.name == "automl-extension"
+        assert mock_request.await_count >= 1
+        first_call = mock_request.await_args_list[0]
+        assert first_call.args == ("POST", "/api/datasetrw/v1/datasets")
+        assert first_call.kwargs["json"]["name"] == "automl-extension"
+        assert first_call.kwargs["json"]["projectId"] == "proj-1"
+
+    @pytest.mark.asyncio
+    async def test_retries_with_next_payload_on_error(self):
+        resolver = ProjectStorageResolver()
+        bad_response = MagicMock()
+        bad_response.status_code = 400
+        bad_response.text = "Bad Request"
+        bad_error = httpx.HTTPStatusError(
+            "bad request",
+            request=MagicMock(),
+            response=bad_response,
+        )
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "dataset": {
+                "id": "ds-created",
+                "name": "automl-extension",
+            }
+        }
+
+        with patch(
+            "app.services.storage_resolver.domino_request",
+            new_callable=AsyncMock,
+            side_effect=[bad_error, mock_resp],
+        ) as mock_request:
+            info = await resolver._create_dataset("proj-1")
+
+        assert info.dataset_id == "ds-created"
+        assert mock_request.await_count == 2
+        first_call = mock_request.await_args_list[0]
+        second_call = mock_request.await_args_list[1]
+        assert first_call.args == ("POST", "/api/datasetrw/v1/datasets")
+        assert second_call.args == ("POST", "/api/datasetrw/v1/datasets")
+
+    @pytest.mark.asyncio
+    async def test_resolve_or_create_falls_back_to_find_existing(self):
+        """When create fails, _resolve_or_create falls back to listing."""
+        resolver = ProjectStorageResolver()
+        existing = DatasetInfo(
+            dataset_id="ds-existing",
+            name="automl-extension",
+            project_id="proj-1",
+        )
+
+        with patch.object(
+            resolver,
+            "_create_dataset",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("all create attempts failed"),
+        ), patch.object(
+            resolver,
+            "_find_existing",
+            new_callable=AsyncMock,
+            return_value=existing,
+        ) as find_existing:
+            info = await resolver._resolve_or_create("proj-1")
+
+        assert info is existing
+        find_existing.assert_awaited_once_with("proj-1")
+
+
+class TestDeleteDataset:
+
+    @pytest.mark.asyncio
+    async def test_uses_dataset_rw_write_helper(self):
+        resolver = ProjectStorageResolver()
+        resolver._cache = {
+            "proj-1": DatasetInfo(
+                dataset_id="ds-123",
+                name="automl-extension",
+                project_id="proj-1",
+            )
+        }
+        resolver._rw_cache["ds-123"] = "rw-123"
+
+        with patch.object(
+            resolver,
+            "_dataset_rw_write_request",
+            new_callable=AsyncMock,
+        ) as write_request:
+            await resolver.delete_dataset("ds-123")
+
+        write_request.assert_awaited_once_with(
+            "DELETE",
+            "/api/datasetrw/v1/datasets/ds-123",
+        )
+        assert resolver._cache == {}
+        assert resolver._rw_cache == {}
+
+
+# ---------------------------------------------------------------------------
+# _get_latest_snapshot_id
+# ---------------------------------------------------------------------------
+
+
+class TestGetLatestSnapshotId:
+
+    @pytest.mark.asyncio
+    async def test_returns_snapshot_id(self):
+        resolver = ProjectStorageResolver()
+        mock_snapshot = MagicMock()
+        mock_snapshot.id = "snap-42"
+
+        with patch.object(
+            ProjectStorageResolver, "_list_snapshots_typed", return_value=[mock_snapshot]
+        ):
+            sid = await resolver._get_latest_snapshot_id("ds-123")
+
+        assert sid == "snap-42"
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_snapshots(self):
+        resolver = ProjectStorageResolver()
+
+        with patch.object(
+            ProjectStorageResolver, "_list_snapshots_typed", return_value=[]
+        ):
+            sid = await resolver._get_latest_snapshot_id("ds-123")
+
+        assert sid is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_error(self):
+        resolver = ProjectStorageResolver()
+
+        with patch.object(
+            ProjectStorageResolver,
+            "_list_snapshots_typed",
+            side_effect=Exception("network error"),
+        ):
+            sid = await resolver._get_latest_snapshot_id("ds-123")
+
+        assert sid is None
+
+
+# ---------------------------------------------------------------------------
 # get_rw_snapshot_id
 # ---------------------------------------------------------------------------
 
@@ -132,6 +301,93 @@ class TestGetRwSnapshotId:
         assert rw_sid == "rw-snap-123"
         resolve_v1.assert_awaited_once_with("ds-123")
         domino_request_mock.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Dataset RW write requests
+# ---------------------------------------------------------------------------
+
+
+class TestDatasetRwWriteRequest:
+
+    @pytest.mark.asyncio
+    async def test_prefers_direct_host_then_falls_back_to_default(self):
+        resolver = ProjectStorageResolver()
+        response = MagicMock()
+
+        with patch(
+            "app.services.storage_resolver.resolve_domino_nucleus_host",
+            return_value="http://nucleus-frontend.domino-platform:80",
+        ), patch(
+            "app.services.storage_resolver.domino_request",
+            new_callable=AsyncMock,
+            side_effect=[
+                httpx.RemoteProtocolError("Server disconnected without sending a response."),
+                response,
+            ],
+        ) as domino_request_mock:
+            result = await resolver._dataset_rw_write_request(
+                "POST",
+                "/v4/datasetrw/datasets/ds-123/snapshot/file/start",
+                json={"filePaths": ["uploads/file.csv"]},
+            )
+
+        assert result is response
+        assert len(domino_request_mock.await_args_list) == 2
+
+        first_call = domino_request_mock.await_args_list[0]
+        assert first_call.args == ("POST", "/v4/datasetrw/datasets/ds-123/snapshot/file/start")
+        assert first_call.kwargs["json"] == {"filePaths": ["uploads/file.csv"]}
+        assert first_call.kwargs["base_url"] == "http://nucleus-frontend.domino-platform:80"
+        assert first_call.kwargs["max_retries"] == 0
+
+        second_call = domino_request_mock.await_args_list[1]
+        assert second_call.args == ("POST", "/v4/datasetrw/datasets/ds-123/snapshot/file/start")
+        assert second_call.kwargs["json"] == {"filePaths": ["uploads/file.csv"]}
+        assert second_call.kwargs["base_url"] is None
+        assert "max_retries" not in second_call.kwargs
+
+
+class TestUploadFile:
+
+    @pytest.mark.asyncio
+    async def test_upload_file_uses_proxy(self):
+        """Upload goes through domino_request (proxy) not the nucleus wrapper."""
+        resolver = ProjectStorageResolver()
+        start_resp = MagicMock()
+        start_resp.json.return_value = "upload-key-123"
+        end_resp = MagicMock()
+
+        with patch(
+            "app.services.storage_resolver.domino_request",
+            new_callable=AsyncMock,
+            side_effect=[start_resp, end_resp],
+        ) as mock_request, patch.object(
+            resolver,
+            "_upload_chunks",
+            new_callable=AsyncMock,
+        ) as upload_chunks:
+            await resolver.upload_file(
+                "ds-123",
+                "uploads/file.csv",
+                b"hello world",
+            )
+
+        assert mock_request.await_args_list[0].args == (
+            "POST",
+            "/v4/datasetrw/datasets/ds-123/snapshot/file/start",
+        )
+        upload_chunks.assert_awaited_once_with(
+            "ds-123",
+            "upload-key-123",
+            "uploads/file.csv",
+            b"hello world",
+            8 * 1024 * 1024,
+        )
+        assert mock_request.await_args_list[1].args == (
+            "GET",
+            "/v4/datasetrw/datasets/ds-123/snapshot/file/end/upload-key-123",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -160,3 +416,5 @@ class TestListSnapshotFiles:
             "/v4/datasetrw/files/snap-123",
             params={"path": "uploads"},
         )
+
+

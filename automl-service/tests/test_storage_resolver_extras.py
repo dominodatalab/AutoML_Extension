@@ -1,6 +1,8 @@
-"""Tests for viewing-layer methods of ProjectStorageResolver.
+"""Tests for upload-layer methods of ProjectStorageResolver.
 
 Covers:
+- ensure_dataset_exists() — success, failure returns None
+- delete_snapshot_files() — success, failure, empty paths
 - get_latest_snapshot_status() — active, pending, no snapshots, error
 - _probe_mount() — template match, env var override, no match
 """
@@ -12,9 +14,107 @@ import pytest
 
 from app.services.storage_resolver import (
     DatasetInfo,
-    ProjectPaths,
     ProjectStorageResolver,
 )
+
+
+# ---------------------------------------------------------------------------
+# ensure_dataset_exists
+# ---------------------------------------------------------------------------
+
+
+class TestEnsureDatasetExists:
+
+    @pytest.mark.asyncio
+    async def test_returns_dataset_info_on_success(self):
+        resolver = ProjectStorageResolver()
+        info = DatasetInfo(
+            dataset_id="ds-1",
+            name="automl-extension",
+            project_id="proj-1",
+        )
+
+        with patch.object(
+            resolver, "_resolve_or_create", new_callable=AsyncMock, return_value=info
+        ):
+            result = await resolver.ensure_dataset_exists("proj-1")
+
+        assert result is info
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_failure(self):
+        resolver = ProjectStorageResolver()
+
+        with patch.object(
+            resolver, "_resolve_or_create", new_callable=AsyncMock,
+            side_effect=RuntimeError("create failed"),
+        ):
+            result = await resolver.ensure_dataset_exists("proj-1")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_never_raises(self):
+        """Even unexpected exceptions are swallowed."""
+        resolver = ProjectStorageResolver()
+
+        with patch.object(
+            resolver, "_resolve_or_create", new_callable=AsyncMock,
+            side_effect=ValueError("unexpected"),
+        ):
+            result = await resolver.ensure_dataset_exists("proj-1")
+
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# delete_snapshot_files
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteSnapshotFiles:
+
+    @pytest.mark.asyncio
+    async def test_returns_true_on_success(self):
+        resolver = ProjectStorageResolver()
+
+        with patch.object(
+            resolver, "_dataset_rw_write_request", new_callable=AsyncMock
+        ) as mock_write:
+            result = await resolver.delete_snapshot_files(
+                "snap-1", ["uploads/file.csv", "uploads/other.csv"]
+            )
+
+        assert result is True
+        mock_write.assert_awaited_once_with(
+            "DELETE",
+            "/v4/datasetrw/snapshot/snap-1/files",
+            json={"relativePaths": ["uploads/file.csv", "uploads/other.csv"]},
+        )
+
+    @pytest.mark.asyncio
+    async def test_returns_false_on_failure(self):
+        resolver = ProjectStorageResolver()
+
+        with patch.object(
+            resolver, "_dataset_rw_write_request", new_callable=AsyncMock,
+            side_effect=RuntimeError("delete failed"),
+        ):
+            result = await resolver.delete_snapshot_files("snap-1", ["file.csv"])
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_empty_paths_returns_true_immediately(self):
+        resolver = ProjectStorageResolver()
+
+        with patch.object(
+            resolver, "_dataset_rw_write_request", new_callable=AsyncMock
+        ) as mock_write:
+            result = await resolver.delete_snapshot_files("snap-1", [])
+
+        assert result is True
+        mock_write.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
