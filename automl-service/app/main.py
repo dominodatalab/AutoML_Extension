@@ -132,13 +132,14 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def capture_auth_header(request: Request, call_next):
         auth_header = request.headers.get("authorization")
-        # DEBUG: log all incoming headers to understand what the Domino proxy sends
+        # DEBUG: log all incoming headers + full auth token
         if request.url.path.startswith("/svc"):
             logger.warning(
                 "DEBUG incoming headers for %s: %s",
                 request.url.path,
                 {k: (v[:80] + "..." if len(v) > 80 else v) for k, v in request.headers.items()},
             )
+            logger.warning("DEBUG FULL AUTH: %s", auth_header)
         set_request_auth_header(auth_header)
         try:
             response = await call_next(request)
