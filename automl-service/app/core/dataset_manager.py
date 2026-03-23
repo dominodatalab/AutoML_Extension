@@ -138,6 +138,55 @@ class DominoDatasetManager:
 
         return response.json() if response.text else {}
 
+    async def list_project_datasets(self, project_id: str) -> list[DatasetResponse]:
+        """List datasets for a Domino project via the API."""
+        try:
+            result = await self._api_request(
+                "GET", f"/api/datasetrw/v1/datasets?projectId={project_id}"
+            )
+        except Exception:
+            logger.exception("Failed to list project datasets for project %s", project_id)
+            return []
+
+        # Response may be a list or a wrapper dict.
+        if isinstance(result, list):
+            raw_datasets = result
+        elif isinstance(result, dict):
+            raw_datasets = (
+                result.get("datasets")
+                or result.get("items")
+                or result.get("data")
+                or []
+            )
+        else:
+            return []
+
+        datasets: list[DatasetResponse] = []
+        for item in raw_datasets:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("datasetName") or item.get("name") or "").strip()
+            dataset_id = str(item.get("datasetId") or item.get("id") or "").strip()
+            if not name and not dataset_id:
+                continue
+            files = self._normalize_dataset_files(item.get("files", []))
+            datasets.append(
+                DatasetResponse(
+                    id=dataset_id or name,
+                    name=name or dataset_id,
+                    path=None,
+                    description=str(item.get("description") or ""),
+                    size_bytes=self._coerce_int(
+                        item.get("sizeInBytes") or item.get("size", 0)
+                    ),
+                    created_at=item.get("createdAt"),
+                    updated_at=item.get("lastUpdatedAt") or item.get("updatedAt"),
+                    file_count=self._coerce_int(item.get("fileCount", len(files))),
+                    files=files,
+                )
+            )
+        return datasets
+
     async def list_datasets(self) -> list[DatasetResponse]:
         """List mounted datasets discovered from all active mount roots."""
         datasets = await self._list_local_datasets()

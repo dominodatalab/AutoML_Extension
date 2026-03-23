@@ -108,8 +108,22 @@ def filter_local_datasets(
 
 async def list_datasets_response(
     dataset_manager: DominoDatasetManager,
+    project_id: Optional[str] = None,
 ) -> DatasetListResponse:
-    """List available local datasets in API response shape."""
+    """List available datasets in API response shape.
+
+    When *project_id* is provided, datasets are fetched from the Domino API for
+    that project.  Otherwise the legacy local-mount scan is used as a fallback.
+    """
+    if project_id:
+        datasets = await dataset_manager.list_project_datasets(project_id)
+        logger.info(
+            "Returning %s datasets for project %s via Domino API",
+            len(datasets),
+            project_id,
+        )
+        return DatasetListResponse(datasets=datasets, total=len(datasets))
+
     datasets = await dataset_manager.list_datasets()
     dataset_mount_roots = get_dataset_mount_roots()
     filtered_datasets = filter_local_datasets(datasets, local_paths=dataset_mount_roots)
