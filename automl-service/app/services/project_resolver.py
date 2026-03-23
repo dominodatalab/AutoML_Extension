@@ -1,10 +1,14 @@
-"""Resolve Domino project metadata from the V4 projects API using domino_http."""
+"""Resolve Domino project metadata using the generated Public API client."""
 
 import logging
 from dataclasses import dataclass
 from typing import Optional
 
-from app.core.domino_http import domino_request
+from app.api.generated.domino_public_api_client.api.projects import get_project_by_id
+from app.api.generated.domino_public_api_client.models.project_envelope_v1 import (
+    ProjectEnvelopeV1,
+)
+from app.core.domino_http import get_domino_public_api_client_sync
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +24,7 @@ class ProjectInfo:
 
 
 async def resolve_project(project_id: str) -> Optional[ProjectInfo]:
-    """Resolve project name and owner from the Domino V4 projects API.
+    """Resolve project name and owner from the Domino Projects API.
 
     Returns cached ProjectInfo on success, None on any failure.
     """
@@ -28,17 +32,25 @@ async def resolve_project(project_id: str) -> Optional[ProjectInfo]:
         return _cache[project_id]
 
     try:
-        # Use shared domino_http helper (handles host and auth acquisition + retries)
-        resp = await domino_request("GET", f"/v4/projects/{project_id}")
-        data = resp.json() if resp.text else {}
-        name = data.get("name")
-        owner = data.get("ownerUsername") or data.get("owner", {}).get("userName")
+        client = get_domino_public_api_client_sync()
+        result = get_project_by_id.sync(project_id, client=client)
+
+        if not isinstance(result, ProjectEnvelopeV1):
+            logger.warning(
+                "Project %s lookup returned unexpected type: %s",
+                project_id,
+                type(result).__name__,
+            )
+            return None
+
+        project = result.project
+        name = project.name
+        owner = project.owner_username
 
         if not name or not owner:
             logger.warning(
-                "Project %s response missing name/owner: %s",
+                "Project %s response missing name/owner",
                 project_id,
-                {k: data.get(k) for k in ("name", "ownerUsername", "owner")},
             )
             return None
 
