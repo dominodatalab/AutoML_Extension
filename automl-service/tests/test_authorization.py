@@ -1,41 +1,12 @@
-class _FakeResponse:
-    def __init__(self, payload, status_code=200):
-        self._payload = payload
-        self.status_code = status_code
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise RuntimeError(f"HTTP {self.status_code}")
-
-    def json(self):
-        return self._payload
-
-
-class _FakeHttpxClient:
-    def __init__(self, *, post_payload=None):
-        self._post_payload = post_payload
-        self.post_calls = []
-
-    def post(self, url, json=None):
-        self.post_calls.append({"url": url, "json": json})
-        return _FakeResponse(self._post_payload)
-
-
-class _FakeDominoClient:
-    def __init__(self, httpx_client):
-        self._httpx_client = httpx_client
-
-    def get_httpx_client(self):
-        return self._httpx_client
-
+from tests.fake_domino_client import FakeResponse, FakeHttpxClient, FakeDominoClient
 
 def test_current_user_can_modify_storage_when_authz_allows(monkeypatch):
     from app.core import authorization as auth
 
-    fake_httpx = _FakeHttpxClient(
+    fake_httpx = FakeHttpxClient(
         post_payload={"actions": [{"id": "project.change_project_settings-project-1", "result": True}]},
     )
-    fake_client = _FakeDominoClient(fake_httpx)
+    fake_client = FakeDominoClient(fake_httpx)
     monkeypatch.setattr(
         auth,
         "get_domino_public_api_client_sync",
@@ -63,10 +34,10 @@ def test_current_user_can_modify_storage_when_authz_allows(monkeypatch):
 def test_current_user_can_modify_storage_when_authz_denies(monkeypatch):
     from app.core import authorization as auth
 
-    fake_httpx = _FakeHttpxClient(
+    fake_httpx = FakeHttpxClient(
         post_payload={"actions": [{"id": "project.change_project_settings-project-1", "result": False}]},
     )
-    fake_client = _FakeDominoClient(fake_httpx)
+    fake_client = FakeDominoClient(fake_httpx)
     monkeypatch.setattr(
         auth,
         "get_domino_public_api_client_sync",
