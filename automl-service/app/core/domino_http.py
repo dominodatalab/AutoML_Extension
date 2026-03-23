@@ -69,15 +69,29 @@ async def get_domino_auth_headers() -> dict[str, str]:
     return headers
 
 def get_domino_public_api_client_sync() -> DominoApiClient:
-    """Create a Domino Public API client with auth, which uses the
-    Authorization header if present, fallsback to DOMINO_API_KEY/DOMINO_USER_API_KEY/token file
-    If none is available, none is set.
+    """Create a Domino Public API client with auth.
+
+    When a forwarded user JWT is present (i.e. during a browser request),
+    call nucleus-frontend directly with the JWT so that RBAC is honoured.
+    The sidecar proxy at localhost:8899 does not correctly forward user
+    JWTs to downstream services like datasetrw.
+
+    When no user JWT is available (background tasks, health checks), fall
+    back to the sidecar proxy which injects its own service auth.
     """
+    forwarded_auth = get_request_auth_header()
+
+    if forwarded_auth:
+        # User JWT present — call nucleus-frontend directly
+        nucleus_host = resolve_domino_nucleus_host()
+        if nucleus_host:
+            base_url = nucleus_host.rstrip("/")
+            headers = {"Authorization": forwarded_auth}
+            return DominoApiClient(base_url=base_url).with_headers(headers)
+
+    # No user JWT or no direct host — use sidecar proxy with API key
     headers = get_sync_auth_headers()
-
-    # Base URL
     base_url = resolve_domino_api_host()
-
     return DominoApiClient(base_url=base_url).with_headers(headers)
 
 def resolve_domino_api_host() -> str:
