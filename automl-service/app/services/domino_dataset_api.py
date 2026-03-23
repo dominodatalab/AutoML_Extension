@@ -77,6 +77,20 @@ async def _list_project_datasets_v2(
 
     while True:
         client = get_domino_public_api_client_sync()
+        # DEBUG: log raw response before generated client parses it
+        _hc = client.get_httpx_client()
+        _dbg = _hc.request(
+            method="get",
+            url="/api/datasetrw/v2/datasets",
+            params={"projectIdsToInclude": [project_id], "offset": offset, "limit": page_size},
+        )
+        logger.warning(
+            "DEBUG v2 raw: status=%s content_type=%s body=%r headers_sent=%s",
+            _dbg.status_code,
+            _dbg.headers.get("content-type"),
+            _dbg.text[:300],
+            {k: v[:40] for k, v in _hc.headers.items()},
+        )
         result = get_datasets_v2.sync(
             client=client,
             project_ids_to_include=[project_id],
