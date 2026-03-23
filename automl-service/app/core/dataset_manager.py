@@ -29,31 +29,7 @@ class DominoDatasetManager:
 
     def __init__(self):
         self.settings = get_settings()
-        self._http_client: Optional[httpx.AsyncClient] = None
         self._dataset_item_cache: dict[str, dict[str, Any]] = {}
-
-    @property
-    def api_headers(self) -> dict:
-        """Get headers for Domino API requests."""
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
-        if self.settings.effective_api_key:
-            headers["X-Domino-Api-Key"] = self.settings.effective_api_key
-        return headers
-
-    @property
-    def api_base_url(self) -> str:
-        """Get Domino API base URL."""
-        host = self.settings.domino_api_host or ""
-        return host.rstrip("/")
-
-    async def _get_client(self) -> httpx.AsyncClient:
-        """Get or create HTTP client."""
-        if self._http_client is None or self._http_client.is_closed:
-            self._http_client = httpx.AsyncClient(timeout=30.0)
-        return self._http_client
 
     def _resolve_dataset_mount_paths(self) -> list[str]:
         """Resolve all filesystem paths that may contain mounted datasets."""
@@ -122,26 +98,14 @@ class DominoDatasetManager:
         return normalized
 
     async def _api_request(self, method: str, endpoint: str, **kwargs) -> dict:
-        """Make a request to the Domino API."""
-        client = await self._get_client()
-        url = f"{self.api_base_url}{endpoint}"
+        """Make a request to the Domino API using the shared auth chain.
 
-        logger.info(f"Domino API request: {method} {url}")
-
-        response = await client.request(
-            method=method,
-            url=url,
-            headers=self.api_headers,
-            **kwargs
-        )
-
-        logger.info(f"Domino API response: {response.status_code}")
-
-        if response.status_code >= 400:
-            logger.error(f"Domino API error: {response.text}")
-            response.raise_for_status()
-
-        return response.json() if response.text else {}
+        Uses ``domino_request`` which forwards the visiting user's token
+        for proper authorization, falling back to the sidecar token for
+        background tasks.
+        """
+        resp = await domino_request(method, endpoint, **kwargs)
+        return resp.json() if resp.text else {}
 
     async def list_datasets(
         self,
