@@ -8,6 +8,7 @@ import httpx
 import pandas as pd
 
 from app.config import get_settings
+from app.core.context.auth import get_request_auth_header
 from app.api.schemas.dataset import (
     DatasetFileResponse,
     DatasetResponse,
@@ -29,13 +30,19 @@ class DominoDatasetManager:
 
     @property
     def api_headers(self) -> dict:
-        """Get headers for Domino API requests."""
-        headers = {
+        """Get headers for Domino API requests.
+
+        Auth uses the bearer token propagated from the user's request via
+        extended identity propagation — the only correct auth mechanism for
+        Domino API calls from this App.
+        """
+        headers: dict[str, str] = {
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
-        if self.settings.effective_api_key:
-            headers["X-Domino-Api-Key"] = self.settings.effective_api_key
+        auth = get_request_auth_header()
+        if auth:
+            headers["Authorization"] = auth
         return headers
 
     @property
@@ -139,53 +146,100 @@ class DominoDatasetManager:
         return response.json() if response.text else {}
 
     async def list_project_datasets(self, project_id: str) -> list[DatasetResponse]:
-        """List datasets for a Domino project via the API."""
+        """List datasets for a Domino project via the API.
+
+        Response shape: PaginatedDatasetRwEnvelopeV1
+          { "datasets": [{ "id", "name", "snapshotIds", "tags", ... }], "metadata": {...} }
+
+        Files are fetched from the most recent snapshot (the read/write head).
+        """
         try:
             result = await self._api_request(
                 "GET", f"/api/datasetrw/v1/datasets?projectId={project_id}"
             )
         except Exception:
-            logger.exception("Failed to list project datasets for project %s", project_id)
+            logger.exception(
+                "Failed to list project datasets for project %s", project_id
+            )
             return []
 
-        # Response may be a list or a wrapper dict.
-        if isinstance(result, list):
-            raw_datasets = result
-        elif isinstance(result, dict):
-            raw_datasets = (
-                result.get("datasets")
-                or result.get("items")
-                or result.get("data")
-                or []
-            )
-        else:
-            return []
+        raw_datasets: list = result.get("datasets") or [] if isinstance(result, dict) else []
 
         datasets: list[DatasetResponse] = []
         for item in raw_datasets:
             if not isinstance(item, dict):
                 continue
-            name = str(item.get("datasetName") or item.get("name") or "").strip()
-            dataset_id = str(item.get("datasetId") or item.get("id") or "").strip()
+            name = str(item.get("name") or "").strip()
+            dataset_id = str(item.get("id") or "").strip()
             if not name and not dataset_id:
                 continue
-            files = self._normalize_dataset_files(item.get("files", []))
+
+            snapshot_ids: list[str] = item.get("snapshotIds") or []
+            files = (
+                await self._list_snapshot_files(name, snapshot_ids)
+                if snapshot_ids
+                else []
+            )
+
             datasets.append(
                 DatasetResponse(
                     id=dataset_id or name,
                     name=name or dataset_id,
                     path=None,
                     description=str(item.get("description") or ""),
-                    size_bytes=self._coerce_int(
-                        item.get("sizeInBytes") or item.get("size", 0)
-                    ),
+                    size_bytes=0,
                     created_at=item.get("createdAt"),
-                    updated_at=item.get("lastUpdatedAt") or item.get("updatedAt"),
-                    file_count=self._coerce_int(item.get("fileCount", len(files))),
+                    updated_at=None,
+                    file_count=len(files),
                     files=files,
                 )
             )
         return datasets
+
+    async def _list_snapshot_files(
+        self,
+        dataset_name: str,
+        snapshot_ids: list[str],
+    ) -> list[DatasetFileResponse]:
+        """Return supported files from the read/write head snapshot of a dataset.
+
+        The last entry in snapshotIds is the most recently created snapshot,
+        which represents the current read/write head.
+        """
+        snapshot_id = snapshot_ids[-1]
+        try:
+            result = await self._api_request(
+                "GET", f"/datasetrw/files/{snapshot_id}?path="
+            )
+        except Exception:
+            logger.warning(
+                "Failed to list files for dataset %s snapshot %s",
+                dataset_name,
+                snapshot_id,
+            )
+            return []
+
+        files: list[DatasetFileResponse] = []
+        for row in result.get("rows", []):
+            name_info = row.get("name", {})
+            if name_info.get("isDirectory"):
+                continue
+            filename = str(
+                name_info.get("label") or name_info.get("fileName") or ""
+            ).strip()
+            if not filename or not self._is_supported_file(filename):
+                continue
+            size_bytes = self._coerce_int(
+                (row.get("size") or {}).get("sizeInBytes", 0)
+            )
+            files.append(
+                DatasetFileResponse(
+                    name=filename,
+                    path=f"/mnt/data/{dataset_name}/{filename}",
+                    size=size_bytes,
+                )
+            )
+        return files
 
     async def list_datasets(self) -> list[DatasetResponse]:
         """List mounted datasets discovered from all active mount roots."""
