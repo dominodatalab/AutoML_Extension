@@ -219,7 +219,7 @@ def build_job_model(
     execution_target: Optional[str] = None,
 ) -> Job:
     """Build a Job ORM model from request and resolved context."""
-    model_execution_target = execution_target or "domino_job"
+    model_execution_target = execution_target or resolve_execution_target(job_request)
 
     return Job(
         name=job_name,

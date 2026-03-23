@@ -334,7 +334,7 @@ class TestBuildJobModel:
     def test_execution_target_defaults_to_local(self):
         req = _make_create_request()
         job = build_job_model(req, "job", "user", None, None)
-        assert job.execution_target == "domino_job"
+        assert job.execution_target == "local"
 
     def test_autogluon_config_stored(self):
         adv = AdvancedAutoGluonConfig(num_gpus=1)
