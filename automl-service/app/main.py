@@ -132,10 +132,13 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def capture_auth_header(request: Request, call_next):
         auth_header = request.headers.get("authorization")
-        # Store the forwarded token so outbound Domino API calls
-        # (datasetrw, jobs, registry) run as the visiting user.
-        # The sidecar token is only used as fallback when no user token
-        # is present (background tasks, health checks).
+        # DEBUG: log all incoming headers to understand what the Domino proxy sends
+        if request.url.path.startswith("/svc"):
+            logger.warning(
+                "DEBUG incoming headers for %s: %s",
+                request.url.path,
+                {k: (v[:80] + "..." if len(v) > 80 else v) for k, v in request.headers.items()},
+            )
         set_request_auth_header(auth_header)
         try:
             response = await call_next(request)
