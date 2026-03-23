@@ -49,12 +49,12 @@ export function useJobStatus(jobId: string, enabled = true) {
   })
 }
 
-export function useJobLogs(jobId: string, limit?: number) {
+export function useJobLogs(jobId: string, limit?: number, enabled = true) {
   return useQuery({
     queryKey: ['jobLogs', jobId, limit],
     queryFn: () => getJobLogs(jobId, limit),
-    enabled: !!jobId,
-    refetchInterval: 5000, // Refresh logs every 5 seconds
+    enabled: !!jobId && enabled,
+    refetchInterval: enabled ? 5000 : false,
   })
 }
 

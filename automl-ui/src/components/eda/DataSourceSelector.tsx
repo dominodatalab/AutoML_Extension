@@ -16,11 +16,17 @@ interface DataSourceSelectorProps {
   loadingDatasets: boolean
   datasetsError?: string | null
   selectedDataset: Dataset | null
+  selectedDatasetFiles?: DatasetFile[]
+  loadingSelectedDatasetFiles?: boolean
   uploadIsPending: boolean
   onDrop: (acceptedFiles: File[]) => void
   onSelectDataset: (dataset: Dataset) => void
   onSelectFile: (file: DatasetFile) => void
   formatSize: (bytes: number) => string
+  isVerifying?: boolean
+  verifyError?: string | null
+  uploadedFileName?: string | null
+  onProceedAnyway?: () => void
 }
 
 export function DataSourceSelector({
@@ -30,11 +36,17 @@ export function DataSourceSelector({
   loadingDatasets,
   datasetsError,
   selectedDataset,
+  selectedDatasetFiles = [],
+  loadingSelectedDatasetFiles = false,
   uploadIsPending,
   onDrop,
   onSelectDataset,
   onSelectFile,
   formatSize,
+  isVerifying,
+  verifyError,
+  uploadedFileName,
+  onProceedAnyway,
 }: DataSourceSelectorProps) {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -44,6 +56,26 @@ export function DataSourceSelector({
     },
     maxFiles: 1,
   })
+
+  const getDatasetSummary = (dataset: Dataset): string => {
+    const isSelected = selectedDataset?.id === dataset.id
+    const derivedFileCount = isSelected ? selectedDatasetFiles.length : 0
+    const derivedSize = isSelected
+      ? selectedDatasetFiles.reduce((total, file) => total + (file.size || 0), 0)
+      : 0
+    const fileCount = dataset.file_count > 0 ? dataset.file_count : derivedFileCount
+    const sizeBytes = dataset.size_bytes > 0 ? dataset.size_bytes : derivedSize
+
+    if (fileCount > 0 || sizeBytes > 0) {
+      return `${fileCount} files, ${formatSize(sizeBytes)}`
+    }
+
+    if (isSelected && !loadingSelectedDatasetFiles) {
+      return 'No supported files found'
+    }
+
+    return 'Browse to inspect files'
+  }
 
   return (
     <div className="space-y-4">
@@ -94,6 +126,28 @@ export function DataSourceSelector({
               <div className="flex flex-col items-center">
                 <Spinner className="mb-4" />
                 <p className="text-domino-text-secondary">Uploading...</p>
+              </div>
+            ) : isVerifying ? (
+              <div className="flex flex-col items-center">
+                <Spinner className="mb-4" />
+                <p className="font-medium text-domino-text-primary">{uploadedFileName}</p>
+                <p className="text-domino-text-secondary mt-2">Syncing with dataset...</p>
+                <div className="w-48 h-1 bg-domino-border rounded mt-3 overflow-hidden">
+                  <div className="h-full bg-domino-accent-purple rounded animate-pulse" style={{ width: '60%' }} />
+                </div>
+              </div>
+            ) : verifyError ? (
+              <div className="flex flex-col items-center">
+                <p className="font-medium text-domino-text-primary">{uploadedFileName}</p>
+                <p className="text-sm text-domino-accent-red mt-2">{verifyError}</p>
+                {onProceedAnyway && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onProceedAnyway() }}
+                    className="mt-3 text-sm text-domino-accent-purple hover:underline"
+                  >
+                    Proceed Anyway
+                  </button>
+                )}
               </div>
             ) : (
               <div className="flex flex-col items-center">
@@ -150,7 +204,7 @@ export function DataSourceSelector({
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-domino-text-primary truncate">{dataset.name}</p>
                     <p className="text-sm text-domino-text-secondary">
-                      {dataset.file_count} files, {formatSize(dataset.size_bytes)}
+                      {getDatasetSummary(dataset)}
                     </p>
                   </div>
                   {selectedDataset?.id === dataset.id && (
@@ -158,13 +212,19 @@ export function DataSourceSelector({
                   )}
                 </button>
 
-                {selectedDataset?.id === dataset.id && dataset.files.length > 0 && (
+                {selectedDataset?.id === dataset.id && loadingSelectedDatasetFiles && selectedDatasetFiles.length === 0 && (
+                  <div className="ml-8 py-3">
+                    <Spinner size="sm" />
+                  </div>
+                )}
+
+                {selectedDataset?.id === dataset.id && selectedDatasetFiles.length > 0 && (
                   <div className="ml-8 space-y-1">
-                    {dataset.files
+                    {selectedDatasetFiles
                       .filter(f => f.name.endsWith('.csv') || f.name.endsWith('.parquet') || f.name.endsWith('.pq'))
                       .map((file) => (
                         <button
-                          key={file.path}
+                          key={`${dataset.id}:${file.name}`}
                           onClick={() => onSelectFile(file)}
                           className="w-full p-3 rounded-lg border border-domino-border hover:border-domino-text-muted transition-colors text-left flex items-center gap-3"
                         >

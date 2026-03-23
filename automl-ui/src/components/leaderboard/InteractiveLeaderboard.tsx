@@ -55,6 +55,10 @@ function safeNumber(value: unknown): number {
   return 0
 }
 
+function getFitTime(model: ExtendedLeaderboardModel): number {
+  return safeNumber(model.fit_time ?? model.fit_time_marginal)
+}
+
 export function InteractiveLeaderboard({
   leaderboard,
   onModelSelect,
@@ -77,8 +81,8 @@ export function InteractiveLeaderboard({
         bVal = safeNumber(b.score_val)
         break
       case 'fit_time':
-        aVal = safeNumber(a.fit_time)
-        bVal = safeNumber(b.fit_time)
+        aVal = getFitTime(a)
+        bVal = getFitTime(b)
         break
       case 'pred_time':
         aVal = safeNumber(a.pred_time_val)
@@ -197,7 +201,7 @@ export function InteractiveLeaderboard({
                       {safeNumber(model.score_val).toFixed(4)}
                     </td>
                     <td className="px-4 py-3 text-right text-sm text-domino-text-secondary">
-                      {formatTime(model.fit_time)}
+                      {formatTime(getFitTime(model))}
                     </td>
                     <td className="px-4 py-3 text-right text-sm text-domino-text-secondary">
                       {formatTime(model.pred_time_val)}
@@ -306,7 +310,7 @@ export function InteractiveLeaderboard({
           <span>
             Total Training Time:{' '}
             <span className="text-domino-text-primary">
-              {formatTime(leaderboard.reduce((acc, m) => acc + safeNumber(m.fit_time), 0))}
+              {formatTime(leaderboard.reduce((acc, m) => acc + getFitTime(m), 0))}
             </span>
           </span>
         </div>

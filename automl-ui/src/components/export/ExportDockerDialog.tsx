@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useExportDeployment } from '../../hooks/useExport'
+import { useExportDeploymentZip } from '../../hooks/useExport'
 import Button from '../common/Button'
-import Input from '../common/Input'
-import { getDefaultExportPath } from '../../utils/pathDefaults'
 
 // Helper to notify parent frame about modal state
 function notifyModalOpen() {
@@ -22,10 +20,6 @@ interface ExportDockerDialogProps {
   onSuccess: () => void
 }
 
-function sanitizePathSegment(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_-]/g, '_')
-}
-
 function toImageName(value: string): string {
   const cleaned = value
     .toLowerCase()
@@ -41,34 +35,15 @@ function toImageName(value: string): string {
 export function ExportDockerDialog({
   jobId,
   jobName,
-  projectName,
   modelType,
   onClose,
   onSuccess,
 }: ExportDockerDialogProps) {
-  const exportDeploymentMutation = useExportDeployment()
-
-  const safeJobName = useMemo(() => sanitizePathSegment(jobName), [jobName])
-  const safeProjectName = useMemo(
-    () => sanitizePathSegment(projectName || 'automl'),
-    [projectName],
-  )
+  const exportZipMutation = useExportDeploymentZip()
   const imageName = useMemo(() => toImageName(jobName), [jobName])
-  const defaultOutputDir = useMemo(
-    () => getDefaultExportPath(safeProjectName, safeJobName),
-    [safeProjectName, safeJobName],
-  )
 
-  const [outputDir, setOutputDir] = useState(defaultOutputDir)
   const [submitError, setSubmitError] = useState<string | null>(null)
-  const [successData, setSuccessData] = useState<{
-    outputDir: string
-    files: string[]
-  } | null>(null)
-
-  useEffect(() => {
-    setOutputDir(defaultOutputDir)
-  }, [defaultOutputDir])
+  const [downloaded, setDownloaded] = useState(false)
 
   useEffect(() => {
     notifyModalOpen()
@@ -77,41 +52,32 @@ export function ExportDockerDialog({
     }
   }, [])
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleDownload = async () => {
     setSubmitError(null)
 
-    const targetDir = outputDir.trim()
-    if (!targetDir) {
-      setSubmitError('Output directory is required')
-      return
-    }
-
     try {
-      const result = await exportDeploymentMutation.mutateAsync({
+      const { blob, filename } = await exportZipMutation.mutateAsync({
         job_id: jobId,
         model_type: modelType,
-        output_dir: targetDir,
       })
 
-      if (!result.success) {
-        setSubmitError(result.error || 'Failed to export Docker package')
-        return
-      }
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
 
-      setSuccessData({
-        outputDir: result.output_dir || `${targetDir}/deployment_package`,
-        files: result.files || [],
-      })
+      setDownloaded(true)
       onSuccess()
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : 'Failed to export Docker package')
+      setSubmitError(error instanceof Error ? error.message : 'Failed to download Docker package')
     }
   }
 
-  const dockerBuildCommand = successData
-    ? `cd "${successData.outputDir}" && docker build -t ${imageName}:latest .`
-    : ''
+  const dockerBuildCommand = `unzip deployment_package.zip -d deployment_package && cd deployment_package && docker build -t ${imageName}:latest .`
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -125,23 +91,11 @@ export function ExportDockerDialog({
           </button>
         </div>
 
-        {successData ? (
+        {downloaded ? (
           <div className="px-6 pb-6 space-y-4">
             <div className="p-3 bg-domino-accent-green/5 border border-domino-accent-green/30 rounded text-sm text-domino-text-primary">
-              Docker deployment package created at:
-              <div className="mt-1 font-mono text-xs break-all">{successData.outputDir}</div>
+              Docker deployment package downloaded successfully.
             </div>
-
-            {successData.files.length > 0 && (
-              <div>
-                <p className="text-sm font-medium text-domino-text-primary">Generated files</p>
-                <ul className="list-disc list-inside text-sm text-domino-text-secondary mt-1">
-                  {successData.files.map((file) => (
-                    <li key={file}>{file}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
 
             <div>
               <p className="text-sm font-medium text-domino-text-primary">Build command</p>
@@ -157,21 +111,11 @@ export function ExportDockerDialog({
             </div>
           </div>
         ) : (
-          <form onSubmit={handleSubmit}>
+          <div>
             <div className="px-6 space-y-4">
               <p className="text-sm text-domino-text-secondary">
-                Creates a Docker-ready deployment package for this trained model, including `Dockerfile`, `inference.py`, and model artifacts.
+                Downloads a Docker-ready deployment package (.zip) for this trained model, including <code className="text-xs bg-domino-bg-tertiary px-1 py-0.5 rounded">Dockerfile</code>, <code className="text-xs bg-domino-bg-tertiary px-1 py-0.5 rounded">inference.py</code>, and model artifacts.
               </p>
-
-              <div>
-                <label className="label">Output Directory *</label>
-                <Input
-                  value={outputDir}
-                  onChange={(e) => setOutputDir(e.target.value)}
-                  placeholder="/mnt/data/<project>/exports/<job> (Domino) or ./local_data/exports/<project>/<job>"
-                  required
-                />
-              </div>
 
               {submitError && (
                 <div className="p-3 bg-domino-accent-red/5 border border-domino-accent-red/30 text-domino-accent-red text-sm rounded flex items-start gap-2">
@@ -187,11 +131,11 @@ export function ExportDockerDialog({
               <button type="button" onClick={onClose} className="text-sm text-domino-accent-purple hover:underline">
                 Cancel
               </button>
-              <Button variant="primary" type="submit" disabled={exportDeploymentMutation.isPending || !outputDir.trim()}>
-                {exportDeploymentMutation.isPending ? 'Exporting...' : 'Export Docker Package'}
+              <Button variant="primary" onClick={handleDownload} disabled={exportZipMutation.isPending}>
+                {exportZipMutation.isPending ? 'Downloading...' : 'Download'}
               </Button>
             </div>
-          </form>
+          </div>
         )}
       </div>
     </div>

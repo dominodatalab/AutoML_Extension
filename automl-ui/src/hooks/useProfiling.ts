@@ -9,7 +9,6 @@ import type {
   DataProfile,
   TargetSuggestion,
   QuickProfile,
-  ColumnProfile,
   MetricsByProblemType,
   PresetsByModelType,
   TimeSeriesProfile,
@@ -19,7 +18,6 @@ interface UseProfilingResult {
   profile: DataProfile | null
   quickProfile: QuickProfile | null
   suggestions: TargetSuggestion[]
-  columnProfile: ColumnProfile | null
   metrics: MetricsByProblemType | null
   presets: PresetsByModelType | null
   tsProfile: TimeSeriesProfile | null
@@ -30,7 +28,6 @@ interface UseProfilingResult {
   profileFile: (filePath: string, sampleSize?: number, samplingStrategy?: string, stratifyColumn?: string) => Promise<DataProfile | null>
   quickProfileFile: (filePath: string) => Promise<QuickProfile | null>
   suggestTarget: (filePath: string) => Promise<TargetSuggestion[]>
-  profileColumn: (filePath: string, columnName: string) => Promise<ColumnProfile | null>
   fetchMetrics: () => Promise<MetricsByProblemType | null>
   fetchPresets: () => Promise<PresetsByModelType | null>
   profileTimeSeries: (request: AsyncProfileStartRequest) => Promise<TimeSeriesProfile | null>
@@ -74,14 +71,6 @@ export function useProfiling(): UseProfilingResult {
     { errorMessage: 'Failed to suggest target' }
   )
 
-  const columnProfileState = useApiState(
-    async (filePath: string, columnName: string) => {
-      const { data } = await api.post<ColumnProfile>('profilecolumn', { file_path: filePath, column_name: columnName })
-      return data
-    },
-    'Failed to profile column'
-  )
-
   const metricsState = useApiState(
     async () => {
       const { data } = await api.get<MetricsByProblemType>('metrics')
@@ -110,7 +99,6 @@ export function useProfiling(): UseProfilingResult {
     profileState,
     quickProfileState,
     suggestTargetOp,
-    columnProfileState,
     metricsState,
     presetsState,
   ])
@@ -133,7 +121,6 @@ export function useProfiling(): UseProfilingResult {
     profile: profileState.data,
     quickProfile: quickProfileState.data,
     suggestions,
-    columnProfile: columnProfileState.data,
     metrics: metricsState.data,
     presets: presetsState.data,
     tsProfile: tsProfileState.data,
@@ -144,7 +131,6 @@ export function useProfiling(): UseProfilingResult {
     profileFile: profileState.execute,
     quickProfileFile: quickProfileState.execute,
     suggestTarget,
-    profileColumn: columnProfileState.execute,
     fetchMetrics: metricsState.execute,
     fetchPresets: presetsState.execute,
     profileTimeSeries: tsProfileState.execute,
