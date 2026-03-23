@@ -354,7 +354,7 @@ class ProjectStorageResolver:
     def _list_snapshots_typed(
         dataset_id: str,
         *,
-        limit: int | None = None,
+        limit: Optional[int] = None,
     ) -> list[SnapshotDetailsV1]:
         """List snapshots for a dataset using the generated API client.
 
