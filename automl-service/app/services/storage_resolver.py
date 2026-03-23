@@ -294,24 +294,14 @@ class ProjectStorageResolver:
 
         from urllib.parse import quote
 
-        # Each entry is (endpoint_path, use_api_key).
-        # The v4 raw endpoint requires X-Domino-Api-Key auth.
-        endpoints: list[tuple[str, bool]] = []
+        endpoints: list[str] = []
 
         if rw_snapshot_id:
             encoded_path = quote(file_path, safe="")
-            # v4 endpoint works on both proxy and nucleus; try with both
-            # API key auth and Bearer token auth.
-            endpoints.append((
+            endpoints.append(
                 f"/v4/datasetrw/snapshot/{rw_snapshot_id}/file/raw"
-                f"?path={encoded_path}&download=true",
-                True,
-            ))
-            endpoints.append((
-                f"/v4/datasetrw/snapshot/{rw_snapshot_id}/file/raw"
-                f"?path={encoded_path}&download=true",
-                False,
-            ))
+                f"?path={encoded_path}&download=true"
+            )
 
         # Try each endpoint via the default host (proxy), then fall back
         # to the nucleus-frontend host directly (proxy may 404 for
@@ -323,16 +313,16 @@ class ProjectStorageResolver:
 
         last_error: Optional[Exception] = None
         for base_url in base_urls:
-            for endpoint, use_api_key in endpoints:
+            for endpoint in endpoints:
                 try:
                     await domino_download(
                         endpoint, dest_path,
-                        base_url=base_url, use_api_key=use_api_key,
+                        base_url=base_url,
                     )
                     logger.info(
-                        "Downloaded '%s' from dataset %s via %s (host=%s, api_key=%s)",
+                        "Downloaded '%s' from dataset %s via %s (host=%s)",
                         file_path, dataset_id, endpoint,
-                        base_url or "default", use_api_key,
+                        base_url or "default",
                     )
                     return dest_path
                 except Exception as exc:
@@ -579,7 +569,7 @@ class ProjectStorageResolver:
                 )
                 try:
                     await domino_download(
-                        endpoint, local_child, use_api_key=True,
+                        endpoint, local_child,
                     )
                     logger.debug(
                         "Downloaded '%s' via v4 raw endpoint", remote_child,
