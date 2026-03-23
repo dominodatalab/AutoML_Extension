@@ -1,41 +1,41 @@
-"""Authorization helpers for role-gated features."""
+"""Authorization helpers for storage-management features."""
 
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from fastapi import HTTPException
 
-from app.core.context import user as user_ctx
+from app.core.authorized_actions import AuthorizedActionRequestItem, authorized_action_allowed
+from app.core.domino_http import get_domino_public_api_client_sync, resolve_domino_project_id
 
 logger = logging.getLogger(__name__)
 
-SYSADMIN_ROLE = "SysAdmin"
-
-
-def user_is_sysadmin(user: Optional[user_ctx.User]) -> bool:
-    """Return True when the given user has the SysAdmin role."""
-    if user is None:
-        return False
-
-    expected = SYSADMIN_ROLE.casefold()
-    return any((assigned_role or "").casefold() == expected for assigned_role in (user.roles or []))
+def _current_user_can_change_project_settings(client, project_id: str) -> bool:
+    """Return True when the current user is authorized to change project settings."""
+    action = AuthorizedActionRequestItem(
+        id=f"project.change_project_settings-{project_id}",
+        code="project.change_project_settings",
+        context={"projectId": project_id},
+    )
+    return authorized_action_allowed(client, action)
 
 
 def current_user_can_modify_storage() -> bool:
-    """Return True when the current viewing user is a SysAdmin."""
+    """Return True when the current user may change project settings."""
     try:
-        return user_is_sysadmin(user_ctx.get_viewing_user())
+        client = get_domino_public_api_client_sync()
+        project_id = resolve_domino_project_id()
+        return _current_user_can_change_project_settings(client, project_id)
     except Exception:
-        logger.exception("Failed to resolve current user roles for storage modification check")
+        logger.exception("Failed to resolve project settings permission for storage modification check")
         return False
 
 
 def require_storage_modify() -> None:
-    """Raise 403 unless the current viewing user is a SysAdmin."""
+    """Raise 403 unless the current user may edit the extension."""
     if not current_user_can_modify_storage():
         raise HTTPException(
             status_code=403,
-            detail="This operation requires the SysAdmin role.",
+            detail="This operation requires permission to edit the extension.",
         )

@@ -13,7 +13,7 @@ from typing import Any, Optional
 import httpx
 
 from app.api.generated.domino_public_api_client.client import Client as DominoApiClient
-from app.core.context.auth import get_request_auth_header
+from app.core.context.auth import get_request_auth_header, get_request_project_id
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -96,6 +96,10 @@ def resolve_domino_project_id() -> str:
 
     Raises ValueError when no project ID is available.
     """
+    request_project_id = get_request_project_id()
+    if request_project_id:
+        return request_project_id
+
     settings = get_settings()
     project_id = settings.domino_project_id or os.environ.get("DOMINO_PROJECT_ID")
     if not project_id:

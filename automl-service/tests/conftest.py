@@ -41,7 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.db.database import Base
 from app.db.models import Job, JobLog, JobStatus, ModelType, ProblemType, RegisteredModel
 from app.core.utils import utc_now
-from app.core.context.auth import set_request_auth_header
+from app.core.context.auth import set_request_auth_header, set_request_project_id
 
 # ---------------------------------------------------------------------------
 # Dynamic HTML report path — saved to /mnt/artifacts so Domino persists it
@@ -267,8 +267,10 @@ def mock_viewing_user(monkeypatch):
 
     # Also clear any leaked Authorization header between tests
     set_request_auth_header(None)
+    set_request_project_id(None)
     yield
     set_request_auth_header(None)
+    set_request_project_id(None)
 
 
 # ---------------------------------------------------------------------------

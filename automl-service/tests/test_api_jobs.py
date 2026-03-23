@@ -17,8 +17,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.core.context import user as user_ctx
-
 pytestmark = pytest.mark.domino
 
 
@@ -49,15 +47,6 @@ def _mock_job_queue():
     })
     mock_queue.get_total_tracked = MagicMock(return_value=0)
     return mock_queue
-
-
-def _set_viewing_user_roles(monkeypatch, roles: list[str]):
-    """Override the viewing user returned by the user context."""
-    def fake_get_viewing_user():
-        return user_ctx.User(id="test-id", user_name="test-user", roles=roles)
-
-    monkeypatch.setattr(user_ctx, "get_viewing_user", fake_get_viewing_user, raising=True)
-
 
 # ---------------------------------------------------------------------------
 # POST /svc/v1/jobs — create job
@@ -143,9 +132,16 @@ async def test_create_timeseries_job_missing_time_column(app_client):
         ("post", "/svcjobcleanuporphans", {}),
     ],
 )
-async def test_cleanup_routes_allow_sysadmin(app_client, monkeypatch, method, path, payload):
-    """Cleanup endpoints succeed for SysAdmin users."""
-    _set_viewing_user_roles(monkeypatch, ["SysAdmin"])
+async def test_cleanup_routes_allow_extension_editors(app_client, monkeypatch, method, path, payload):
+    """Cleanup endpoints succeed when extension edit permission is granted."""
+    from app.core import authorization
+
+    monkeypatch.setattr(
+        authorization,
+        "current_user_can_modify_storage",
+        lambda: True,
+        raising=True,
+    )
 
     if method == "get":
         response = await app_client.get(path)
@@ -168,9 +164,16 @@ async def test_cleanup_routes_allow_sysadmin(app_client, monkeypatch, method, pa
         ("post", "/svcjobcleanuporphans", {}),
     ],
 )
-async def test_cleanup_routes_reject_non_sysadmin(app_client, monkeypatch, method, path, payload):
-    """Cleanup endpoints reject non-SysAdmin users."""
-    _set_viewing_user_roles(monkeypatch, ["Practitioner"])
+async def test_cleanup_routes_reject_users_without_extension_edit(app_client, monkeypatch, method, path, payload):
+    """Cleanup endpoints reject users without extension edit permission."""
+    from app.core import authorization
+
+    monkeypatch.setattr(
+        authorization,
+        "current_user_can_modify_storage",
+        lambda: False,
+        raising=True,
+    )
 
     if method == "get":
         response = await app_client.get(path)
@@ -178,7 +181,7 @@ async def test_cleanup_routes_reject_non_sysadmin(app_client, monkeypatch, metho
         response = await app_client.post(path, json=payload)
 
     assert response.status_code == 403
-    assert "sysadmin" in response.json()["detail"].lower()
+    assert "edit the extension" in response.json()["detail"].lower()
 
 
 # ---------------------------------------------------------------------------

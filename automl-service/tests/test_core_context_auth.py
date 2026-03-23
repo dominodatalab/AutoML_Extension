@@ -17,6 +17,18 @@ def test_set_get_and_clear_auth_header():
     assert get_request_auth_header() is None
 
 
+def test_set_get_and_clear_project_id():
+    from app.core.context.auth import set_request_project_id, get_request_project_id
+
+    assert get_request_project_id() is None
+
+    set_request_project_id("project-123")
+    assert get_request_project_id() == "project-123"
+
+    set_request_project_id(None)
+    assert get_request_project_id() is None
+
+
 @pytest.mark.asyncio
 async def test_contextvar_is_per_task_isolated():
     from app.core.context.auth import set_request_auth_header, get_request_auth_header
