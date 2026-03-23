@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Optional, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class DatasetFileResponse(BaseModel):
@@ -12,6 +12,7 @@ class DatasetFileResponse(BaseModel):
     name: str
     path: str
     size: int = 0
+    mounted: bool = True
 
 
 class DatasetResponse(BaseModel):
@@ -64,6 +65,9 @@ class FileUploadResponse(BaseModel):
     file_size: int
     columns: list[str]
     row_count: int
+    dataset_id: Optional[str] = None
+    snapshot_file_path: Optional[str] = None
+    snapshot_verified: bool = True
 
 
 class FilePreviewRequest(BaseModel):
