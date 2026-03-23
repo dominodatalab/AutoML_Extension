@@ -2,6 +2,7 @@
 
 import logging
 import os
+import time
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -55,3 +56,34 @@ def remap_shared_path(path: str) -> str:
                 return candidate
 
     return path
+
+
+def cleanup_dataset_cache(cache_dir: str, max_age_hours: int = 24) -> int:
+    """Remove cached dataset files older than *max_age_hours*.
+
+    Called at startup and can be called periodically for long-running pods.
+    Returns the number of files deleted.
+    """
+    if not os.path.isdir(cache_dir):
+        return 0
+
+    cutoff = time.time() - (max_age_hours * 3600)
+    deleted = 0
+
+    for dirpath, _, filenames in os.walk(cache_dir, topdown=False):
+        for filename in filenames:
+            filepath = os.path.join(dirpath, filename)
+            try:
+                if os.path.getmtime(filepath) < cutoff:
+                    os.remove(filepath)
+                    deleted += 1
+            except OSError:
+                pass
+        # Remove empty directories
+        try:
+            if dirpath != cache_dir and not os.listdir(dirpath):
+                os.rmdir(dirpath)
+        except OSError:
+            pass
+
+    return deleted

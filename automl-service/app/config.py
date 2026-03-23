@@ -122,6 +122,7 @@ class Settings(BaseSettings):
 
     # Upload limits
     max_upload_size_mb: int = 550  # AUTOML_MAX_UPLOAD_SIZE_MB
+    dataset_cache_ttl_hours: int = 24  # AUTOML_DATASET_CACHE_TTL_HOURS
 
     # Training defaults
     default_time_limit: int = 3600
