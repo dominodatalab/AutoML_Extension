@@ -6,7 +6,7 @@ Covers:
 - _create_dataset() — creation with payload variants
 - _get_latest_snapshot_id() — snapshot lookup
 - upload_file() — chunked upload workflow
-- _extract_dataset_list() — v2 response unwrapping
+- extract_dataset_list() — v2 response unwrapping (tested via domino_dataset_api)
 """
 
 import os
@@ -18,12 +18,12 @@ import pytest
 from app.services.storage_resolver import (
     ProjectStorageResolver,
     DatasetInfo,
-    _extract_dataset_list,
 )
+from app.services.domino_dataset_api import extract_dataset_list
 
 
 # ---------------------------------------------------------------------------
-# _extract_dataset_list
+# extract_dataset_list
 # ---------------------------------------------------------------------------
 
 
@@ -31,7 +31,7 @@ class TestExtractDatasetList:
 
     def test_plain_list(self):
         data = [{"datasetName": "ds1"}, {"datasetName": "ds2"}]
-        result = _extract_dataset_list(data)
+        result = extract_dataset_list(data)
         assert len(result) == 2
         assert result[0]["datasetName"] == "ds1"
 
@@ -41,21 +41,21 @@ class TestExtractDatasetList:
                 {"dataset": {"datasetName": "wrapped", "datasetId": "123"}},
             ]
         }
-        result = _extract_dataset_list(data)
+        result = extract_dataset_list(data)
         assert len(result) == 1
         assert result[0]["datasetName"] == "wrapped"
         assert result[0]["datasetId"] == "123"
 
     def test_datasets_key(self):
         data = {"datasets": [{"name": "a"}, {"name": "b"}]}
-        result = _extract_dataset_list(data)
+        result = extract_dataset_list(data)
         assert len(result) == 2
 
     def test_empty_dict(self):
-        assert _extract_dataset_list({}) == []
+        assert extract_dataset_list({}) == []
 
     def test_non_dict_non_list(self):
-        assert _extract_dataset_list("unexpected") == []
+        assert extract_dataset_list("unexpected") == []
 
 
 # ---------------------------------------------------------------------------

@@ -556,7 +556,7 @@ class DominoDatasetManager:
                     )
                     return dataset
             except Exception as e:
-                logger.error(f"Failed to get dataset details: {e}")
+                logger.debug("Failed to get dataset details: %s", e)
 
         return None
 

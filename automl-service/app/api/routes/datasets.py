@@ -1,5 +1,6 @@
 """Dataset management endpoints."""
 
+import asyncio
 import hashlib
 import logging
 import mimetypes
@@ -51,8 +52,6 @@ async def _verify_snapshot_active(
     visibility, since that requires extra API round-trips and the file
     index can lag behind the snapshot status.
     """
-    import asyncio
-
     for delay in _VERIFY_BACKOFF:
         await asyncio.sleep(delay)
         try:
@@ -67,11 +66,6 @@ async def _verify_snapshot_active(
     return False
 
 
-def _resolve_project_id(request: Request) -> Optional[str]:
-    """Extract project ID from request metadata with env var fallback."""
-    return resolve_request_project_id(request)
-
-
 @router.get("", response_model=DatasetListResponse)
 @handle_errors("Failed to list datasets", detail_prefix="Failed to list datasets")
 async def list_datasets(
@@ -80,7 +74,7 @@ async def list_datasets(
     dataset_manager=Depends(get_dataset_manager),
 ):
     """List available datasets scoped to the current project."""
-    project_id = _resolve_project_id(request)
+    project_id = resolve_request_project_id(request)
     return await list_datasets_response(
         dataset_manager,
         project_id=project_id,
@@ -104,7 +98,7 @@ async def verify_snapshot(
     try:
         status = await resolver.get_latest_snapshot_status(dataset_id)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to check snapshot: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"Failed to check snapshot: {exc}") from exc
 
     verified = status == "active"
 
@@ -191,6 +185,8 @@ async def download_dataset_file(
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"File '{file_name}' not found in dataset {dataset_id}")
 
+    # get_dataset_file_path may return a synthetic path for cross-project
+    # datasets that isn't locally mounted in this App — guard against it.
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail=f"File not found at resolved path: {file_path}")
 
@@ -218,7 +214,7 @@ async def upload_file(
     """
     from app.config import get_settings as _get_settings
 
-    project_id = _resolve_project_id(request)
+    project_id = resolve_request_project_id(request)
 
     if project_id and not _get_settings().standalone_mode:
         # --- Domino dataset upload path (in-memory) ---
@@ -251,7 +247,7 @@ async def upload_file(
         dataset_info = await resolver.ensure_dataset_exists(project_id)
         if not dataset_info:
             raise HTTPException(
-                status_code=502,
+                status_code=500,
                 detail=f"Failed to create/find dataset for project {project_id}",
             )
 
@@ -262,7 +258,7 @@ async def upload_file(
             )
         except Exception as exc:
             raise HTTPException(
-                status_code=502,
+                status_code=500,
                 detail=f"Failed to upload file to dataset: {exc}",
             ) from exc
 
