@@ -419,33 +419,33 @@ class TestGetLatestSnapshotStatus:
 
     @pytest.mark.asyncio
     async def test_returns_status_string(self):
-        resolver = ProjectStorageResolver()
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "snapshots": [{"id": "snap-1", "status": "active"}]
-        }
+        from app.api.generated.domino_public_api_client.models.snapshot_details_v1_status import (
+            SnapshotDetailsV1Status,
+        )
 
-        with patch(
-            "app.services.storage_resolver.domino_request",
-            new_callable=AsyncMock,
-            return_value=mock_resp,
+        resolver = ProjectStorageResolver()
+        mock_snapshot = MagicMock()
+        mock_snapshot.status = SnapshotDetailsV1Status.ACTIVE
+
+        with patch.object(
+            ProjectStorageResolver, "_list_snapshots_typed", return_value=[mock_snapshot]
         ):
             status = await resolver.get_latest_snapshot_status("ds-123")
 
         assert status == "active"
 
     @pytest.mark.asyncio
-    async def test_unwraps_v1_envelope(self):
-        resolver = ProjectStorageResolver()
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "snapshots": [{"snapshot": {"id": "snap-1", "status": "pending"}}]
-        }
+    async def test_returns_pending_status(self):
+        from app.api.generated.domino_public_api_client.models.snapshot_details_v1_status import (
+            SnapshotDetailsV1Status,
+        )
 
-        with patch(
-            "app.services.storage_resolver.domino_request",
-            new_callable=AsyncMock,
-            return_value=mock_resp,
+        resolver = ProjectStorageResolver()
+        mock_snapshot = MagicMock()
+        mock_snapshot.status = SnapshotDetailsV1Status.PENDING
+
+        with patch.object(
+            ProjectStorageResolver, "_list_snapshots_typed", return_value=[mock_snapshot]
         ):
             status = await resolver.get_latest_snapshot_status("ds-123")
 
@@ -454,13 +454,9 @@ class TestGetLatestSnapshotStatus:
     @pytest.mark.asyncio
     async def test_returns_none_when_no_snapshots(self):
         resolver = ProjectStorageResolver()
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"snapshots": []}
 
-        with patch(
-            "app.services.storage_resolver.domino_request",
-            new_callable=AsyncMock,
-            return_value=mock_resp,
+        with patch.object(
+            ProjectStorageResolver, "_list_snapshots_typed", return_value=[]
         ):
             status = await resolver.get_latest_snapshot_status("ds-123")
 
@@ -470,8 +466,9 @@ class TestGetLatestSnapshotStatus:
     async def test_returns_none_on_error(self):
         resolver = ProjectStorageResolver()
 
-        with patch(
-            "app.services.storage_resolver.domino_request",
+        with patch.object(
+            ProjectStorageResolver,
+            "_list_snapshots_typed",
             side_effect=Exception("network error"),
         ):
             status = await resolver.get_latest_snapshot_status("ds-123")
@@ -481,21 +478,13 @@ class TestGetLatestSnapshotStatus:
     @pytest.mark.asyncio
     async def test_passes_limit_param(self):
         resolver = ProjectStorageResolver()
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"snapshots": []}
 
-        with patch(
-            "app.services.storage_resolver.domino_request",
-            new_callable=AsyncMock,
-            return_value=mock_resp,
-        ) as mock_request:
+        with patch.object(
+            ProjectStorageResolver, "_list_snapshots_typed", return_value=[]
+        ) as mock_list:
             await resolver.get_latest_snapshot_status("ds-123")
 
-        mock_request.assert_awaited_once_with(
-            "GET",
-            "/api/datasetrw/v1/datasets/ds-123/snapshots",
-            params={"limit": 1},
-        )
+        mock_list.assert_called_once_with("ds-123", limit=1)
 
 
 # ---------------------------------------------------------------------------

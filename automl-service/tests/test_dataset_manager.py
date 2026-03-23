@@ -100,10 +100,9 @@ class TestApiDatasetSummaries:
             new_callable=PropertyMock,
             return_value=True,
         ), patch.object(
-            manager,
-            "_api_request",
-            new_callable=AsyncMock,
-        ) as api_request, patch.object(
+            DominoDatasetManager,
+            "_fetch_dataset_details",
+        ) as fetch_details, patch.object(
             manager,
             "_list_files_via_snapshot_api",
             new_callable=AsyncMock,
@@ -113,10 +112,10 @@ class TestApiDatasetSummaries:
 
         assert response is not None
         assert response.id == "ds-123"
-        api_request.assert_not_called()
+        fetch_details.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_get_dataset_handles_wrapped_v1_detail_payload(self):
+    async def test_get_dataset_fetches_via_generated_client(self):
         manager = DominoDatasetManager()
 
         with patch.object(
@@ -125,19 +124,16 @@ class TestApiDatasetSummaries:
             new_callable=PropertyMock,
             return_value=True,
         ), patch.object(
-            manager,
-            "_api_request",
-            new_callable=AsyncMock,
+            DominoDatasetManager,
+            "_fetch_dataset_details",
             return_value={
-                "dataset": {
-                    "id": "ds-123",
-                    "name": "sales-data",
-                    "description": "Quarterly sales",
-                    "fileCount": 7,
-                    "sizeInBytes": 4096,
-                    "projectId": "proj-1",
-                    "readWriteSnapshotId": "snap-1",
-                }
+                "id": "ds-123",
+                "name": "sales-data",
+                "description": "Quarterly sales",
+                "fileCount": 7,
+                "sizeInBytes": 4096,
+                "projectId": "proj-1",
+                "readWriteSnapshotId": "snap-1",
             },
         ):
             response = await manager.get_dataset("ds-123", include_files=False)
