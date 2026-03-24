@@ -1,24 +1,35 @@
 import pytest
 
+from app.core.domino_http import MissingUserTokenError
+
 
 @pytest.mark.asyncio
-async def test_get_domino_auth_headers_ignores_forwarded_auth(monkeypatch):
-    """get_domino_auth_headers should NOT forward the per-request Authorization
-    header to the sidecar proxy.  The sidecar injects its own auth; overriding
-    it with the browser's token causes 500 errors.
+async def test_get_user_auth_headers_uses_forwarded_token():
+    """get_user_auth_headers_async returns only the forwarded user token.
 
-    When no sidecar token is available, the function falls back to API key.
+    No API key or sidecar fallback — the forwarded JWT is the sole
+    credential for outbound Domino API calls.
     """
-    monkeypatch.setenv("DOMINO_API_KEY", "unit-test-key")
-
-    from app.core.domino_http import get_domino_auth_headers
+    from app.core.domino_http import get_user_auth_headers_async
     from app.core.context.auth import set_request_auth_header
 
-    # Simulate middleware capturing a browser auth header
     set_request_auth_header("Bearer token-A")
+    try:
+        headers = await get_user_auth_headers_async()
+        assert headers == {"Authorization": "Bearer token-A"}
+    finally:
+        set_request_auth_header(None)
 
-    # get_domino_auth_headers should NOT use the forwarded token —
-    # it should fall through to sidecar token (which will fail in test)
-    # then to API key
-    headers = await get_domino_auth_headers()
-    assert headers == {'Authorization': 'Bearer token-A', 'X-Domino-Api-Key': 'unit-test-key'}
+
+@pytest.mark.asyncio
+async def test_get_user_auth_headers_raises_without_token(monkeypatch):
+    """When no forwarded token exists, MissingUserTokenError is raised
+    instead of silently falling back to sidecar/API key."""
+    monkeypatch.setenv("DOMINO_API_KEY", "unit-test-key")
+
+    from app.core.domino_http import get_user_auth_headers_async
+    from app.core.context.auth import set_request_auth_header
+
+    set_request_auth_header(None)
+    with pytest.raises(MissingUserTokenError):
+        await get_user_auth_headers_async()

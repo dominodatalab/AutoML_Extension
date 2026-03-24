@@ -3,7 +3,7 @@
 Covers:
 - domino_download() — streaming file download to disk
 - domino_request() — retry logic, auth headers
-- get_domino_auth_headers() — ephemeral token vs API key
+- get_user_auth_headers() / get_user_auth_headers_async() — strict user token
 - resolve_domino_api_host() — priority chain
 """
 
@@ -14,9 +14,11 @@ import httpx
 import pytest
 
 from app.core.domino_http import (
+    MissingUserTokenError,
     domino_download,
     domino_request,
-    get_domino_auth_headers,
+    get_user_auth_headers,
+    get_user_auth_headers_async,
     resolve_domino_api_host,
 )
 
@@ -26,6 +28,15 @@ async def reset_domino_http_state():
     from app.core.context.auth import set_request_auth_header
     set_request_auth_header(None)
     yield
+    set_request_auth_header(None)
+
+
+@pytest.fixture()
+def with_user_token():
+    """Set a forwarded user token for tests that need one."""
+    from app.core.context.auth import set_request_auth_header
+    set_request_auth_header("Bearer test-user-token")
+    yield "Bearer test-user-token"
     set_request_auth_header(None)
 
 
@@ -64,74 +75,48 @@ class TestResolveDominoApiHost:
 # ---------------------------------------------------------------------------
 
 
-class TestGetDominoAuthHeaders:
+class TestGetUserAuthHeaders:
+
+    def test_raises_when_no_token(self):
+        """Must raise MissingUserTokenError when no forwarded token exists."""
+        with pytest.raises(MissingUserTokenError):
+            get_user_auth_headers()
 
     @pytest.mark.asyncio
-    async def test_returns_api_key_when_sidecar_down(self, monkeypatch):
-        monkeypatch.setenv("DOMINO_API_KEY", "test-key-123")
-        # Mock the sidecar call to fail so we fall through to API key
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(side_effect=ConnectionError("no sidecar"))
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        with patch("httpx.AsyncClient", return_value=mock_client):
-            headers = await get_domino_auth_headers()
-        assert headers.get("X-Domino-Api-Key") == "test-key-123"
+    async def test_async_raises_when_no_token(self):
+        """Async variant must also raise when no forwarded token exists."""
+        with pytest.raises(MissingUserTokenError):
+            await get_user_auth_headers_async()
+
+    def test_returns_forwarded_token(self, with_user_token):
+        """Returns the forwarded user token as Authorization header."""
+        headers = get_user_auth_headers()
+        assert headers == {"Authorization": "Bearer test-user-token"}
 
     @pytest.mark.asyncio
-    async def test_returns_empty_when_no_credentials(self, monkeypatch):
-        monkeypatch.delenv("DOMINO_API_KEY", raising=False)
-        monkeypatch.delenv("DOMINO_USER_API_KEY", raising=False)
-        # Clear settings to avoid picking up a key from config
-        import app.config as cfg
-        old = cfg._settings_instance
-        cfg._settings_instance = None
-        try:
-            headers = await get_domino_auth_headers()
-            # May be empty or may pick up from settings — just verify it's a dict
-            assert isinstance(headers, dict)
-        finally:
-            cfg._settings_instance = old
+    async def test_async_returns_forwarded_token(self, with_user_token):
+        """Async variant returns the forwarded user token."""
+        headers = await get_user_auth_headers_async()
+        assert headers == {"Authorization": "Bearer test-user-token"}
+
+    def test_no_api_key_fallback(self, monkeypatch):
+        """API key env vars must NOT be used as fallback."""
+        monkeypatch.setenv("DOMINO_API_KEY", "should-not-appear")
+        monkeypatch.setenv("DOMINO_USER_API_KEY", "should-not-appear")
+        with pytest.raises(MissingUserTokenError):
+            get_user_auth_headers()
 
     @pytest.mark.asyncio
-    async def test_sidecar_token_used_when_no_forwarded_token(self, monkeypatch):
-        """When no user token is forwarded, sidecar token is fetched."""
-        monkeypatch.delenv("DOMINO_API_KEY", raising=False)
-        monkeypatch.delenv("DOMINO_USER_API_KEY", raising=False)
-
-        response = MagicMock()
-        response.status_code = 200
-        response.text = "token-123"
-
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(return_value=response)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        with patch("httpx.AsyncClient", return_value=mock_client):
-            headers = await get_domino_auth_headers()
-
-        assert headers["Authorization"] == "Bearer token-123"
-        assert mock_client.get.await_count == 1
-
-    @pytest.mark.asyncio
-    async def test_sidecar_skipped_when_forwarded_token_present(self, monkeypatch):
-        """When a user token is forwarded, sidecar is NOT called."""
-        from app.core.context.auth import set_request_auth_header
-
-        monkeypatch.delenv("DOMINO_API_KEY", raising=False)
-        monkeypatch.delenv("DOMINO_USER_API_KEY", raising=False)
-        set_request_auth_header("Bearer user-token-abc")
-
+    async def test_no_sidecar_fallback(self):
+        """Sidecar token must NOT be fetched as fallback."""
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-            headers = await get_domino_auth_headers()
-
-        assert headers["Authorization"] == "Bearer user-token-abc"
-        # Sidecar should NOT have been called
+            with pytest.raises(MissingUserTokenError):
+                await get_user_auth_headers_async()
+        # Sidecar should never be called
         assert mock_client.get.await_count == 0
 
 
@@ -143,7 +128,13 @@ class TestGetDominoAuthHeaders:
 class TestDominoRequest:
 
     @pytest.mark.asyncio
-    async def test_successful_get(self, monkeypatch):
+    async def test_raises_without_user_token(self, monkeypatch):
+        monkeypatch.setenv("DOMINO_API_PROXY", "https://api.test.com")
+        with pytest.raises(MissingUserTokenError):
+            await domino_request("GET", "/api/test", max_retries=0)
+
+    @pytest.mark.asyncio
+    async def test_successful_get(self, monkeypatch, with_user_token):
         monkeypatch.setenv("DOMINO_API_PROXY", "https://api.test.com")
 
         mock_response = MagicMock(spec=httpx.Response)
@@ -160,7 +151,7 @@ class TestDominoRequest:
         assert resp.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_raises_on_client_error(self, monkeypatch):
+    async def test_raises_on_client_error(self, monkeypatch, with_user_token):
         monkeypatch.setenv("DOMINO_API_PROXY", "https://api.test.com")
 
         mock_response = MagicMock(spec=httpx.Response)
@@ -177,7 +168,7 @@ class TestDominoRequest:
                 await domino_request("GET", "/api/missing", max_retries=0)
 
     @pytest.mark.asyncio
-    async def test_retries_on_503(self, monkeypatch):
+    async def test_retries_on_503(self, monkeypatch, with_user_token):
         monkeypatch.setenv("DOMINO_API_PROXY", "https://api.test.com")
 
         call_count = 0
@@ -200,12 +191,10 @@ class TestDominoRequest:
                 )
 
         assert resp.status_code == 200
-        # call_count includes auth header fetches triggering extra client creates,
-        # but the mock_request captures the actual API calls
         assert call_count >= 3
 
     @pytest.mark.asyncio
-    async def test_creates_fresh_client_per_request(self, monkeypatch):
+    async def test_creates_fresh_client_per_request(self, monkeypatch, with_user_token):
         """domino_request uses a fresh AsyncClient per call (no shared pool)."""
         monkeypatch.setenv("DOMINO_API_PROXY", "https://api.test.com")
 
@@ -231,13 +220,11 @@ class TestDominoRequest:
             await domino_request("GET", "/api/first", max_retries=0)
             await domino_request("GET", "/api/second", max_retries=0)
 
-        # Each domino_request call creates a fresh client; get_domino_auth_headers
-        # may also create a client for the sidecar token fetch, so we just verify
-        # that multiple clients are instantiated (no shared pool).
+        # Each domino_request call creates a fresh client.
         assert len(client_instances) >= 2
 
     @pytest.mark.asyncio
-    async def test_retries_after_transport_error(self, monkeypatch):
+    async def test_retries_after_transport_error(self, monkeypatch, with_user_token):
         """domino_request retries on transport errors with a fresh client."""
         monkeypatch.setenv("DOMINO_API_PROXY", "https://api.test.com")
 
@@ -276,7 +263,14 @@ class TestDominoRequest:
 class TestDominoDownload:
 
     @pytest.mark.asyncio
-    async def test_downloads_file_to_dest(self, tmp_path, monkeypatch):
+    async def test_raises_without_user_token(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DOMINO_API_PROXY", "https://api.test.com")
+        dest = str(tmp_path / "fail.csv")
+        with pytest.raises(MissingUserTokenError):
+            await domino_download("/api/files/test.csv", dest)
+
+    @pytest.mark.asyncio
+    async def test_downloads_file_to_dest(self, tmp_path, monkeypatch, with_user_token):
         monkeypatch.setenv("DOMINO_API_PROXY", "https://api.test.com")
 
         file_content = b"col1,col2\n1,2\n3,4\n"
@@ -318,7 +312,7 @@ class TestDominoDownload:
             assert f.read() == file_content
 
     @pytest.mark.asyncio
-    async def test_creates_parent_directories(self, tmp_path, monkeypatch):
+    async def test_creates_parent_directories(self, tmp_path, monkeypatch, with_user_token):
         monkeypatch.setenv("DOMINO_API_PROXY", "https://api.test.com")
 
         dest = str(tmp_path / "a" / "b" / "c" / "file.csv")
@@ -357,7 +351,7 @@ class TestDominoDownload:
         assert os.path.exists(dest)
 
     @pytest.mark.asyncio
-    async def test_raises_on_http_error(self, tmp_path, monkeypatch):
+    async def test_raises_on_http_error(self, tmp_path, monkeypatch, with_user_token):
         monkeypatch.setenv("DOMINO_API_PROXY", "https://api.test.com")
 
         dest = str(tmp_path / "fail.csv")
