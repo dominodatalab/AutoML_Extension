@@ -14,16 +14,10 @@ from app.db.models import JobStatus, ModelType, ProblemType
 from app.core.autogluon_runner import AutoGluonRunner
 from app.api.schemas.job import AdvancedAutoGluonConfig as AdvancedConfig
 from app.core.experiment_tracker import ExperimentTracker
-from app.core.dataset_manager import DominoDatasetManager
 from app.core.domino_registry import get_domino_registry
 from app.core.model_diagnostics import get_model_diagnostics
 from app.core.model_loader import load_predictor, load_dataframe
-from app.core.utils import (
-    ensure_local_file,
-    extract_dataset_relative_path,
-    remap_shared_path,
-    utc_now,
-)
+from app.core.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -90,46 +84,6 @@ def _ensure_feature_importance_diagnostics(
         return resolved_diagnostics, trainer_features
 
     return diagnostics_data, None
-
-
-async def _resolve_training_data_path(
-    job: Any,
-    dataset_manager: DominoDatasetManager,
-) -> tuple[str, str]:
-    """Resolve the exact data file to train against for a job."""
-    project_id = getattr(job, "project_id", None)
-
-    if job.data_source != "domino_dataset":
-        data_path = remap_shared_path(job.file_path)
-        data_path = await ensure_local_file(data_path, project_id)
-        return data_path, f"Using uploaded file: {data_path}"
-
-    selected_file_path = getattr(job, "file_path", None)
-    selected_relative_path = extract_dataset_relative_path(selected_file_path)
-
-    if selected_file_path:
-        preferred_path = remap_shared_path(selected_file_path)
-        local_preferred_path = await ensure_local_file(preferred_path, project_id)
-        if os.path.exists(local_preferred_path):
-            return local_preferred_path, f"Using Domino dataset file: {local_preferred_path}"
-
-        logger.warning(
-            "Selected dataset file path was unavailable for job %s; "
-            "falling back to dataset_id lookup (dataset_id=%s, file_path=%s)",
-            getattr(job, "id", "unknown"),
-            job.dataset_id,
-            selected_file_path,
-        )
-
-    data_path = await dataset_manager.get_dataset_file_path(
-        job.dataset_id,
-        file_name=selected_relative_path,
-    )
-    data_path = await ensure_local_file(data_path, project_id)
-
-    if selected_relative_path:
-        return data_path, f"Using Domino dataset file: {selected_relative_path}"
-    return data_path, f"Using Domino dataset: {job.dataset_id}"
 
 
 class TrainingProgressReporter:
@@ -204,7 +158,7 @@ class TrainingProgressReporter:
         )
 
 
-async def run_training_job(job_id: str, data_path: Optional[str] = None, advanced_config: Optional[Dict[str, Any]] = None, job_config: Optional[Dict[str, Any]] = None):
+async def run_training_job(job_id: str, data_path: str, advanced_config: Optional[Dict[str, Any]] = None, job_config: Optional[Dict[str, Any]] = None):
     """
     Run a training job in the background with Domino experiment tracking.
 
@@ -240,21 +194,8 @@ async def run_training_job(job_id: str, data_path: Optional[str] = None, advance
             else:
                 reason = "not requested" if not job.enable_mlflow else "standalone mode"
                 await crud.add_job_log(db, job_id, f"Experiment tracking disabled ({reason})", "INFO")
-            # Resolve training data path — prefer the pre-resolved path
-            # passed via --file-path CLI arg (resolved at job creation time).
-            # Fall back to runtime resolution for legacy/local jobs.
-            if data_path:
-                logger.info("[TRAINING] Using pre-resolved data_path: %s", data_path)
-                await crud.add_job_log(db, job_id, f"Using data file: {data_path}")
-            else:
-                dataset_manager = DominoDatasetManager()
-                logger.info(f"[TRAINING] Resolving data path at runtime (data_source={job.data_source})")
-                data_path, data_path_log = await _resolve_training_data_path(
-                    job,
-                    dataset_manager,
-                )
-                await crud.add_job_log(db, job_id, data_path_log)
-                logger.info("[TRAINING] Resolved data_path: %s", data_path)
+            logger.info("[TRAINING] data_path: %s", data_path)
+            await crud.add_job_log(db, job_id, f"Using data file: {data_path}")
 
             await _check_cancelled(job_id, db)
 
