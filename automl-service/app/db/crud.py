@@ -1,20 +1,89 @@
 """Database CRUD operations."""
 
+import asyncio
+import json
+import logging
 from datetime import datetime, timedelta
 from typing import Optional, Sequence
 
 from sqlalchemy import select, update, desc, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.core.utils import utc_now
+from app.core.websocket_manager import get_websocket_manager
 
 from app.db.models import (
+    EDAResult,
     Job,
     JobLog,
     JobStatus,
     ModelType,
     RegisteredModel,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _job_update_payload(job: Job, event_type: str = "job_update") -> dict:
+    """Serialize the current job state for websocket subscribers."""
+    status = job.status.value if hasattr(job.status, "value") else str(job.status)
+    payload = {
+        "type": event_type,
+        "job_id": job.id,
+        "status": status,
+        "progress": int(getattr(job, "progress", 0) or 0),
+        "current_step": getattr(job, "current_step", None),
+        "models_trained": int(getattr(job, "models_trained", 0) or 0),
+        "current_model": getattr(job, "current_model", None),
+        "eta_seconds": getattr(job, "eta_seconds", None),
+        "domino_job_status": getattr(job, "domino_job_status", None),
+        "started_at": job.started_at.isoformat() if getattr(job, "started_at", None) else None,
+        "completed_at": job.completed_at.isoformat() if getattr(job, "completed_at", None) else None,
+    }
+    return payload
+
+
+def _schedule_job_broadcast(job: Optional[Job], event_type: str = "job_update") -> None:
+    """Fire-and-forget websocket broadcast for a job update."""
+    if job is None:
+        return
+
+    async def _broadcast() -> None:
+        await get_websocket_manager().send_progress(job.id, _job_update_payload(job, event_type=event_type))
+
+    task = asyncio.create_task(_broadcast())
+    task.add_done_callback(_log_broadcast_error)
+
+
+def _schedule_job_log_broadcast(log: JobLog) -> None:
+    """Broadcast a newly written log line to job subscribers."""
+    async def _broadcast() -> None:
+        await get_websocket_manager().send_progress(
+            log.job_id,
+            {
+                "type": "job_log",
+                "job_id": log.job_id,
+                "log": {
+                    "id": log.id,
+                    "job_id": log.job_id,
+                    "level": log.level,
+                    "message": log.message,
+                    "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+                },
+            },
+        )
+
+    task = asyncio.create_task(_broadcast())
+    task.add_done_callback(_log_broadcast_error)
+
+
+def _log_broadcast_error(task: asyncio.Task) -> None:
+    """Log background websocket errors without surfacing them to callers."""
+    try:
+        task.result()
+    except Exception:
+        logger.exception("Background websocket broadcast failed")
 
 
 # Job CRUD operations
@@ -72,6 +141,7 @@ async def get_jobs(
     owner: Optional[str] = None,
     project_id: Optional[str] = None,
     project_name: Optional[str] = None,
+    summary_only: bool = False,
 ) -> Sequence[Job]:
     """Get all jobs with optional filtering.
 
@@ -86,6 +156,37 @@ async def get_jobs(
         project_name: Filter by project name (from Domino environment)
     """
     query = select(Job).order_by(desc(Job.created_at))
+    if summary_only:
+        query = query.options(
+            load_only(
+                Job.id,
+                Job.name,
+                Job.description,
+                Job.owner,
+                Job.project_id,
+                Job.project_name,
+                Job.model_type,
+                Job.problem_type,
+                Job.status,
+                Job.execution_target,
+                Job.domino_job_id,
+                Job.domino_job_status,
+                Job.progress,
+                Job.current_step,
+                Job.data_source,
+                Job.dataset_id,
+                Job.file_path,
+                Job.metrics,
+                Job.experiment_name,
+                Job.error_message,
+                Job.is_registered,
+                Job.registered_model_name,
+                Job.registered_model_version,
+                Job.created_at,
+                Job.started_at,
+                Job.completed_at,
+            )
+        )
 
     if status:
         query = query.where(Job.status == status)
@@ -142,7 +243,9 @@ async def update_job_domino_fields(
 
     await db.execute(update(Job).where(Job.id == job_id).values(**update_data))
     await db.commit()
-    return await get_job(db, job_id)
+    job = await get_job(db, job_id)
+    _schedule_job_broadcast(job, event_type="job_update")
+    return job
 
 
 async def update_job_status(
@@ -167,7 +270,9 @@ async def update_job_status(
         update(Job).where(Job.id == job_id).values(**update_data)
     )
     await db.commit()
-    return await get_job(db, job_id)
+    job = await get_job(db, job_id)
+    _schedule_job_broadcast(job, event_type="job_update")
+    return job
 
 
 async def update_job_progress(
@@ -195,7 +300,9 @@ async def update_job_progress(
         update(Job).where(Job.id == job_id).values(**update_data)
     )
     await db.commit()
-    return await get_job(db, job_id)
+    job = await get_job(db, job_id)
+    _schedule_job_broadcast(job, event_type="job_update")
+    return job
 
 
 async def update_job_results(
@@ -206,6 +313,7 @@ async def update_job_results(
     model_path: str,
     experiment_run_id: Optional[str] = None,
     experiment_name: Optional[str] = None,
+    diagnostics_data: Optional[dict] = None,
 ) -> Optional[Job]:
     """Update job with training results."""
     update_data = {
@@ -224,11 +332,16 @@ async def update_job_results(
     if experiment_name:
         update_data["experiment_name"] = experiment_name
 
+    if diagnostics_data is not None:
+        update_data["diagnostics_data"] = diagnostics_data
+
     await db.execute(
         update(Job).where(Job.id == job_id).values(**update_data)
     )
     await db.commit()
-    return await get_job(db, job_id)
+    job = await get_job(db, job_id)
+    _schedule_job_broadcast(job, event_type="job_update")
+    return job
 
 
 async def delete_job(db: AsyncSession, job_id: str) -> bool:
@@ -254,6 +367,7 @@ async def add_job_log(
     db.add(log)
     await db.commit()
     await db.refresh(log)
+    _schedule_job_log_broadcast(log)
     return log
 
 
@@ -299,13 +413,16 @@ async def get_registered_model(
 async def get_registered_models(
     db: AsyncSession,
     project_id: Optional[str] = None,
+    owner: Optional[str] = None,
 ) -> Sequence[RegisteredModel]:
-    """Get all registered models, optionally filtered by project via job FK."""
+    """Get all registered models, optionally filtered by project/owner via job FK."""
     query = select(RegisteredModel)
-    if project_id:
-        query = query.join(Job, RegisteredModel.job_id == Job.id).where(
-            Job.project_id == project_id
-        )
+    if project_id or owner:
+        query = query.join(Job, RegisteredModel.job_id == Job.id)
+        if project_id:
+            query = query.where(Job.project_id == project_id)
+        if owner:
+            query = query.where(Job.owner == owner)
     query = query.order_by(desc(RegisteredModel.created_at))
     result = await db.execute(query)
     return result.scalars().all()
@@ -340,6 +457,7 @@ async def get_jobs_for_cleanup(
     statuses: list[JobStatus],
     older_than_days: Optional[int] = None,
     project_id: Optional[str] = None,
+    owner: Optional[str] = None,
 ) -> Sequence[Job]:
     """Get jobs matching statuses and optional age filter, ordered by created_at."""
     query = select(Job).where(Job.status.in_(statuses))
@@ -348,6 +466,8 @@ async def get_jobs_for_cleanup(
         query = query.where(Job.created_at < cutoff)
     if project_id:
         query = query.where(Job.project_id == project_id)
+    if owner:
+        query = query.where(Job.owner == owner)
     return (await db.execute(query.order_by(Job.created_at))).scalars().all()
 
 
@@ -357,3 +477,97 @@ async def count_job_logs(db: AsyncSession, job_id: str) -> int:
         select(func.count()).select_from(JobLog).where(JobLog.job_id == job_id)
     )
     return result.scalar()
+
+
+# EDA Result operations
+
+
+async def create_eda_request(
+    db: AsyncSession,
+    request_id: str,
+    mode: str,
+    request_payload: dict,
+    owner: Optional[str] = None,
+    project_id: Optional[str] = None,
+) -> EDAResult:
+    """Create a new EDA request record."""
+    eda = EDAResult(
+        id=request_id,
+        status="pending",
+        mode=mode,
+        request_payload=json.dumps(request_payload),
+        owner=owner,
+        project_id=project_id,
+    )
+    db.add(eda)
+    await db.commit()
+    await db.refresh(eda)
+    return eda
+
+
+async def get_eda_request(
+    db: AsyncSession, request_id: str, owner: Optional[str] = None,
+) -> Optional[EDAResult]:
+    """Get an EDA request by ID, optionally scoped to owner."""
+    query = select(EDAResult).where(EDAResult.id == request_id)
+    if owner:
+        query = query.where(EDAResult.owner == owner)
+    result = await db.execute(query)
+    return result.scalar_one_or_none()
+
+
+async def update_eda_request(
+    db: AsyncSession, request_id: str, **updates
+) -> Optional[EDAResult]:
+    """Update an EDA request with arbitrary fields."""
+    eda = await get_eda_request(db, request_id)
+    if eda is None:
+        return None
+    for key, value in updates.items():
+        if hasattr(eda, key) and value is not None:
+            setattr(eda, key, value)
+    eda.updated_at = utc_now()
+    await db.commit()
+    await db.refresh(eda)
+    return eda
+
+
+async def write_eda_result(
+    db: AsyncSession, request_id: str, mode: str, result: dict
+) -> Optional[EDAResult]:
+    """Write EDA profiling result payload."""
+    return await update_eda_request(
+        db, request_id, status="completed", mode=mode,
+        result_payload=json.dumps(result), error=None,
+    )
+
+
+async def write_eda_error(
+    db: AsyncSession, request_id: str, error_message: str
+) -> Optional[EDAResult]:
+    """Mark an EDA request as failed with an error message."""
+    return await update_eda_request(
+        db, request_id, status="failed", error=error_message,
+    )
+
+
+async def get_eda_result(
+    db: AsyncSession, request_id: str
+) -> Optional[dict]:
+    """Get the parsed result payload for an EDA request."""
+    eda = await get_eda_request(db, request_id)
+    if eda is None or eda.result_payload is None:
+        return None
+    return json.loads(eda.result_payload)
+
+
+async def delete_stale_eda_results(
+    db: AsyncSession, max_age_hours: float = 72.0
+) -> int:
+    """Delete EDA results older than *max_age_hours*. Returns rows deleted."""
+    cutoff = utc_now() - timedelta(hours=max_age_hours)
+    result = await db.execute(
+        delete(EDAResult).where(EDAResult.created_at < cutoff)
+    )
+    await db.commit()
+    return result.rowcount
