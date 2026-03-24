@@ -16,6 +16,8 @@ interface ImportMetaEnv {
   readonly VITE_BASE_PATH: string
   /** API URL for the FastAPI backend */
   readonly VITE_API_URL: string
+  /** Domino API host used to generate user-facing links, derived from DOMINO_API_HOST */
+  readonly VITE_DOMINO_API_HOST?: string
   /** Model API URL (optional, for external model endpoints) */
   readonly VITE_MODEL_API_URL?: string
   /** Model API authentication token (optional) */
