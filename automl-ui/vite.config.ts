@@ -5,9 +5,11 @@ import path from 'path'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
+  const isProduction = mode === 'production';
+
   // Use relative base path for Domino apps - this ensures assets work behind Domino's proxy
   // For production builds, use './' to generate relative asset paths
-  const basePath = mode === 'production' ? './' : (env.VITE_BASE_PATH || '/')
+  const basePath = isProduction ? './' : (env.VITE_BASE_PATH || '/')
 
   // API target - defaults to localhost for local dev, use VITE_API_URL for Domino
   const apiTarget = env.VITE_API_URL || 'http://localhost:8000'
@@ -63,6 +65,7 @@ export default defineConfig(({ mode }) => {
     define: {
       'import.meta.env.VITE_API_URL': JSON.stringify(apiTarget),
       'import.meta.env.VITE_BASE_PATH': JSON.stringify(basePath),
+      'import.meta.env.VITE_DEV_DOMINO_API_HOST': JSON.stringify(!isProduction ? env.DOMINO_API_HOST || '' : '')
     },
   }
 })
