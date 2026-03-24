@@ -2,11 +2,25 @@
 
 from typing import Optional, Tuple
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.utils import remap_shared_path
 from app.db import crud
+
+
+def resolve_request_project_id(request: Optional[Request]) -> Optional[str]:
+    """Resolve project context from ``projectId`` / ``project_id`` query param.
+
+    Returns ``None`` when no project context is available.
+    """
+    if request is not None:
+        for query_key in ("projectId", "project_id"):
+            query_project_id = request.query_params.get(query_key)
+            if query_project_id:
+                return query_project_id
+
+    return None
 
 
 async def get_job_paths(
