@@ -15,8 +15,8 @@ def register_custom_misc_routes(app: FastAPI) -> None:
         return await lazy_import("app.api.routes.health", "get_current_user")(request)
 
     @app.get("/svccapabilities")
-    async def svc_capabilities():
-        return await lazy_import("app.api.routes.health", "get_capabilities")()
+    async def svc_capabilities(request: Request):
+        return await lazy_import("app.api.routes.health", "get_capabilities")(request)
 
     @app.get("/svcping")
     async def svc_ping():
