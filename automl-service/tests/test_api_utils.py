@@ -45,7 +45,12 @@ def test_resolve_request_project_id_reads_snake_case_query_param(monkeypatch):
     assert resolve_request_project_id(request) == "query-proj"
 
 
-def test_resolve_request_project_id_falls_back_to_environment(monkeypatch):
+def test_resolve_request_project_id_ignores_environment_variable(monkeypatch):
+    """DOMINO_PROJECT_ID is the App's own project — never use it as fallback."""
     monkeypatch.setenv("DOMINO_PROJECT_ID", "env-proj")
 
-    assert resolve_request_project_id(None) == "env-proj"
+    assert resolve_request_project_id(None) is None
+
+
+def test_resolve_request_project_id_none_without_request():
+    assert resolve_request_project_id(None) is None
