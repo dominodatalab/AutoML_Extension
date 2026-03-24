@@ -12,22 +12,23 @@ from app.db import crud
 def resolve_request_project_id(request: Optional[Request]) -> Optional[str]:
     """Resolve project context from request metadata.
 
-    Checks ``X-Project-Id`` header, then ``projectId`` / ``project_id``
-    query params.  Returns ``None`` when no project context is available.
+    Checks ``projectId`` / ``project_id`` query params first, then falls
+    back to the ``X-Project-Id`` header for legacy clients.  Returns
+    ``None`` when no project context is available.
 
     **No env-var fallback** — ``DOMINO_PROJECT_ID`` is the App's own
     project, not the target project the user is working in.  Falling back
     to it silently operates on the wrong project.
     """
     if request is not None:
-        header_project_id = request.headers.get("X-Project-Id")
-        if header_project_id:
-            return header_project_id
-
         for query_key in ("projectId", "project_id"):
             query_project_id = request.query_params.get(query_key)
             if query_project_id:
                 return query_project_id
+
+        header_project_id = request.headers.get("X-Project-Id")
+        if header_project_id:
+            return header_project_id
 
     return None
 
