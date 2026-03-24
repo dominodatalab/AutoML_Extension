@@ -18,6 +18,7 @@ interface DashboardFiltersProps {
   onTypeFilterChange: (value: string) => void
   viewMode: ViewMode
   onViewModeChange: (mode: ViewMode) => void
+  showStorageCleanup: boolean
   onStorageCleanupClick: () => void
 }
 
@@ -30,6 +31,7 @@ export function DashboardFilters({
   onTypeFilterChange,
   viewMode,
   onViewModeChange,
+  showStorageCleanup,
   onStorageCleanupClick,
 }: DashboardFiltersProps) {
   return (
@@ -53,13 +55,15 @@ export function DashboardFilters({
               New training job
             </button>
           </Link>
-          <button
-            onClick={onStorageCleanupClick}
-            className="h-[32px] px-[15px] bg-[#EDECFB] text-[#1820A0] text-sm font-normal rounded-[4px] border border-[#C9C5F2] hover:bg-[#E2E0F8] transition-all duration-200 inline-flex items-center gap-2"
-          >
-            <ArchiveBoxXMarkIcon className="h-4 w-4" />
-            Storage cleanup
-          </button>
+          {showStorageCleanup && (
+            <button
+              onClick={onStorageCleanupClick}
+              className="h-[32px] px-[15px] bg-[#EDECFB] text-[#1820A0] text-sm font-normal rounded-[4px] border border-[#C9C5F2] hover:bg-[#E2E0F8] transition-all duration-200 inline-flex items-center gap-2"
+            >
+              <ArchiveBoxXMarkIcon className="h-4 w-4" />
+              Storage cleanup
+            </button>
+          )}
         </div>
       </div>
 
