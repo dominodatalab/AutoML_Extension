@@ -252,7 +252,6 @@ class DominoDatasetManager:
                         local_path = os.path.join(dataset_path, f.name)
                         if os.path.exists(local_path):
                             f.path = local_path
-                            f.mounted = True
                             try:
                                 f.size = os.stat(local_path).st_size
                             except OSError:
@@ -374,7 +373,6 @@ class DominoDatasetManager:
                         name=rel_path,
                         path=synthetic_path,
                         size=size,
-                        mounted=False,
                     )
                 )
                 total_size += size
