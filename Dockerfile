@@ -60,7 +60,7 @@ RUN chown -R ${DOMINO_USER}:${DOMINO_GROUP} "/home/${DOMINO_USER}"
 WORKDIR /home/${DOMINO_USER}
 
 # TODO refactor the pip installations to also use this
-RUN git clone https://github.com/niole/AutoML_Extension.git --depth 1 --branch $EXTENSION_VERSION
+RUN git clone https://github.com/dominodatalab/AutoML_Extension.git --depth 1 --branch $EXTENSION_VERSION
 
 WORKDIR /home/${DOMINO_USER}/AutoML_Extension
 
