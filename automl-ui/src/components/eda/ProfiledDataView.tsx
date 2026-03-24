@@ -250,31 +250,35 @@ export function ProfiledDataView({
       {/* Tab Content */}
       <div className="bg-white border border-domino-border p-6">
         {activeTab === 'data' && (
-          <DataPreviewContent
-            preview={preview}
-            previewLoading={previewLoading}
-            previewError={previewError}
-            currentPage={currentPage}
-            pageSize={pageSize}
-            onPageChange={onPageChange}
-            onPageSizeChange={onPageSizeChange}
-          />
+          <TabContent loading={previewLoading} error={previewError ? String(previewError) : null} data={preview} emptyMessage="Select an execution target and click Analyze to preview your data">
+            {preview && (
+              <DataPreviewContent
+                preview={preview}
+                previewLoading={false}
+                previewError={null}
+                currentPage={currentPage}
+                pageSize={pageSize}
+                onPageChange={onPageChange}
+                onPageSizeChange={onPageSizeChange}
+              />
+            )}
+          </TabContent>
         )}
 
         {activeTab === 'columns' && (
-          <TabContent loading={profilingLoading} error={profilingError} data={profile}>
+          <TabContent loading={profilingLoading} error={profilingError} data={profile} emptyMessage="Select an execution target and click Analyze to profile your data">
             {profile && <ColumnExplorer columns={profile.columns} filePath={selectedFilePath} />}
           </TabContent>
         )}
 
         {activeTab === 'correlations' && (
-          <TabContent loading={profilingLoading} error={profilingError} data={profile?.correlations} emptyMessage="No correlation data available">
+          <TabContent loading={profilingLoading} error={profilingError} data={profile?.correlations} emptyMessage="Select an execution target and click Analyze to view correlations">
             {profile?.correlations && <CorrelationMatrix correlations={profile.correlations} columns={profile.columns} />}
           </TabContent>
         )}
 
         {activeTab === 'quality' && (
-          <TabContent loading={profilingLoading} error={profilingError} data={profile}>
+          <TabContent loading={profilingLoading} error={profilingError} data={profile} emptyMessage="Select an execution target and click Analyze to assess data quality">
             {profile && (
               <div className="space-y-6">
                 <MissingValuesChart columns={profile.columns} />
@@ -284,13 +288,17 @@ export function ProfiledDataView({
           </TabContent>
         )}
 
-        {activeTab === 'transforms' && profile && (
-          <TransformsContent
-            profile={profile}
-            transforms={transforms}
-            onAddTransform={onAddTransform}
-            onRemoveTransform={onRemoveTransform}
-          />
+        {activeTab === 'transforms' && (
+          <TabContent loading={profilingLoading} error={profilingError} data={profile} emptyMessage="Select an execution target and click Analyze before applying transforms">
+            {profile && (
+              <TransformsContent
+                profile={profile}
+                transforms={transforms}
+                onAddTransform={onAddTransform}
+                onRemoveTransform={onRemoveTransform}
+              />
+            )}
+          </TabContent>
         )}
 
         {activeTab === 'ts-overview' && (

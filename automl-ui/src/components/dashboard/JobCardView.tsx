@@ -70,9 +70,10 @@ export function JobCardView({ jobs, onDeleteRequest, selectedIds, onToggleJob }:
                 </span>
               </div>
 
-              {job.leaderboard && job.leaderboard.length > 0 && (
+              {job.best_model_name && (
                 <p className="text-xs text-domino-text-secondary mt-2">
-                  Best: {job.leaderboard[0].model} ({job.leaderboard[0].score_val.toFixed(4)})
+                  Best: {job.best_model_name}
+                  {typeof job.best_model_score === 'number' ? ` (${job.best_model_score.toFixed(4)})` : ''}
                 </p>
               )}
 
