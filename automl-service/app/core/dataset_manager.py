@@ -33,7 +33,6 @@ class DominoDatasetManager:
 
     def __init__(self):
         self.settings = get_settings()
-        self._dataset_item_cache: dict[str, dict[str, Any]] = {}
 
     def _resolve_dataset_mount_paths(self) -> list[str]:
         """Resolve all filesystem paths that may contain mounted datasets."""
@@ -191,9 +190,6 @@ class DominoDatasetManager:
         items = await list_project_datasets(project_id)
 
         for item in items:
-            dataset_id = str(item.get("datasetId") or item.get("id") or "")
-            if dataset_id:
-                self._dataset_item_cache[dataset_id] = dict(item)
             ds = await self._api_item_to_dataset_response(
                 item,
                 include_files=include_files,
@@ -219,11 +215,6 @@ class DominoDatasetManager:
         enabling direct reads during training/preview.
         """
         dataset_id = str(item.get("datasetId") or item.get("id", "") or "")
-        if dataset_id:
-            cached_item = self._dataset_item_cache.get(dataset_id, {})
-            item = {**cached_item, **item}
-            self._dataset_item_cache[dataset_id] = dict(item)
-
         dataset_name = item.get("datasetName") or item.get("name", "")
         if not dataset_name:
             return None
@@ -307,24 +298,6 @@ class DominoDatasetManager:
             item.get("sizeInBytes", item.get("storageSizeBytes", 0))
         )
         file_count = len(files) if files else self._coerce_int(item.get("fileCount", 0))
-
-        if dataset_id:
-            cached_item = dict(self._dataset_item_cache.get(dataset_id, {}))
-            cached_item.update({
-                "datasetId": dataset_id,
-                "datasetName": dataset_name,
-                "name": dataset_name,
-                "description": item.get("description", ""),
-            })
-            if dataset_project_id:
-                cached_item["projectId"] = dataset_project_id
-            if rw_snapshot_id:
-                cached_item["readWriteSnapshotId"] = rw_snapshot_id
-            if size_bytes or "sizeInBytes" not in cached_item:
-                cached_item["sizeInBytes"] = size_bytes
-            if file_count or "fileCount" not in cached_item:
-                cached_item["fileCount"] = file_count
-            self._dataset_item_cache[dataset_id] = cached_item
 
         return DatasetResponse(
             id=dataset_id,
@@ -540,15 +513,9 @@ class DominoDatasetManager:
         # Domino dataset - use generated API client
         if self.settings.is_domino_environment:
             try:
-                result = self._dataset_item_cache.get(dataset_id)
-                cache_hit = result is not None
-                if result is None:
-                    result = self._fetch_dataset_details(dataset_id)
-                    if not result:
-                        return None
-                    cached_id = str(result.get("datasetId", result.get("id", dataset_id)))
-                    if cached_id:
-                        self._dataset_item_cache[cached_id] = dict(result)
+                result = self._fetch_dataset_details(dataset_id)
+                if not result:
+                    return None
                 dataset = await self._api_item_to_dataset_response(
                     result,
                     include_files=include_files,
@@ -556,10 +523,9 @@ class DominoDatasetManager:
                 if dataset is not None:
                     elapsed_ms = (time.perf_counter() - started_at) * 1000
                     logger.debug(
-                        "Loaded dataset %s include_files=%s cache_hit=%s files=%s elapsed=%.1fms",
+                        "Loaded dataset %s include_files=%s files=%s elapsed=%.1fms",
                         dataset_id,
                         include_files,
-                        cache_hit,
                         len(dataset.files),
                         elapsed_ms,
                     )
