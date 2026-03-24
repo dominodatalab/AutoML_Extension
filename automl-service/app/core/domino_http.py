@@ -3,6 +3,20 @@
 Provides auth header acquisition, host resolution, project ID resolution,
 and a retry-aware request helper used by domino_job_launcher and other
 modules that call Domino platform APIs.
+
+Auth strategy
+~~~~~~~~~~~~~
+All outbound Domino API calls MUST use the visiting user's forwarded JWT
+so that Domino enforces its own RBAC.  The sidecar token and static API
+keys are **never** used as silent fallbacks — if no user token is present,
+the request fails loudly.
+
+``get_user_auth_headers`` / ``get_user_auth_headers_async``
+    Strict user-identity auth.  Raises ``RuntimeError`` when no forwarded
+    token is available.  Used by every user-facing code path.
+
+The previous fallback chain (sidecar → API key) has been removed to
+prevent accidental privilege escalation to the App-owner identity.
 """
 
 import asyncio
@@ -22,53 +36,50 @@ _RETRYABLE_STATUS_CODES = (408, 502, 503, 504)
 _DEFAULT_MAX_RETRIES = 4
 _DEFAULT_TIMEOUT = 30.0
 
-def get_sync_auth_headers() -> dict[str, str]:
-    forwarded_auth = get_request_auth_header()
-    headers = {}
-    if forwarded_auth:
-        headers["Authorization"] = forwarded_auth
 
-    api_key = (
-        os.environ.get("DOMINO_API_KEY")
-        or os.environ.get("DOMINO_USER_API_KEY")
-        or get_settings().effective_api_key
-    )
-    if api_key:
-        headers["X-Domino-Api-Key"] = api_key
+class MissingUserTokenError(RuntimeError):
+    """Raised when a Domino API call requires a forwarded user token but none is available."""
 
-    return headers
 
-async def get_domino_auth_headers() -> dict[str, str]:
-    """Build Domino auth headers using the platform priority chain.
+def get_user_auth_headers() -> dict[str, str]:
+    """Build auth headers from the forwarded user token.
 
-    Priority:
-    1. Get auth headers from request from auth context
-    2. Fallback to the ephemeral token from Domino App/Run sidecar (localhost:8899)
+    Raises ``MissingUserTokenError`` if no token was forwarded by the
+    middleware, preventing silent escalation to the App-owner identity.
     """
-    headers = get_sync_auth_headers()
+    forwarded_auth = get_request_auth_header()
+    if not forwarded_auth:
+        raise MissingUserTokenError(
+            "No forwarded user token available. "
+            "Domino API calls require a user token from the incoming request."
+        )
+    return {"Authorization": forwarded_auth}
 
-    # fallbaack to the ephemeral token from Domino App/Run sidecar
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            # TODO this url must be dynamically resolved
-            resp = await client.get("http://localhost:8899/access-token")
-        if resp.status_code == 200 and resp.text.strip():
-            headers["Authorization"] = f"Bearer {resp.text.strip()}"
-    except Exception:
-        pass
 
-    return headers
+async def get_user_auth_headers_async() -> dict[str, str]:
+    """Async version of ``get_user_auth_headers``.
+
+    Identical behaviour — exists so ``domino_request`` / ``domino_download``
+    can await it symmetrically.
+    """
+    return get_user_auth_headers()
+
+
+# ── Backward-compatible aliases ──────────────────────────────────────
+# These preserve the old function names so that callers outside this
+# module (and tests that mock them) continue to work without a rename
+# sweep.  They now enforce user-token-only semantics.
+get_sync_auth_headers = get_user_auth_headers
+get_domino_auth_headers = get_user_auth_headers_async
+
 
 def get_domino_public_api_client_sync() -> DominoApiClient:
-    """Create a Domino Public API client with auth, which uses the
-    Authorization header if present, fallsback to DOMINO_API_KEY/DOMINO_USER_API_KEY/token file
-    If none is available, none is set.
+    """Create a Domino Public API client authenticated as the visiting user.
+
+    Raises ``MissingUserTokenError`` if no forwarded token is available.
     """
-    headers = get_sync_auth_headers()
-
-    # Base URL
+    headers = get_user_auth_headers()
     base_url = resolve_domino_api_host()
-
     return DominoApiClient(base_url=base_url).with_headers(headers)
 
 def resolve_domino_api_host() -> str:
@@ -111,40 +122,60 @@ async def domino_request(
     path: str,
     *,
     json: Any = None,
+    params: Optional[dict[str, Any]] = None,
+    files: Optional[dict] = None,
+    headers: Optional[dict[str, str]] = None,
+    base_url: Optional[str] = None,
     timeout: float = _DEFAULT_TIMEOUT,
     max_retries: int = _DEFAULT_MAX_RETRIES,
     retry_statuses: tuple[int, ...] = _RETRYABLE_STATUS_CODES,
 ) -> httpx.Response:
     """Send an HTTP request to the Domino API with retry logic.
 
-    Builds the full URL from ``resolve_domino_api_host() + path``, acquires
-    auth headers on each attempt (ephemeral tokens may expire between retries),
-    and retries on transient server errors with exponential backoff.
+    Uses the forwarded user token for authentication.  Raises
+    ``MissingUserTokenError`` if no token is available.
+
+    Builds the full URL from ``base_url`` when provided, otherwise from
+    ``resolve_domino_api_host() + path``, and retries on transient server
+    errors with exponential backoff.
     """
-    base_url = resolve_domino_api_host()
-    url = f"{base_url}{path}"
+    resolved_base_url = (base_url or resolve_domino_api_host()).rstrip("/")
+    url = f"{resolved_base_url}{path}"
     last_exc: Optional[Exception] = None
 
     for attempt in range(max_retries + 1):
-        headers = await get_domino_auth_headers()
+        auth_headers = await get_user_auth_headers_async()
+        merged_headers = {**auth_headers, **(headers or {})}
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.request(method, url, json=json, headers=headers)
-                if resp.status_code in retry_statuses and attempt < max_retries:
-                    backoff = 2**attempt  # 1, 2, 4, 8
-                    logger.warning(
-                        "Domino API %s %s returned %s, retrying in %ss (attempt %s/%s)",
-                        method,
-                        path,
-                        resp.status_code,
-                        backoff,
-                        attempt + 1,
-                        max_retries,
-                    )
-                    await asyncio.sleep(backoff)
-                    continue
-                resp.raise_for_status()
-                return resp
+            # Fresh client per request — the Domino App proxy closes idle
+            # connections server-side, causing "Server disconnected" errors
+            # with a shared connection pool.  This matches the behaviour of
+            # the python-domino SDK (which used synchronous requests).
+            async with httpx.AsyncClient() as client:
+                resp = await client.request(
+                    method,
+                    url,
+                    json=json,
+                    params=params,
+                    files=files,
+                    headers=merged_headers,
+                    timeout=timeout,
+                )
+            if resp.status_code in retry_statuses and attempt < max_retries:
+                backoff = 2**attempt  # 1, 2, 4, 8
+                logger.warning(
+                    "Domino API %s %s returned %s, retrying in %ss (attempt %s/%s)",
+                    method,
+                    path,
+                    resp.status_code,
+                    backoff,
+                    attempt + 1,
+                    max_retries,
+                )
+                await asyncio.sleep(backoff)
+                continue
+            resp.raise_for_status()
+            return resp
         except httpx.HTTPStatusError:
             raise
         except Exception as exc:
@@ -166,3 +197,48 @@ async def domino_request(
 
     # Should not reach here, but satisfy type checker.
     raise last_exc or RuntimeError("Domino request failed after retries")
+
+
+def resolve_domino_nucleus_host() -> Optional[str]:
+    """Return the nucleus-frontend host, bypassing the local proxy.
+
+    Returns ``None`` when no direct host is configured (i.e. only the
+    proxy is available).
+    """
+    settings = get_settings()
+    return (
+        settings.domino_api_host
+        or os.environ.get("DOMINO_API_HOST")
+    ) or None
+
+
+async def domino_download(
+    path: str,
+    dest_path: str,
+    *,
+    timeout: float = 300.0,
+    base_url: Optional[str] = None,
+) -> None:
+    """Stream a file from the Domino API to a local path.
+
+    Uses the forwarded user token for authentication.  Raises
+    ``MissingUserTokenError`` if no token is available.
+
+    An explicit *base_url* can be passed to bypass the default proxy-first
+    resolution (useful when the proxy does not support the endpoint).
+    """
+    base_url = (base_url or resolve_domino_api_host()).rstrip("/")
+    url = f"{base_url}{path}"
+
+    auth_headers = await get_user_auth_headers_async()
+
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        async with client.stream("GET", url, headers=auth_headers) as resp:
+            resp.raise_for_status()
+            with open(dest_path, "wb") as f:
+                async for chunk in resp.aiter_bytes(chunk_size=8192):
+                    f.write(chunk)
+
+    logger.info("Downloaded %s -> %s", path, dest_path)
