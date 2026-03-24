@@ -1,6 +1,6 @@
 """Launch and manage external Domino Jobs for AutoML workflows.
 
-Uses the public Domino Jobs v1/beta API for launch and status polling,
+Uses the generated Domino Public API client for job start and status,
 and the internal v4 stop endpoint (no public alternative).
 """
 
@@ -11,12 +11,11 @@ import shlex
 from functools import lru_cache
 from typing import Any, Optional
 
-import httpx
-
 from app.config import get_settings
 from app.core.domino_http import (
     domino_request,
-    resolve_domino_nucleus_host,
+    get_domino_public_api_client_sync,
+    resolve_domino_api_host,
     resolve_domino_project_id,
 )
 
@@ -40,41 +39,6 @@ class DominoJobLauncher:
                 "DOMINO_ENVIRONMENT_ID not set — child jobs will use the project default environment"
             )
 
-    @staticmethod
-    def _remap_db_url_for_target(database_url: str, target_project_id: Optional[str] = None) -> str:
-        """Pre-remap the database URL for a cross-project Domino Job.
-
-        The App's DB lives at e.g. ``/mnt/data/automl_shared_db/automl.db``
-        (local mount). A Job running in a *different* project sees the
-        App's data under ``/mnt/imported/data/`` instead. Swap the prefix
-        now so the job command contains the correct path from the start.
-
-        When ``target_project_id`` matches the App's own project
-        (``DOMINO_PROJECT_ID``), no remap is needed — the job runs in
-        the same project and sees the same mounts.
-        """
-        # Same-project job — no remap needed
-        app_project_id = os.environ.get("DOMINO_PROJECT_ID")
-        if app_project_id and target_project_id and app_project_id == target_project_id:
-            return database_url
-
-        prefix = "sqlite:////"
-        if not database_url.startswith(prefix):
-            return database_url
-        db_path = "/" + database_url[len(prefix):]
-
-        # /mnt/data/<project>/ → /mnt/imported/data/<project>/
-        if db_path.startswith("/mnt/data/"):
-            remapped = "/mnt/imported/data/" + db_path[len("/mnt/data/"):]
-            return f"sqlite:////{remapped.lstrip('/')}"
-
-        # /domino/datasets/local/<name>/ → /domino/datasets/<name>/
-        if db_path.startswith("/domino/datasets/local/"):
-            remapped = "/domino/datasets/" + db_path[len("/domino/datasets/local/"):]
-            return f"sqlite:////{remapped.lstrip('/')}"
-
-        return database_url
-
     def _project_ref(self) -> Optional[str]:
         owner = self.settings.domino_project_owner or os.environ.get("DOMINO_PROJECT_OWNER")
         project_name = self.settings.domino_project_name or os.environ.get("DOMINO_PROJECT_NAME")
@@ -84,60 +48,6 @@ class DominoJobLauncher:
 
     def _host(self) -> Optional[str]:
         return self.settings.domino_api_host or os.environ.get("DOMINO_API_HOST")
-
-    @staticmethod
-    def _job_api_base_urls() -> list[Optional[str]]:
-        """Prefer the direct Domino host for Jobs API calls, then fall back."""
-        base_urls: list[Optional[str]] = []
-        nucleus = resolve_domino_nucleus_host()
-        if nucleus:
-            base_urls.append(nucleus)
-        base_urls.append(None)
-        return base_urls
-
-    async def _job_api_request(self, method: str, path: str, **kwargs) -> httpx.Response:
-        """Call a Jobs API endpoint, preferring the direct host over the proxy."""
-        last_exc: Optional[Exception] = None
-        base_urls = self._job_api_base_urls()
-
-        for index, base_url in enumerate(base_urls):
-            request_kwargs = dict(kwargs)
-            if base_url is not None:
-                # Fail fast on the direct host so we can still fall back to the
-                # proxy/default host when the direct route is unavailable.
-                request_kwargs.setdefault("max_retries", 0)
-            is_last = index == len(base_urls) - 1
-            try:
-                return await domino_request(
-                    method,
-                    path,
-                    base_url=base_url,
-                    **request_kwargs,
-                )
-            except httpx.HTTPStatusError as exc:
-                last_exc = exc
-                if is_last:
-                    raise
-                logger.warning(
-                    "Domino Jobs API %s %s returned HTTP %s via direct host; "
-                    "falling back to the default host",
-                    method,
-                    path,
-                    exc.response.status_code,
-                )
-            except Exception as exc:
-                last_exc = exc
-                if is_last:
-                    raise
-                logger.warning(
-                    "Domino Jobs API %s %s failed via direct host (%s); "
-                    "falling back to the default host",
-                    method,
-                    path,
-                    exc,
-                )
-
-        raise last_exc or RuntimeError(f"Domino Jobs API {method} {path} failed")
 
     @staticmethod
     def _build_cli_args(args: dict[str, Any]) -> list[str]:
@@ -336,15 +246,19 @@ class DominoJobLauncher:
         hardware_tier_name: Optional[str],
         project_id: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Launch a Domino job via the public v1 Jobs API.
+        """Launch a Domino job via the generated public API client.
 
-        Uses ``POST /api/jobs/v1/jobs`` which accepts the hardware tier
-        name directly (no ID resolution needed).
+        Uses the ``start_job`` endpoint from the generated client which
+        posts to ``POST /api/jobs/v1/jobs``.
 
         The environment is pinned to the App's own environment via
         ``DOMINO_ENVIRONMENT_ID`` / ``DOMINO_ENVIRONMENT_REVISION_ID``
         so that child jobs have the same dependencies available.
         """
+        from app.api.generated.domino_public_api_client.api.jobs import start_job
+        from app.api.generated.domino_public_api_client.models.new_job_v1 import NewJobV1
+        from app.api.generated.domino_public_api_client.types import UNSET
+
         env_project_id = resolve_domino_project_id()
         resolved_project_id = project_id or env_project_id
         logger.info(
@@ -368,29 +282,29 @@ class DominoJobLauncher:
                 "Domino will use the project default branch/commit."
             )
 
-        payload: dict[str, Any] = {
-            "projectId": project_id,
-            "runCommand": command,
-        }
-        if commit_id:
-            payload["commitId"] = commit_id
-        if hardware_tier_name:
-            payload["hardwareTier"] = hardware_tier_name
-        if self.environment_id:
-            payload["environmentId"] = self.environment_id
-        if self.environment_revision_id:
-            payload["environmentRevisionId"] = self.environment_revision_id
-        if title:
-            payload["title"] = title
+        body = NewJobV1(
+            project_id=project_id,
+            run_command=command,
+            commit_id=commit_id if commit_id else UNSET,
+            hardware_tier=hardware_tier_name if hardware_tier_name else UNSET,
+            environment_id=self.environment_id if self.environment_id else UNSET,
+            title=title if title else UNSET,
+        )
 
-        logger.info("[JOB LAUNCH] POST /api/jobs/v1/jobs payload: %s", json.dumps(payload, default=str))
+        logger.info("[JOB LAUNCH] POST /api/jobs/v1/jobs body: %s", body.to_dict())
+        client = get_domino_public_api_client_sync()
         try:
-            resp = await domino_request("POST", "/api/jobs/v1/jobs", json=payload)
-            result = resp.json()
-            logger.info("[JOB LAUNCH] Response: %s", json.dumps(result, default=str)[:500])
-            return result
-        except (httpx.HTTPStatusError, Exception) as e:
-            pinned_commit = payload.get("commitId")
+            response = await start_job.asyncio_detailed(client=client, body=body)
+            result = response.parsed
+            if result is None:
+                raise RuntimeError(
+                    f"Domino Jobs API returned unexpected status {response.status_code}"
+                )
+            result_dict = result.to_dict() if hasattr(result, "to_dict") else dict(result)
+            logger.info("[JOB LAUNCH] Response: %s", json.dumps(result_dict, default=str)[:500])
+            return result_dict
+        except Exception as e:
+            pinned_commit = commit_id
             # If the pinned commit cannot be resolved by Domino's repo mirror,
             # fall back to the project default instead of hard failing.
             if pinned_commit and (
@@ -403,9 +317,14 @@ class DominoJobLauncher:
                     str(pinned_commit)[:12],
                     self._summarize_error(e),
                 )
-                payload.pop("commitId", None)
-                resp = await domino_request("POST", "/api/jobs/v1/jobs", json=payload)
-                return resp.json()
+                body.commit_id = UNSET
+                response = await start_job.asyncio_detailed(client=client, body=body)
+                result = response.parsed
+                if result is None:
+                    raise RuntimeError(
+                        f"Domino Jobs API returned unexpected status {response.status_code}"
+                    )
+                return result.to_dict() if hasattr(result, "to_dict") else dict(result)
             raise
 
     def _run_url(self, job_id: str) -> Optional[str]:
@@ -442,7 +361,7 @@ class DominoJobLauncher:
             args: dict[str, Any] = {
                 "job_id": job_id,
                 "file_path": file_path,
-                "database_url": self._remap_db_url_for_target(self.settings.database_url, project_id),
+                "database_url": self.settings.database_url,
             }
             if job_config is not None:
                 args["job_config"] = json.dumps(job_config)
@@ -511,7 +430,7 @@ class DominoJobLauncher:
                     "target_column": target_column,
                     "id_column": id_column,
                     "rolling_window": rolling_window,
-                    "database_url": self._remap_db_url_for_target(self.settings.database_url, project_id),
+                    "database_url": self.settings.database_url,
                     "project_id": project_id,
                 },
             )
@@ -540,28 +459,43 @@ class DominoJobLauncher:
             return {"success": False, "error": self._summarize_error(e)}
 
     async def get_job_status(self, domino_job_id: str) -> dict[str, Any]:
-        """Fetch Domino job status via the public beta Jobs API."""
+        """Fetch Domino job status via the generated public API client."""
         if not self.settings.is_domino_environment:
             return {
                 "success": False,
                 "error": "Domino environment not configured",
             }
         try:
-            resp = await domino_request("GET", f"/api/jobs/beta/jobs/{domino_job_id}")
-            data = resp.json()
-            execution_status = self._extract_execution_status(data)
+            from app.api.generated.domino_public_api_client.api.jobs import get_job_details
+
+            client = get_domino_public_api_client_sync()
+            response = await get_job_details.asyncio_detailed(
+                job_id=domino_job_id, client=client,
+            )
+            data = response.parsed
+            if data is None:
+                return {
+                    "success": False,
+                    "error": f"Domino Jobs API returned status {response.status_code}",
+                    "domino_job_id": domino_job_id,
+                }
+            data_dict = data.to_dict() if hasattr(data, "to_dict") else dict(data)
+            execution_status = self._extract_execution_status(data_dict)
             return {
                 "success": True,
                 "domino_job_id": domino_job_id,
                 "domino_job_status": execution_status,
-                "raw_response": data,
+                "raw_response": data_dict,
             }
         except Exception as e:
             logger.exception("Failed to fetch Domino job status")
             return {"success": False, "error": str(e), "domino_job_id": domino_job_id}
 
     async def stop_job(self, domino_job_id: str, commit_results: bool = False, project_id: Optional[str] = None) -> dict[str, Any]:
-        """Stop an external Domino job."""
+        """Stop an external Domino job.
+
+        Uses the internal v4 endpoint — no public API alternative exists.
+        """
         if not self.settings.is_domino_environment:
             return {"success": False, "error": "Domino environment not configured"}
         try:
