@@ -92,51 +92,35 @@ def get_request_owner(request: Optional[Request]) -> str:
     return "anonymous"
 
 
-def get_request_project_id(request: Optional[Request]) -> Optional[str]:
-    """Extract project_id from X-Project-Id header with env var fallback."""
+def get_request_project_id(request: Optional[Request]) -> str:
+    """Extract project_id from projectId query param."""
     if request:
-        header_val = request.headers.get("X-Project-Id")
-        if header_val:
-            return header_val
-    return os.environ.get("DOMINO_PROJECT_ID") or LOCAL_PROJECT_ID
+        query_val = request.query_params.get("projectId")
+        if query_val:
+            return query_val
+    raise HTTPException(status_code=400, detail="projectId query parameter is required")
 
 
 async def get_project_context(
     request: Optional[Request] = None,
 ) -> tuple[Optional[str], Optional[str], Optional[str]]:
-    """Resolve Domino project id/name/owner from header, API, or environment.
+    """Resolve Domino project id/name/owner from projectId query param via API.
 
     Returns (project_id, project_name, project_owner).
     """
-    settings = get_settings()
+    project_id = request.query_params.get("projectId") if request else None
+    if not project_id:
+        raise HTTPException(status_code=400, detail="projectId query parameter is required")
 
-    # Check for sidebar-injected project id header
-    header_project_id = request.headers.get("X-Project-Id") if request else None
+    from app.services.project_resolver import resolve_project
 
-    if header_project_id:
-        from app.services.project_resolver import resolve_project
+    info = await resolve_project(project_id)
+    if info:
+        return info.id, info.name, info.owner_username
 
-        info = await resolve_project(header_project_id)
-        if info:
-            return info.id, info.name, info.owner_username
-
-        # Resolution failed — use header id with env fallbacks
-        logger.warning(
-            "Could not resolve project %s via API; falling back to env vars",
-            header_project_id,
-        )
-        return (
-            header_project_id,
-            settings.domino_project_name or os.environ.get("DOMINO_PROJECT_NAME"),
-            settings.domino_project_owner or os.environ.get("DOMINO_PROJECT_OWNER"),
-        )
-
-    # No header — existing env var behavior
-    project_id = settings.domino_project_id or os.environ.get("DOMINO_PROJECT_ID") or LOCAL_PROJECT_ID
-    return (
-        project_id,
-        settings.domino_project_name or os.environ.get("DOMINO_PROJECT_NAME"),
-        settings.domino_project_owner or os.environ.get("DOMINO_PROJECT_OWNER"),
+    raise HTTPException(
+        status_code=400,
+        detail=f"Could not resolve project {project_id}",
     )
 
 
