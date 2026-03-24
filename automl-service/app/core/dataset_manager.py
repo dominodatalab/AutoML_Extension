@@ -146,16 +146,17 @@ class DominoDatasetManager:
         return response.json() if response.text else {}
 
     async def list_project_datasets(self, project_id: str) -> list[DatasetResponse]:
-        """List datasets for a Domino project via the API.
+        """List datasets for a Domino project.
 
-        Response shape: PaginatedDatasetRwEnvelopeV1
-          { "datasets": [{ "id", "name", "snapshotIds", "tags", ... }], "metadata": {...} }
-
-        Files are fetched from the most recent snapshot (the read/write head).
+        Uses the v2 listing endpoint which returns snapshotIds inline, so no
+        per-dataset detail call is needed here. File paths are relative filenames
+        only; callers that need the full mount path must resolve it separately via
+        GET /v4/datasetrw/datasets/{id} (datasetPath field).
         """
         try:
             result = await self._api_request(
-                "GET", f"/api/datasetrw/v1/datasets?projectId={project_id}"
+                "GET",
+                f"/v4/datasetrw/datasets-v2?projectIdsToInclude={project_id}",
             )
         except Exception:
             logger.exception(
@@ -163,32 +164,34 @@ class DominoDatasetManager:
             )
             return []
 
-        raw_datasets: list = result.get("datasets") or [] if isinstance(result, dict) else []
+        # v2 envelope: {"datasets": [{"dataset": {...}, "projectInfo": ...}], ...}
+        raw_items: list = result.get("datasets") or [] if isinstance(result, dict) else []
 
         datasets: list[DatasetResponse] = []
-        for item in raw_datasets:
+        for item in raw_items:
             if not isinstance(item, dict):
                 continue
-            name = str(item.get("name") or "").strip()
-            dataset_id = str(item.get("id") or "").strip()
-            if not name and not dataset_id:
+            ds = item.get("dataset") or item
+            dataset_id = str(ds.get("id") or "").strip()
+            name = str(ds.get("name") or "").strip()
+            if not dataset_id:
                 continue
 
-            snapshot_ids: list[str] = item.get("snapshotIds") or []
+            snapshot_ids: list[str] = ds.get("snapshotIds") or []
             files = (
-                await self._list_snapshot_files(name, snapshot_ids)
+                await self._list_snapshot_files(dataset_id, snapshot_ids)
                 if snapshot_ids
                 else []
             )
 
             datasets.append(
                 DatasetResponse(
-                    id=dataset_id or name,
+                    id=dataset_id,
                     name=name or dataset_id,
                     path=None,
-                    description=str(item.get("description") or ""),
+                    description=str(ds.get("description") or ""),
                     size_bytes=0,
-                    created_at=item.get("createdAt"),
+                    created_at=ds.get("createdAt"),
                     updated_at=None,
                     file_count=len(files),
                     files=files,
@@ -196,25 +199,37 @@ class DominoDatasetManager:
             )
         return datasets
 
+    async def get_dataset_path(self, dataset_id: str) -> Optional[str]:
+        """Return the datasetPath (mount location in Domino Jobs) for a dataset."""
+        try:
+            result = await self._api_request(
+                "GET", f"/v4/datasetrw/datasets/{dataset_id}"
+            )
+        except Exception:
+            logger.exception("Failed to fetch dataset detail for %s", dataset_id)
+            return None
+        detail = result.get("dataset") or result
+        return str(detail.get("datasetPath") or "").strip() or None
+
     async def _list_snapshot_files(
         self,
-        dataset_name: str,
+        dataset_id: str,
         snapshot_ids: list[str],
     ) -> list[DatasetFileResponse]:
-        """Return supported files from the read/write head snapshot of a dataset.
+        """Return supported files from the read/write head snapshot.
 
-        The last entry in snapshotIds is the most recently created snapshot,
-        which represents the current read/write head.
+        The last entry in snapshotIds is the most recently created snapshot.
+        Paths are relative filenames only — no dataset path prefix.
         """
         snapshot_id = snapshot_ids[-1]
         try:
             result = await self._api_request(
-                "GET", f"/datasetrw/files/{snapshot_id}?path="
+                "GET", f"/v4/datasetrw/files/{snapshot_id}?path="
             )
         except Exception:
             logger.warning(
                 "Failed to list files for dataset %s snapshot %s",
-                dataset_name,
+                dataset_id,
                 snapshot_id,
             )
             return []
@@ -232,13 +247,7 @@ class DominoDatasetManager:
             size_bytes = self._coerce_int(
                 (row.get("size") or {}).get("sizeInBytes", 0)
             )
-            files.append(
-                DatasetFileResponse(
-                    name=filename,
-                    path=f"/mnt/data/{dataset_name}/{filename}",
-                    size=size_bytes,
-                )
-            )
+            files.append(DatasetFileResponse(name=filename, path=filename, size=size_bytes))
         return files
 
     async def list_datasets(self) -> list[DatasetResponse]:

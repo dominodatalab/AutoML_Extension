@@ -345,11 +345,23 @@ async def create_job_with_context(
         if not job.file_path:
             raise ValueError(f"Job {job.id} has no file_path")
 
+        file_path = job.file_path
+        if job.data_source == "domino_dataset" and job.dataset_id:
+            from app.services.dataset_service import get_dataset_manager
+            dataset_manager = get_dataset_manager()
+            dataset_path = await dataset_manager.get_dataset_path(job.dataset_id)
+            if not dataset_path:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not resolve dataset path for dataset {job.dataset_id}",
+                )
+            file_path = f"{dataset_path}/{job.file_path}"
+
         settings = get_settings()
         launcher = get_domino_job_launcher()
         launch_result = await launcher.start_training_job(
             job_id=job.id,
-            file_path=job.file_path,
+            file_path=file_path,
             title=job.name,
             hardware_tier_name=job_request.domino_hardware_tier_name or settings.domino_training_hardware_tier_name,
             project_id=project_id,
