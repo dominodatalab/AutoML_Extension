@@ -2,7 +2,6 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 
 from app.core.domino_job_launcher import DominoJobLauncher
@@ -11,11 +10,16 @@ from app.core.domino_job_launcher import DominoJobLauncher
 class TestJobStart:
 
     @pytest.mark.asyncio
-    async def test_job_start_uses_proxy(self):
-        """Job launch goes through domino_request (proxy) directly."""
+    async def test_job_start_uses_generated_client(self):
+        """Job launch uses the generated Domino public API client."""
         launcher = DominoJobLauncher()
-        response = MagicMock(spec=httpx.Response)
-        response.json.return_value = {"job": {"id": "job-123"}}
+
+        # Mock the generated client response
+        mock_parsed = MagicMock()
+        mock_parsed.to_dict.return_value = {"job": {"id": "job-123"}}
+        mock_response = MagicMock()
+        mock_response.parsed = mock_parsed
+        mock_response.status_code = 200
 
         with patch(
             "app.core.domino_job_launcher.resolve_domino_project_id",
@@ -25,10 +29,12 @@ class TestJobStart:
             "_resolve_launch_commit_id",
             return_value=(None, None),
         ), patch(
-            "app.core.domino_job_launcher.domino_request",
+            "app.core.domino_job_launcher.get_domino_public_api_client_sync",
+        ) as mock_get_client, patch(
+            "app.api.generated.domino_public_api_client.api.jobs.start_job.asyncio_detailed",
             new_callable=AsyncMock,
-            return_value=response,
-        ) as mock_request:
+            return_value=mock_response,
+        ) as mock_start:
             result = await launcher._job_start(
                 command="python automl-service/app/workers/domino_eda_runner.py",
                 title="AutoML EDA 12345678",
@@ -37,12 +43,9 @@ class TestJobStart:
             )
 
         assert result == {"job": {"id": "job-123"}}
-        mock_request.assert_awaited_once_with(
-            "POST",
-            "/api/jobs/v1/jobs",
-            json={
-                "projectId": "target-project",
-                "runCommand": "python automl-service/app/workers/domino_eda_runner.py",
-                "title": "AutoML EDA 12345678",
-            },
-        )
+        mock_start.assert_awaited_once()
+        # Verify the body was constructed with correct project_id and command
+        call_kwargs = mock_start.call_args
+        body = call_kwargs.kwargs.get("body") or call_kwargs[1].get("body")
+        assert body.project_id == "target-project"
+        assert body.run_command == "python automl-service/app/workers/domino_eda_runner.py"

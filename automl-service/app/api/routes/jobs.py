@@ -107,7 +107,7 @@ async def preview_cleanup(
 async def bulk_cleanup(
     cleanup_request: CleanupRequest,
     db: AsyncSession = Depends(get_db),
-    http_request: Request = None,
+    request: Request = None,
 ):
     """Delete artifacts and DB rows for jobs matching the given criteria."""
     from app.services.job_service import get_request_owner
@@ -116,8 +116,8 @@ async def bulk_cleanup(
         statuses=cleanup_request.statuses,
         older_than_days=cleanup_request.older_than_days,
         include_orphans=cleanup_request.include_orphans,
-        owner=get_request_owner(http_request) if http_request else None,
-        project_id=http_request.headers.get("X-Project-Id") if http_request else None,
+        owner=get_request_owner(request) if request else None,
+        project_id=request.headers.get("X-Project-Id") if request else None,
     )
 
 
