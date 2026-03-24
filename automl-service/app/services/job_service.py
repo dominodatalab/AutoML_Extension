@@ -21,6 +21,7 @@ from app.api.schemas.job import (
     RegisterModelResponse,
 )
 from app.config import get_settings
+from app.core.authorization import require_storage_modify
 from app.core.context.user import get_viewing_user
 from app.core.dataset_mounts import resolve_dataset_mount_paths
 from app.db.models import Job, JobStatus, ModelType, ProblemType
@@ -216,9 +217,10 @@ def build_job_model(
     project_id: Optional[str],
     project_name: Optional[str],
     project_owner: Optional[str] = None,
+    execution_target: Optional[str] = None,
 ) -> Job:
     """Build a Job ORM model from request and resolved context."""
-    execution_target = resolve_execution_target(job_request)
+    model_execution_target = execution_target or resolve_execution_target(job_request)
 
     return Job(
         name=job_name,
@@ -244,7 +246,7 @@ def build_job_model(
         auto_register=job_request.auto_register,
         register_name=job_request.register_name,
         status=JobStatus.PENDING,
-        execution_target=execution_target,
+        execution_target=model_execution_target,
         autogluon_config=build_autogluon_config(job_request),
     )
 
@@ -325,6 +327,7 @@ async def create_job_with_context(
         project_id=project_id,
         project_name=project_name,
         project_owner=project_owner,
+        execution_target=execution_target,
     )
     try:
         job = await crud.create_job(db, job)
@@ -535,6 +538,8 @@ async def preview_cleanup(
     project_id: Optional[str] = None,
 ) -> dict:
     """Preview what would be removed by bulk cleanup."""
+    require_storage_modify(project_id=project_id)
+
     from app.core.cleanup_service import get_cleanup_service
 
     cleanup = get_cleanup_service()
@@ -552,6 +557,8 @@ async def bulk_cleanup(
     project_id: Optional[str] = None,
 ) -> dict:
     """Delete artifacts and DB rows for jobs matching given criteria."""
+    require_storage_modify(project_id=project_id)
+
     from app.core.cleanup_service import get_cleanup_service
 
     cleanup = get_cleanup_service()
@@ -565,16 +572,20 @@ async def bulk_cleanup(
     return result
 
 
-async def delete_orphans(db: AsyncSession) -> dict:
+async def delete_orphans(db: AsyncSession, project_id: Optional[str] = None) -> dict:
     """Delete orphaned artifacts with no matching job rows."""
+    require_storage_modify(project_id=project_id)
+
     from app.core.cleanup_service import get_cleanup_service
 
     await reconcile_jobs_for_storage_cleanup(db)
     return await get_cleanup_service().delete_orphans(db)
 
 
-async def find_orphans_checked(db: AsyncSession) -> dict:
+async def find_orphans_checked(db: AsyncSession, project_id: Optional[str] = None) -> dict:
     """Preview orphaned artifacts without deleting them."""
+    require_storage_modify(project_id=project_id)
+
     from app.core.cleanup_service import get_cleanup_service
 
     await reconcile_jobs_for_storage_cleanup(db)

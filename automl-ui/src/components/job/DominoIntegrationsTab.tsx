@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import type { Job } from '../../types/job'
 import type { ModelApi, Deployment } from '../../types/deployment'
 import { useDeployments } from '../../hooks/useDeployments'
+import { toDominoTenantUrl } from '../../utils/dominoLinks'
 
 interface DominoIntegrationsTabProps {
   job: Job
@@ -234,21 +235,4 @@ function ExternalLinkIcon({ className = '' }: { className?: string }) {
       <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
     </svg>
   )
-}
-
-function toDominoTenantUrl(rawUrl?: string): string | null {
-  if (!rawUrl) return null
-  try {
-    const tenantUrl = new URL(window.location.origin)
-    if (tenantUrl.hostname.startsWith('apps.')) {
-      tenantUrl.hostname = tenantUrl.hostname.slice('apps.'.length)
-    }
-    const url = new URL(rawUrl, tenantUrl.origin)
-    url.protocol = tenantUrl.protocol
-    url.hostname = tenantUrl.hostname
-    url.port = tenantUrl.port
-    return url.toString()
-  } catch {
-    return rawUrl
-  }
 }
