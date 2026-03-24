@@ -111,19 +111,10 @@ function Step3Configuration() {
               setLocalJobInfo((prev) => ({ ...prev, description: e.target.value }))
             }
           />
-          <Select
+          <Input
             label="Execution Target"
-            options={[
-              { value: 'local', label: 'Local (In-App Queue)' },
-              ...(dominoJobs ? [{ value: 'domino_job', label: 'Domino Job' }] : []),
-            ]}
-            value={localConfig.executionTarget}
-            onChange={(e) =>
-              setLocalConfig((prev) => ({
-                ...prev,
-                executionTarget: e.target.value as 'local' | 'domino_job',
-              }))
-            }
+            value="Domino Job"
+            disabled
           />
         </div>
 

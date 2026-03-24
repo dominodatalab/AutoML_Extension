@@ -99,6 +99,7 @@ async def preview_cleanup(
         statuses=statuses,
         older_than_days=older_than_days,
         owner=get_request_owner(request) if request else None,
+        project_id=request.headers.get("X-Project-Id") if request else None,
     )
 
 
@@ -106,7 +107,7 @@ async def preview_cleanup(
 async def bulk_cleanup(
     cleanup_request: CleanupRequest,
     db: AsyncSession = Depends(get_db),
-    request: Request = None,
+    http_request: Request = None,
 ):
     """Delete artifacts and DB rows for jobs matching the given criteria."""
     from app.services.job_service import get_request_owner
@@ -115,14 +116,18 @@ async def bulk_cleanup(
         statuses=cleanup_request.statuses,
         older_than_days=cleanup_request.older_than_days,
         include_orphans=cleanup_request.include_orphans,
-        owner=get_request_owner(request) if request else None,
+        owner=get_request_owner(http_request) if http_request else None,
+        project_id=http_request.headers.get("X-Project-Id") if http_request else None,
     )
 
 
 @router.post("/cleanup/orphans")
-async def delete_orphans(db: AsyncSession = Depends(get_db)):
+async def delete_orphans(db: AsyncSession = Depends(get_db), request: Request = None):
     """Delete orphaned model dirs and upload files with no matching job."""
-    return await delete_orphans_service(db)
+    return await delete_orphans_service(
+        db,
+        project_id=request.headers.get("X-Project-Id") if request else None,
+    )
 
 
 @router.post("/bulk-delete", response_model=BulkDeleteJobsResponse)

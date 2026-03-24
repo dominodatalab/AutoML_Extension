@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 import uuid
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import AsyncGenerator
@@ -547,7 +548,23 @@ async def app_client(async_engine, tmp_data_dir, monkeypatch, mock_viewing_user)
             finally:
                 await session.close()
 
+    @asynccontextmanager
+    async def override_get_db_session():
+        async with test_session_factory() as session:
+            try:
+                yield session
+            finally:
+                await session.close()
+
     app.dependency_overrides[get_db] = override_get_db
+
+    import app.dependencies as dependencies_module
+    import app.api.compat.custom_jobs as custom_jobs_module
+    import app.api.compat.patterns as patterns_module
+
+    monkeypatch.setattr(dependencies_module, "get_db_session", override_get_db_session, raising=True)
+    monkeypatch.setattr(custom_jobs_module, "get_db_session", override_get_db_session, raising=True)
+    monkeypatch.setattr(patterns_module, "get_db_session", override_get_db_session, raising=True)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

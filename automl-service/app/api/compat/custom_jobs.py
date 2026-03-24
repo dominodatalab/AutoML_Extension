@@ -13,6 +13,7 @@ from app.api.schemas.job import (
 from app.dependencies import get_db_session
 from app.api.schemas.job import JobLogResponse
 from app.services.job_service import (
+    get_request_project_id,
     create_job_with_context,
     find_orphans_checked,
     delete_orphans as delete_orphans_service,
@@ -79,7 +80,6 @@ def register_custom_job_routes(app: FastAPI) -> None:
 
     @app.post("/svcjobcleanuppreview")
     async def svc_job_cleanup_preview(request: Request, body: dict = Body(default={})):
-        from app.services.job_service import get_request_project_id
         project_id = get_request_project_id(request)
         owner = get_request_owner(request)
         async with get_db_session() as db:
@@ -92,10 +92,11 @@ def register_custom_job_routes(app: FastAPI) -> None:
             )
 
     @app.post("/svcjoborphans")
-    async def svc_job_orphans():
+    async def svc_job_orphans(request: Request):
         """Preview orphaned artifacts (no deletion)."""
+        project_id = get_request_project_id(request)
         async with get_db_session() as db:
-            return await find_orphans_checked(db)
+            return await find_orphans_checked(db, project_id=project_id)
 
     @app.post("/svcjobcleanup")
     async def svc_job_cleanup(request: Request, body: dict = Body(default={})):
@@ -123,6 +124,7 @@ def register_custom_job_routes(app: FastAPI) -> None:
         return [JobLogResponse.model_validate(log) for log in logs]
 
     @app.post("/svcjobcleanuporphans")
-    async def svc_job_cleanup_orphans():
+    async def svc_job_cleanup_orphans(request: Request):
+        project_id = get_request_project_id(request)
         async with get_db_session() as db:
-            return await delete_orphans_service(db=db)
+            return await delete_orphans_service(db=db, project_id=project_id)
