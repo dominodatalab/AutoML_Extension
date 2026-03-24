@@ -29,6 +29,17 @@ class DominoJobLauncher:
     def __init__(self):
         self.settings = get_settings()
 
+        # The App container always has these env vars — they identify the
+        # compute environment used to build the App image.  Child jobs must
+        # use the same environment so the AutoML code and its dependencies
+        # are available.
+        self.environment_id: Optional[str] = os.environ.get("DOMINO_ENVIRONMENT_ID")
+        self.environment_revision_id: Optional[str] = os.environ.get("DOMINO_ENVIRONMENT_REVISION_ID")
+        if not self.environment_id:
+            logger.warning(
+                "DOMINO_ENVIRONMENT_ID not set — child jobs will use the project default environment"
+            )
+
     @staticmethod
     def _remap_db_url_for_target(database_url: str, target_project_id: Optional[str] = None) -> str:
         """Pre-remap the database URL for a cross-project Domino Job.
@@ -323,13 +334,16 @@ class DominoJobLauncher:
         command: str,
         title: str,
         hardware_tier_name: Optional[str],
-        environment_id: Optional[str],
         project_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Launch a Domino job via the public v1 Jobs API.
 
         Uses ``POST /api/jobs/v1/jobs`` which accepts the hardware tier
         name directly (no ID resolution needed).
+
+        The environment is pinned to the App's own environment via
+        ``DOMINO_ENVIRONMENT_ID`` / ``DOMINO_ENVIRONMENT_REVISION_ID``
+        so that child jobs have the same dependencies available.
         """
         env_project_id = resolve_domino_project_id()
         resolved_project_id = project_id or env_project_id
@@ -362,8 +376,10 @@ class DominoJobLauncher:
             payload["commitId"] = commit_id
         if hardware_tier_name:
             payload["hardwareTier"] = hardware_tier_name
-        if environment_id:
-            payload["environmentId"] = environment_id
+        if self.environment_id:
+            payload["environmentId"] = self.environment_id
+        if self.environment_revision_id:
+            payload["environmentRevisionId"] = self.environment_revision_id
         if title:
             payload["title"] = title
 
@@ -402,13 +418,20 @@ class DominoJobLauncher:
     async def start_training_job(
         self,
         job_id: str,
+        file_path: Optional[str] = None,
         job_config: Optional[dict] = None,
         title: Optional[str] = None,
         hardware_tier_name: Optional[str] = None,
-        environment_id: Optional[str] = None,
         project_id: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Launch a training job in Domino."""
+        """Launch a training job in Domino.
+
+        *file_path* is the resolved path to the training data file as it
+        will appear inside the Domino Job container (e.g.
+        ``/domino/datasets/local/my-dataset/train.csv``).  The path is
+        resolved at job-creation time so the worker doesn't need dataset
+        API access.
+        """
         if not self.settings.is_domino_environment:
             return {
                 "success": False,
@@ -416,7 +439,12 @@ class DominoJobLauncher:
             }
 
         try:
-            args: dict[str, Any] = {"job_id": job_id, "database_url": self._remap_db_url_for_target(self.settings.database_url, project_id)}
+            args: dict[str, Any] = {
+                "job_id": job_id,
+                "database_url": self._remap_db_url_for_target(self.settings.database_url, project_id),
+            }
+            if file_path is not None:
+                args["file_path"] = file_path
             if job_config is not None:
                 args["job_config"] = json.dumps(job_config)
 
@@ -428,7 +456,6 @@ class DominoJobLauncher:
                 command=command,
                 title=title or f"AutoML Training {job_id[:8]}",
                 hardware_tier_name=hardware_tier_name,
-                environment_id=environment_id,
                 project_id=project_id,
             )
             if not isinstance(response, dict):
@@ -462,7 +489,6 @@ class DominoJobLauncher:
         id_column: Optional[str] = None,
         rolling_window: Optional[int] = None,
         hardware_tier_name: Optional[str] = None,
-        environment_id: Optional[str] = None,
         project_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Launch an async EDA job in Domino."""
@@ -494,7 +520,6 @@ class DominoJobLauncher:
                 command=command,
                 title=f"AutoML EDA {request_id[:8]}",
                 hardware_tier_name=hardware_tier_name,
-                environment_id=environment_id,
                 project_id=project_id,
             )
             if not isinstance(response, dict):

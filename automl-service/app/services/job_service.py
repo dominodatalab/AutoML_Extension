@@ -611,7 +611,6 @@ async def create_job_with_context(
             job_config=serialize_job_config(job),
             title=job.name,
             hardware_tier_name=job_request.domino_hardware_tier_name or settings.domino_training_hardware_tier_name,
-            environment_id=job_request.domino_environment_id or settings.domino_training_environment_id,
             project_id=project_id,
         )
         if not launch_result.get("success"):
