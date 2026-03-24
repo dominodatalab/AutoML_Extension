@@ -7,6 +7,7 @@ interface BackendCapabilities {
   mlflow_tracking: boolean
   model_registry: boolean
   model_deployment: boolean
+  can_user_modify_storage: boolean
 }
 
 export interface Capabilities {
@@ -16,6 +17,7 @@ export interface Capabilities {
   mlflowTracking: boolean
   modelRegistry: boolean
   modelDeployment: boolean
+  canUserModifyStorage: boolean
 }
 
 function readEnableDominoParam(): boolean {
@@ -29,6 +31,7 @@ const STANDALONE: Capabilities = {
   mlflowTracking: false,
   modelRegistry: false,
   modelDeployment: false,
+  canUserModifyStorage: false,
 }
 
 export function useCapabilities(): Capabilities {
@@ -56,5 +59,6 @@ export function useCapabilities(): Capabilities {
     mlflowTracking: data.mlflow_tracking,
     modelRegistry: data.model_registry,
     modelDeployment: data.model_deployment,
+    canUserModifyStorage: Boolean(data.can_user_modify_storage),
   }
 }
