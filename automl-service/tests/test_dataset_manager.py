@@ -164,7 +164,6 @@ class TestApiDatasetSummaries:
                         name="uploads/file.csv",
                         path="/tmp/uploads/file.csv",
                         size=11,
-                        mounted=False,
                     )
                 ],
                 11,
