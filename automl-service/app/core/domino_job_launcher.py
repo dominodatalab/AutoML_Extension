@@ -418,12 +418,20 @@ class DominoJobLauncher:
     async def start_training_job(
         self,
         job_id: str,
+        file_path: str,
         job_config: Optional[dict] = None,
         title: Optional[str] = None,
         hardware_tier_name: Optional[str] = None,
         project_id: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Launch a training job in Domino."""
+        """Launch a training job in Domino.
+
+        *file_path* is the resolved path to the training data file as it
+        will appear inside the Domino Job container (e.g.
+        ``/domino/datasets/local/my-dataset/train.csv``).  The path is
+        resolved at job-creation time so the worker doesn't need dataset
+        API access.
+        """
         if not self.settings.is_domino_environment:
             return {
                 "success": False,
@@ -431,7 +439,11 @@ class DominoJobLauncher:
             }
 
         try:
-            args: dict[str, Any] = {"job_id": job_id, "database_url": self._remap_db_url_for_target(self.settings.database_url, project_id)}
+            args: dict[str, Any] = {
+                "job_id": job_id,
+                "file_path": file_path,
+                "database_url": self._remap_db_url_for_target(self.settings.database_url, project_id),
+            }
             if job_config is not None:
                 args["job_config"] = json.dumps(job_config)
 
