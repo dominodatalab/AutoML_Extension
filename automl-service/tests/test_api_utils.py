@@ -21,20 +21,12 @@ def _make_request(*, headers=None, query_string: bytes = b"") -> Request:
     )
 
 
-def test_resolve_request_project_id_prefers_query_param_over_header(monkeypatch):
-    monkeypatch.setenv("DOMINO_PROJECT_ID", "env-proj")
-    request = _make_request(
-        headers={"X-Project-Id": "header-proj"},
-        query_string=b"projectId=query-proj",
-    )
-
-    assert resolve_request_project_id(request) == "query-proj"
-
-
-def test_resolve_request_project_id_falls_back_to_header():
+def test_resolve_request_project_id_ignores_header(monkeypatch):
+    """X-Project-Id header is not used — only query params."""
+    monkeypatch.delenv("DOMINO_PROJECT_ID", raising=False)
     request = _make_request(headers={"X-Project-Id": "header-proj"})
 
-    assert resolve_request_project_id(request) == "header-proj"
+    assert resolve_request_project_id(request) is None
 
 
 def test_resolve_request_project_id_reads_camel_case_query_param(monkeypatch):
