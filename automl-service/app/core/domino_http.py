@@ -3,6 +3,20 @@
 Provides auth header acquisition, host resolution, project ID resolution,
 and a retry-aware request helper used by domino_job_launcher and other
 modules that call Domino platform APIs.
+
+Auth strategy
+~~~~~~~~~~~~~
+All outbound Domino API calls MUST use the visiting user's forwarded JWT
+so that Domino enforces its own RBAC.  The sidecar token and static API
+keys are **never** used as silent fallbacks — if no user token is present,
+the request fails loudly.
+
+``get_user_auth_headers`` / ``get_user_auth_headers_async``
+    Strict user-identity auth.  Raises ``RuntimeError`` when no forwarded
+    token is available.  Used by every user-facing code path.
+
+The previous fallback chain (sidecar → API key) has been removed to
+prevent accidental privilege escalation to the App-owner identity.
 """
 
 import asyncio
@@ -22,62 +36,50 @@ _RETRYABLE_STATUS_CODES = (408, 502, 503, 504)
 _DEFAULT_MAX_RETRIES = 4
 _DEFAULT_TIMEOUT = 30.0
 
-def get_sync_auth_headers() -> dict[str, str]:
-    forwarded_auth = get_request_auth_header()
-    headers = {}
-    if forwarded_auth:
-        headers["Authorization"] = forwarded_auth
 
-    api_key = (
-        os.environ.get("DOMINO_API_KEY")
-        or os.environ.get("DOMINO_USER_API_KEY")
-        or get_settings().effective_api_key
-    )
-    if api_key:
-        headers["X-Domino-Api-Key"] = api_key
+class MissingUserTokenError(RuntimeError):
+    """Raised when a Domino API call requires a forwarded user token but none is available."""
 
-    return headers
 
-async def get_domino_auth_headers() -> dict[str, str]:
-    """Build Domino auth headers using the platform priority chain.
+def get_user_auth_headers() -> dict[str, str]:
+    """Build auth headers from the forwarded user token.
 
-    Priority:
-    1. Forwarded user token from the incoming request (per-request context)
-    2. Ephemeral token from the Domino App/Run sidecar (localhost:8899)
-    3. Static API key (DOMINO_API_KEY / DOMINO_USER_API_KEY)
-
-    When a forwarded user token is present, it is preserved so that
-    outbound Domino API calls (datasetrw, jobs, model registry) run as
-    the visiting user, not the App owner.  The sidecar token is only
-    used as a fallback when no user token was forwarded (e.g. background
-    tasks, health checks).
+    Raises ``MissingUserTokenError`` if no token was forwarded by the
+    middleware, preventing silent escalation to the App-owner identity.
     """
-    headers = get_sync_auth_headers()
+    forwarded_auth = get_request_auth_header()
+    if not forwarded_auth:
+        raise MissingUserTokenError(
+            "No forwarded user token available. "
+            "Domino API calls require a user token from the incoming request."
+        )
+    return {"Authorization": forwarded_auth}
 
-    # Only fetch the sidecar token when no user token was forwarded.
-    # The forwarded token carries the visiting user's identity; overwriting
-    # it with the sidecar token would make all API calls run as the App owner.
-    if "Authorization" not in headers:
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get("http://localhost:8899/access-token")
-            if resp.status_code == 200 and resp.text.strip():
-                headers["Authorization"] = f"Bearer {resp.text.strip()}"
-        except Exception:
-            pass
 
-    return headers
+async def get_user_auth_headers_async() -> dict[str, str]:
+    """Async version of ``get_user_auth_headers``.
+
+    Identical behaviour — exists so ``domino_request`` / ``domino_download``
+    can await it symmetrically.
+    """
+    return get_user_auth_headers()
+
+
+# ── Backward-compatible aliases ──────────────────────────────────────
+# These preserve the old function names so that callers outside this
+# module (and tests that mock them) continue to work without a rename
+# sweep.  They now enforce user-token-only semantics.
+get_sync_auth_headers = get_user_auth_headers
+get_domino_auth_headers = get_user_auth_headers_async
+
 
 def get_domino_public_api_client_sync() -> DominoApiClient:
-    """Create a Domino Public API client with auth, which uses the
-    Authorization header if present, fallsback to DOMINO_API_KEY/DOMINO_USER_API_KEY/token file
-    If none is available, none is set.
+    """Create a Domino Public API client authenticated as the visiting user.
+
+    Raises ``MissingUserTokenError`` if no forwarded token is available.
     """
-    headers = get_sync_auth_headers()
-
-    # Base URL
+    headers = get_user_auth_headers()
     base_url = resolve_domino_api_host()
-
     return DominoApiClient(base_url=base_url).with_headers(headers)
 
 def resolve_domino_api_host() -> str:
@@ -130,17 +132,19 @@ async def domino_request(
 ) -> httpx.Response:
     """Send an HTTP request to the Domino API with retry logic.
 
+    Uses the forwarded user token for authentication.  Raises
+    ``MissingUserTokenError`` if no token is available.
+
     Builds the full URL from ``base_url`` when provided, otherwise from
-    ``resolve_domino_api_host() + path``, acquires auth headers on each
-    attempt (ephemeral tokens may expire between retries), and retries on
-    transient server errors with exponential backoff.
+    ``resolve_domino_api_host() + path``, and retries on transient server
+    errors with exponential backoff.
     """
     resolved_base_url = (base_url or resolve_domino_api_host()).rstrip("/")
     url = f"{resolved_base_url}{path}"
     last_exc: Optional[Exception] = None
 
     for attempt in range(max_retries + 1):
-        auth_headers = await get_domino_auth_headers()
+        auth_headers = await get_user_auth_headers_async()
         merged_headers = {**auth_headers, **(headers or {})}
         try:
             # Fresh client per request — the Domino App proxy closes idle
@@ -217,9 +221,8 @@ async def domino_download(
 ) -> None:
     """Stream a file from the Domino API to a local path.
 
-    Uses the same auth and host resolution as ``domino_request`` but
-    streams the response body to *dest_path* in chunks to avoid loading
-    large files into memory.
+    Uses the forwarded user token for authentication.  Raises
+    ``MissingUserTokenError`` if no token is available.
 
     An explicit *base_url* can be passed to bypass the default proxy-first
     resolution (useful when the proxy does not support the endpoint).
@@ -227,7 +230,7 @@ async def domino_download(
     base_url = (base_url or resolve_domino_api_host()).rstrip("/")
     url = f"{base_url}{path}"
 
-    auth_headers = await get_domino_auth_headers()
+    auth_headers = await get_user_auth_headers_async()
 
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
 
