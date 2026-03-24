@@ -14,4 +14,3 @@ def set_request_auth_header(value: Optional[str]) -> None:
 
 def get_request_auth_header() -> Optional[str]:
     return _auth_header_var.get()
-

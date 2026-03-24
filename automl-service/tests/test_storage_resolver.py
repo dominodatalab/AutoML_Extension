@@ -6,7 +6,7 @@ Covers:
 - _create_dataset() — creation with payload variants
 - _get_latest_snapshot_id() — snapshot lookup
 - upload_file() — chunked upload workflow
-- _extract_dataset_list() — v2 response unwrapping
+- extract_dataset_list() — v2 response unwrapping (tested via domino_dataset_api)
 """
 
 import os
@@ -18,12 +18,12 @@ import pytest
 from app.services.storage_resolver import (
     ProjectStorageResolver,
     DatasetInfo,
-    _extract_dataset_list,
 )
+from app.services.domino_dataset_api import extract_dataset_list
 
 
 # ---------------------------------------------------------------------------
-# _extract_dataset_list
+# extract_dataset_list
 # ---------------------------------------------------------------------------
 
 
@@ -31,7 +31,7 @@ class TestExtractDatasetList:
 
     def test_plain_list(self):
         data = [{"datasetName": "ds1"}, {"datasetName": "ds2"}]
-        result = _extract_dataset_list(data)
+        result = extract_dataset_list(data)
         assert len(result) == 2
         assert result[0]["datasetName"] == "ds1"
 
@@ -41,21 +41,111 @@ class TestExtractDatasetList:
                 {"dataset": {"datasetName": "wrapped", "datasetId": "123"}},
             ]
         }
-        result = _extract_dataset_list(data)
+        result = extract_dataset_list(data)
         assert len(result) == 1
         assert result[0]["datasetName"] == "wrapped"
         assert result[0]["datasetId"] == "123"
 
     def test_datasets_key(self):
         data = {"datasets": [{"name": "a"}, {"name": "b"}]}
-        result = _extract_dataset_list(data)
+        result = extract_dataset_list(data)
         assert len(result) == 2
 
     def test_empty_dict(self):
-        assert _extract_dataset_list({}) == []
+        assert extract_dataset_list({}) == []
 
     def test_non_dict_non_list(self):
-        assert _extract_dataset_list("unexpected") == []
+        assert extract_dataset_list("unexpected") == []
+
+
+# ---------------------------------------------------------------------------
+# download_file
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadFile:
+
+    @pytest.mark.asyncio
+    async def test_download_with_snapshot(self, tmp_path):
+        resolver = ProjectStorageResolver()
+        dest = str(tmp_path / "output.csv")
+
+        with patch.object(
+            resolver, "_get_latest_snapshot_id", new_callable=AsyncMock, return_value="snap-1"
+        ), patch.object(
+            resolver, "get_rw_snapshot_id", new_callable=AsyncMock, return_value="rw-snap-1"
+        ), patch(
+            "app.services.storage_resolver.domino_download", new_callable=AsyncMock
+        ) as mock_dl:
+            result = await resolver.download_file("ds-123", "uploads/file.csv", dest)
+
+        assert result == dest
+        # First call should use the v4 raw endpoint with the RW snapshot
+        call_path = mock_dl.call_args_list[0][0][0]
+        assert "rw-snap-1" in call_path
+        assert "/v4/datasetrw/snapshot/" in call_path
+
+    @pytest.mark.asyncio
+    async def test_falls_back_when_snapshot_endpoint_fails(self, tmp_path):
+        resolver = ProjectStorageResolver()
+        dest = str(tmp_path / "output.csv")
+        call_count = 0
+
+        async def fake_download(path, dest_path, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise httpx.HTTPStatusError(
+                    "Not Found", request=MagicMock(), response=MagicMock(status_code=404)
+                )
+            # Second call succeeds (Bearer auth fallback on same v4 endpoint)
+
+        with patch.object(
+            resolver, "_get_latest_snapshot_id", new_callable=AsyncMock, return_value="snap-1"
+        ), patch.object(
+            resolver, "get_rw_snapshot_id", new_callable=AsyncMock, return_value="rw-snap-1"
+        ), patch(
+            "app.services.storage_resolver.domino_download", side_effect=fake_download
+        ):
+            result = await resolver.download_file("ds-123", "uploads/file.csv", dest)
+
+        assert result == dest
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_download_without_latest_snapshot(self, tmp_path):
+        """Even without a latest snapshot, the RW snapshot provides the v4 path."""
+        resolver = ProjectStorageResolver()
+        dest = str(tmp_path / "output.csv")
+
+        with patch.object(
+            resolver, "_get_latest_snapshot_id", new_callable=AsyncMock, return_value=None
+        ), patch.object(
+            resolver, "get_rw_snapshot_id", new_callable=AsyncMock, return_value="rw-snap-1"
+        ), patch(
+            "app.services.storage_resolver.domino_download", new_callable=AsyncMock
+        ) as mock_dl:
+            result = await resolver.download_file("ds-123", "uploads/file.csv", dest)
+
+        assert result == dest
+        call_path = mock_dl.call_args_list[0][0][0]
+        assert "/v4/datasetrw/snapshot/rw-snap-1/file/raw" in call_path
+
+    @pytest.mark.asyncio
+    async def test_raises_when_all_endpoints_fail(self, tmp_path):
+        resolver = ProjectStorageResolver()
+        dest = str(tmp_path / "output.csv")
+
+        with patch.object(
+            resolver, "_get_latest_snapshot_id", new_callable=AsyncMock, return_value=None
+        ), patch.object(
+            resolver, "get_rw_snapshot_id", new_callable=AsyncMock, return_value="rw-snap-1"
+        ), patch(
+            "app.services.storage_resolver.domino_download",
+            side_effect=RuntimeError("fail"),
+        ):
+            with pytest.raises(RuntimeError, match="Failed to download"):
+                await resolver.download_file("ds-123", "uploads/file.csv", dest)
 
 
 # ---------------------------------------------------------------------------
@@ -418,3 +508,30 @@ class TestListSnapshotFiles:
         )
 
 
+# ---------------------------------------------------------------------------
+# Cache and invalidate
+# ---------------------------------------------------------------------------
+
+
+class TestCacheInvalidation:
+
+    def test_invalidate_single_project(self):
+        resolver = ProjectStorageResolver()
+        resolver._cache["proj-1"] = DatasetInfo(
+            dataset_id="ds-1", name="test", project_id="proj-1"
+        )
+        resolver._cache["proj-2"] = DatasetInfo(
+            dataset_id="ds-2", name="test", project_id="proj-2"
+        )
+
+        resolver.invalidate("proj-1")
+        assert "proj-1" not in resolver._cache
+        assert "proj-2" in resolver._cache
+
+    def test_invalidate_all(self):
+        resolver = ProjectStorageResolver()
+        resolver._cache["proj-1"] = DatasetInfo(
+            dataset_id="ds-1", name="test", project_id="proj-1"
+        )
+        resolver.invalidate()
+        assert len(resolver._cache) == 0

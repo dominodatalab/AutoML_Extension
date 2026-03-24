@@ -53,6 +53,7 @@ async def _verify_snapshot_active(
     """
     import asyncio
 
+
     for delay in _VERIFY_BACKOFF:
         await asyncio.sleep(delay)
         try:
@@ -67,11 +68,6 @@ async def _verify_snapshot_active(
     return False
 
 
-def _resolve_project_id(request: Request) -> Optional[str]:
-    """Extract project ID from request metadata with env var fallback."""
-    return resolve_request_project_id(request)
-
-
 @router.get("", response_model=DatasetListResponse)
 @handle_errors("Failed to list datasets", detail_prefix="Failed to list datasets")
 async def list_datasets(
@@ -80,7 +76,7 @@ async def list_datasets(
     dataset_manager=Depends(get_dataset_manager),
 ):
     """List available datasets scoped to the current project."""
-    project_id = _resolve_project_id(request)
+    project_id = resolve_request_project_id(request)
     return await list_datasets_response(
         dataset_manager,
         project_id=project_id,
@@ -191,6 +187,8 @@ async def download_dataset_file(
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"File '{file_name}' not found in dataset {dataset_id}")
 
+    # get_dataset_file_path may return a synthetic path for cross-project
+    # datasets that isn't locally mounted in this App — guard against it.
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail=f"File not found at resolved path: {file_path}")
 
@@ -219,7 +217,7 @@ async def upload_file(
     from app.config import get_settings as _get_settings
 
     settings = _get_settings()
-    project_id = _resolve_project_id(request)
+    project_id = resolve_request_project_id(request)
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
@@ -294,7 +292,6 @@ async def upload_file(
         # Save a local copy so ensure_local_file() can resolve the mount path
         # without needing a download API (which Domino doesn't provide).
         try:
-            settings = _get_settings()
             cache_key = hashlib.sha256(
                 f"{dataset_info.dataset_id}:{dataset_path}".encode()
             ).hexdigest()[:16]
@@ -326,4 +323,6 @@ async def upload_file(
         )
 
     # --- Standalone / no project_id: save to local disk ---
+    # Reset file position since we already consumed it with file.read() above.
+    await file.seek(0)
     return await save_uploaded_file(file)

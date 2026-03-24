@@ -1,5 +1,6 @@
 """Shared utilities for API route handlers."""
 
+import os
 from typing import Optional, Tuple
 
 from fastapi import HTTPException, Request

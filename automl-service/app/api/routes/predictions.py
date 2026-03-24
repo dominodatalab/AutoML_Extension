@@ -8,9 +8,11 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.leaderboard_utils import normalize_leaderboard_payload
 from app.core.prediction_service import get_prediction_service
 from app.core.model_diagnostics import get_model_diagnostics
-from app.core.domino_registry import get_domino_registry
+from app.core.utils import ensure_local_file
+from app.db import crud
 from app.dependencies import get_db
 from app.api.utils import get_job_paths
 from app.api.error_handler import handle_errors
@@ -30,30 +32,46 @@ async def _run_diagnostics(
 ) -> Dict[str, Any]:
     """Shared helper that handles the common diagnostics flow.
 
-    1. Resolve job paths from the database
-    2. Apply any request-level overrides for model_type / data_path
-    3. Optionally enforce that a data_path is available
-    4. Delegate to the named method on ModelDiagnostics
-    5. Return the raw result dict
-
-    Args:
-        db: Async database session.
-        job_id: The training job ID to look up.
-        diagnostics_method: Name of the method to call on ModelDiagnostics
-            (e.g. "get_confusion_matrix").
-        model_type_override: Optional model_type from the request body.
-        data_path_override: Optional data_path from the request body.
-        require_data_path: If True, raise 400 when no data path is available.
-        extra_kwargs: Any additional keyword arguments forwarded to the
-            diagnostics method.
-
-    Returns:
-        The dict returned by the diagnostics method.
+    First checks the job's pre-computed ``diagnostics_data`` (populated during
+    training while the model was on disk inside the Domino Job).  Falls back to
+    loading the model from disk only when stored diagnostics are unavailable.
     """
+    # Try pre-computed diagnostics first
+    job = await crud.get_job(db, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+
+    stored = getattr(job, "diagnostics_data", None) or {}
+    stored_result = stored.get(diagnostics_method)
+    if stored_result is not None:
+        if diagnostics_method in {"get_leaderboard", "get_learning_curves"}:
+            stored_result = normalize_leaderboard_payload(stored_result)
+
+        # Recompute feature importance when the stored payload contains only
+        # an error/empty result. This gives completed jobs a second chance to
+        # display importance if the live model/data are still available.
+        if diagnostics_method != "get_feature_importance":
+            logger.debug("Serving %s for job %s from stored diagnostics", diagnostics_method, job_id)
+            return stored_result
+
+        if stored_result.get("features"):
+            logger.debug("Serving %s for job %s from stored diagnostics", diagnostics_method, job_id)
+            return stored_result
+
+        logger.warning(
+            "Stored feature importance for job %s was empty or had error '%s'; attempting live recompute",
+            job_id,
+            stored_result.get("error"),
+        )
+
+    # Fall back to live computation (model must be on disk)
     model_path, model_type, file_path, _ = await get_job_paths(db, job_id)
 
     actual_model_type = model_type_override or model_type
     actual_data_path = data_path_override or file_path
+
+    if actual_data_path:
+        actual_data_path = await ensure_local_file(actual_data_path, getattr(job, "project_id", None))
 
     if require_data_path and not actual_data_path:
         raise HTTPException(status_code=400, detail="No data path available for this job")
@@ -90,10 +108,14 @@ class PredictResponse(BaseModel):
     model_id: str
     model_type: str
     num_rows: int
-    predictions: List[Any]
+    predictions: Any
     probabilities: Optional[List[Dict[str, float]]] = None
     problem_type: Optional[str] = None
     label: Optional[str] = None
+    prediction_length: Optional[int] = None
+    timestamps: Optional[List[str]] = None
+    quantiles: Optional[Dict[str, List[Optional[float]]]] = None
+    error: Optional[str] = None
 
 
 class BatchPredictRequest(BaseModel):

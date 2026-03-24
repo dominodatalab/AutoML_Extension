@@ -418,7 +418,7 @@ class DominoJobLauncher:
     async def start_training_job(
         self,
         job_id: str,
-        file_path: str,
+        file_path: Optional[str] = None,
         job_config: Optional[dict] = None,
         title: Optional[str] = None,
         hardware_tier_name: Optional[str] = None,
@@ -441,9 +441,10 @@ class DominoJobLauncher:
         try:
             args: dict[str, Any] = {
                 "job_id": job_id,
-                "file_path": file_path,
                 "database_url": self._remap_db_url_for_target(self.settings.database_url, project_id),
             }
+            if file_path is not None:
+                args["file_path"] = file_path
             if job_config is not None:
                 args["job_config"] = json.dumps(job_config)
 

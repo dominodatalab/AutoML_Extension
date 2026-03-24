@@ -12,6 +12,7 @@ class DatasetFileResponse(BaseModel):
     name: str
     path: str
     size: int = 0
+    mounted: bool = True
 
 
 class DatasetResponse(BaseModel):

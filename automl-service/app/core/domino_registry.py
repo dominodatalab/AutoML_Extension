@@ -119,6 +119,7 @@ class DominoModelRegistry:
         experiment_name: Optional[str] = None,
         project_id: Optional[str] = None,
         project_name: Optional[str] = None,
+        temp_path: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Register a trained model to the Domino Model Registry.
 
@@ -215,7 +216,10 @@ class DominoModelRegistry:
 
                 # Use run artifacts + explicit model registration to stay compatible
                 # with tracking servers that don't support logged-model artifact uploads.
-                with tempfile.TemporaryDirectory(prefix="mlflow_model_") as tmp_dir:
+                with tempfile.TemporaryDirectory(
+                    prefix="mlflow_model_",
+                    dir=(temp_path or self.settings.temp_path),
+                ) as tmp_dir:
                     local_model_dir = os.path.join(tmp_dir, "model")
                     mlflow.pyfunc.save_model(
                         path=local_model_dir,

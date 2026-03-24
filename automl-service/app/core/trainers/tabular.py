@@ -4,7 +4,6 @@ import logging
 from typing import Any, Dict, Optional
 
 import pandas as pd
-import numpy as np
 
 from app.db.models import ProblemType
 from .base import BaseTrainer, AdvancedConfig
