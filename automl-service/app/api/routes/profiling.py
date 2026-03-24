@@ -499,7 +499,6 @@ async def start_profile_async(request: AsyncProfileStartRequest, http_request: R
         id_column=request.id_column,
         rolling_window=request.rolling_window,
         hardware_tier_name=request.domino_hardware_tier_name or settings.domino_eda_hardware_tier_name,
-        environment_id=request.domino_environment_id or settings.domino_eda_environment_id,
         project_id=project_id,
     )
     if not launch_result.get("success"):

@@ -33,7 +33,6 @@ class TestJobStart:
                 command="python automl-service/app/workers/domino_eda_runner.py",
                 title="AutoML EDA 12345678",
                 hardware_tier_name=None,
-                environment_id=None,
                 project_id="target-project",
             )
 
