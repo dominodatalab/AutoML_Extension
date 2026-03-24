@@ -21,6 +21,7 @@ def parse_args() -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(description="Run AutoML training job from Domino")
     parser.add_argument("--job-id", required=True, help="AutoML job id")
+    parser.add_argument("--file-path", required=True, help="Path to the training data file")
     parser.add_argument("--database-url", default=None, help="Override DATABASE_URL for cross-project jobs")
     parser.add_argument("--job-config", default=None, help="JSON-encoded job config to skip initial DB read")
     return parser.parse_args()
@@ -40,7 +41,7 @@ def main() -> None:
 
     from app.workers.training_worker import run_training_job
 
-    asyncio.run(run_training_job(args.job_id, job_config=job_config))
+    asyncio.run(run_training_job(args.job_id, data_path=args.file_path, job_config=job_config))
 
 
 if __name__ == "__main__":

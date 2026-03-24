@@ -204,7 +204,7 @@ class TrainingProgressReporter:
         )
 
 
-async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]] = None, job_config: Optional[Dict[str, Any]] = None):
+async def run_training_job(job_id: str, data_path: Optional[str] = None, advanced_config: Optional[Dict[str, Any]] = None, job_config: Optional[Dict[str, Any]] = None):
     """
     Run a training job in the background with Domino experiment tracking.
 
@@ -240,21 +240,21 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
             else:
                 reason = "not requested" if not job.enable_mlflow else "standalone mode"
                 await crud.add_job_log(db, job_id, f"Experiment tracking disabled ({reason})", "INFO")
-            dataset_manager = DominoDatasetManager()
-
-            # Get data file path
-            logger.info(f"[TRAINING DEBUG] Job data_source: {job.data_source}")
-            logger.info(f"[TRAINING DEBUG] Job file_path: {job.file_path}")
-            logger.info(f"[TRAINING DEBUG] Job dataset_id: {job.dataset_id}")
-
-            data_path, data_path_log = await _resolve_training_data_path(
-                job,
-                dataset_manager,
-            )
-            await crud.add_job_log(db, job_id, data_path_log)
-
-            logger.info(f"[TRAINING DEBUG] Resolved data_path: {data_path}")
-            await crud.add_job_log(db, job_id, f"[DEBUG] Data path resolved to: {data_path}", "INFO")
+            # Resolve training data path — prefer the pre-resolved path
+            # passed via --file-path CLI arg (resolved at job creation time).
+            # Fall back to runtime resolution for legacy/local jobs.
+            if data_path:
+                logger.info("[TRAINING] Using pre-resolved data_path: %s", data_path)
+                await crud.add_job_log(db, job_id, f"Using data file: {data_path}")
+            else:
+                dataset_manager = DominoDatasetManager()
+                logger.info(f"[TRAINING] Resolving data path at runtime (data_source={job.data_source})")
+                data_path, data_path_log = await _resolve_training_data_path(
+                    job,
+                    dataset_manager,
+                )
+                await crud.add_job_log(db, job_id, data_path_log)
+                logger.info("[TRAINING] Resolved data_path: %s", data_path)
 
             await _check_cancelled(job_id, db)
 

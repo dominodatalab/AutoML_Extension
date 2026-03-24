@@ -616,9 +616,32 @@ async def create_job_with_context(
                     project_id,
                 )
 
+        # Resolve the full training data path before launching the job.
+        # For domino_dataset, construct {datasetPath}/{file_path} using
+        # the dataset's mount location from the Domino API.
+        if not job.file_path:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Job {job.id} has no file_path",
+            )
+
+        resolved_file_path = job.file_path
+        if job.data_source == "domino_dataset" and job.dataset_id:
+            from app.services.dataset_service import get_dataset_manager
+
+            dataset_manager = get_dataset_manager()
+            dataset_path = await dataset_manager.get_dataset_path(job.dataset_id)
+            if not dataset_path:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not resolve mount path for dataset {job.dataset_id}",
+                )
+            resolved_file_path = f"{dataset_path}/{job.file_path}"
+
         launcher = get_domino_job_launcher()
         launch_result = await launcher.start_training_job(
             job_id=job.id,
+            file_path=resolved_file_path,
             job_config=serialize_job_config(job),
             title=job.name,
             hardware_tier_name=job_request.domino_hardware_tier_name or settings.domino_training_hardware_tier_name,

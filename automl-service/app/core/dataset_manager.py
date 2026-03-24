@@ -114,6 +114,15 @@ class DominoDatasetManager:
             return result.dataset.to_dict()
         return {}
 
+    async def get_dataset_path(self, dataset_id: str) -> Optional[str]:
+        """Return the datasetPath (mount location in Domino Jobs) for a dataset."""
+        try:
+            result = self._fetch_dataset_details(dataset_id)
+            return str(result.get("datasetPath") or result.get("dataset_path") or "").strip() or None
+        except Exception:
+            logger.exception("Failed to fetch dataset path for %s", dataset_id)
+            return None
+
     async def list_datasets(
         self,
         project_id: Optional[str] = None,
