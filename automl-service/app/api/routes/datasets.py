@@ -1,12 +1,9 @@
-"""Dataset viewing endpoints — list, detail, download."""
+"""Dataset viewing endpoints — list, detail, verify-snapshot."""
 
 import logging
-import mimetypes
-import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse
 
 from app.api.error_handler import handle_errors
 from app.api.utils import resolve_request_project_id
@@ -82,24 +79,3 @@ async def get_dataset(
     )
 
 
-@router.get("/{dataset_id}/files/{file_name:path}/download")
-async def download_dataset_file(
-    dataset_id: str,
-    file_name: str,
-    dataset_manager=Depends(get_dataset_manager),
-):
-    """Download a file from a mounted dataset."""
-    try:
-        file_path = await dataset_manager.get_dataset_file_path(dataset_id, file_name)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"File '{file_name}' not found in dataset {dataset_id}")
-
-    if not os.path.isfile(file_path):
-        raise HTTPException(status_code=404, detail=f"File not found at resolved path: {file_path}")
-
-    media_type, _ = mimetypes.guess_type(file_path)
-    return FileResponse(
-        path=file_path,
-        filename=os.path.basename(file_path),
-        media_type=media_type or "application/octet-stream",
-    )
