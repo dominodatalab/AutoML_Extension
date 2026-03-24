@@ -43,7 +43,10 @@ from app.core.domino_http import (
     resolve_domino_api_host,
     resolve_domino_nucleus_host,
 )
-from app.services.domino_dataset_api import list_project_datasets
+from app.services.domino_dataset_api import (
+    extract_dataset_list as _extract_project_dataset_list,
+    list_project_datasets,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -966,6 +969,15 @@ class ProjectStorageResolver:
                 if os.path.isdir(candidate) and os.access(candidate, os.W_OK):
                     return candidate
         return None
+
+
+def _extract_dataset_list(data: object) -> list[dict]:
+    """Normalize the Dataset RW API list response into a list of dicts.
+
+    The v2 response wraps each item as ``{"dataset": {...}}``; this helper
+    unwraps to the inner dict so callers can access fields directly.
+    """
+    return _extract_project_dataset_list(data)
 
 
 @lru_cache()

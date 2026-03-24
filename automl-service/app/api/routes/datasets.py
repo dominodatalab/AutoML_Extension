@@ -1,6 +1,5 @@
 """Dataset management endpoints."""
 
-import asyncio
 import hashlib
 import logging
 import mimetypes
@@ -52,6 +51,9 @@ async def _verify_snapshot_active(
     visibility, since that requires extra API round-trips and the file
     index can lag behind the snapshot status.
     """
+    import asyncio
+
+
     for delay in _VERIFY_BACKOFF:
         await asyncio.sleep(delay)
         try:
@@ -98,7 +100,7 @@ async def verify_snapshot(
     try:
         status = await resolver.get_latest_snapshot_status(dataset_id)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to check snapshot: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"Failed to check snapshot: {exc}") from exc
 
     verified = status == "active"
 
@@ -214,21 +216,30 @@ async def upload_file(
     """
     from app.config import get_settings as _get_settings
 
+    settings = _get_settings()
     project_id = resolve_request_project_id(request)
 
-    if project_id and not _get_settings().standalone_mode:
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    file_ext = os.path.splitext(file.filename)[1].lower()
+    if file_ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type not supported. Allowed: {list(ALLOWED_UPLOAD_EXTENSIONS)}",
+        )
+
+    max_bytes = settings.max_upload_size_mb * 1024 * 1024
+    content = await file.read()
+    if len(content) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File size ({len(content) / (1024 * 1024):.1f} MB) exceeds "
+                   f"the {settings.max_upload_size_mb} MB limit",
+        )
+
+    if project_id and not settings.standalone_mode:
         # --- Domino dataset upload path (in-memory) ---
-        if not file.filename:
-            raise HTTPException(status_code=400, detail="No file provided")
-
-        file_ext = os.path.splitext(file.filename)[1].lower()
-        if file_ext not in ALLOWED_UPLOAD_EXTENSIONS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"File type not supported. Allowed: {list(ALLOWED_UPLOAD_EXTENSIONS)}",
-            )
-
-        content = await file.read()
 
         safe_filename = f"{str(uuid.uuid4())[:8]}_{file.filename}"
 
@@ -247,7 +258,7 @@ async def upload_file(
         dataset_info = await resolver.ensure_dataset_exists(project_id)
         if not dataset_info:
             raise HTTPException(
-                status_code=500,
+                status_code=502,
                 detail=f"Failed to create/find dataset for project {project_id}",
             )
 
@@ -258,7 +269,7 @@ async def upload_file(
             )
         except Exception as exc:
             raise HTTPException(
-                status_code=500,
+                status_code=502,
                 detail=f"Failed to upload file to dataset: {exc}",
             ) from exc
 
@@ -281,7 +292,6 @@ async def upload_file(
         # Save a local copy so ensure_local_file() can resolve the mount path
         # without needing a download API (which Domino doesn't provide).
         try:
-            settings = _get_settings()
             cache_key = hashlib.sha256(
                 f"{dataset_info.dataset_id}:{dataset_path}".encode()
             ).hexdigest()[:16]
@@ -313,4 +323,6 @@ async def upload_file(
         )
 
     # --- Standalone / no project_id: save to local disk ---
+    # Reset file position since we already consumed it with file.read() above.
+    await file.seek(0)
     return await save_uploaded_file(file)

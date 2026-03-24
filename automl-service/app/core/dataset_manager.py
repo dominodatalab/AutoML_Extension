@@ -215,6 +215,7 @@ class DominoDatasetManager:
             item = {**cached_item, **item}
             self._dataset_item_cache[dataset_id] = dict(item)
 
+
         dataset_name = item.get("datasetName") or item.get("name", "")
         if not dataset_name:
             return None
@@ -316,6 +317,7 @@ class DominoDatasetManager:
             if file_count or "fileCount" not in cached_item:
                 cached_item["fileCount"] = file_count
             self._dataset_item_cache[dataset_id] = cached_item
+
 
         return DatasetResponse(
             id=dataset_id,

@@ -51,15 +51,12 @@ def _envelope_to_dataset_dicts(
 ) -> list[dict]:
     """Convert a typed paginated envelope into a flat list of dataset dicts.
 
-    For v2 envelopes, each item is a ``DatasetRwInfoDtoV1`` that wraps the
-    actual dataset under a ``dataset`` attribute.  We unwrap it so callers
-    always receive flat dataset dicts (matching ``extract_dataset_list``
-    semantics).
+    V2 items wrap the actual dataset under a ``dataset`` key — unwrap it
+    so callers always receive flat dataset dicts.
     """
     result: list[dict] = []
     for ds in envelope.datasets:
         d = ds.to_dict()
-        # v2 items wrap the dataset inside a "dataset" key — unwrap it.
         if "dataset" in d and isinstance(d["dataset"], dict):
             result.append(d["dataset"])
         else:
@@ -72,6 +69,7 @@ async def _list_project_datasets_v2(
     *,
     page_size: int = _DEFAULT_PAGE_SIZE,
 ) -> list[dict]:
+    """List datasets for a project using the v2 Dataset RW API."""
     datasets: list[dict] = []
     offset = 0
 

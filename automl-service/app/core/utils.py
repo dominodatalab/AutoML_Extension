@@ -20,27 +20,31 @@ _DATASET_MOUNT_RE = re.compile(
 )
 
 
-def cleanup_dataset_cache(cache_dir: str, max_age_hours: float = 24.0) -> int:
-    """Delete cached dataset files older than *max_age_hours*. Returns count deleted."""
+def cleanup_dataset_cache(cache_dir: str, max_age_hours: int = 24) -> int:
+    """Remove cached dataset files older than *max_age_hours*.
+
+    Called at startup and can be called periodically for long-running pods.
+    Returns the number of files deleted.
+    """
     if not os.path.isdir(cache_dir):
         return 0
 
-    cutoff = time.time() - max_age_hours * 3600
+    cutoff = time.time() - (max_age_hours * 3600)
     deleted = 0
 
     for dirpath, _, filenames in os.walk(cache_dir, topdown=False):
-        for fname in filenames:
-            fpath = os.path.join(dirpath, fname)
+        for filename in filenames:
+            filepath = os.path.join(dirpath, filename)
             try:
-                if os.path.getmtime(fpath) < cutoff:
-                    os.remove(fpath)
+                if os.path.getmtime(filepath) < cutoff:
+                    os.remove(filepath)
                     deleted += 1
             except OSError:
                 pass
         # Remove empty directories
         try:
-            if dirpath != cache_dir:
-                os.rmdir(dirpath)  # only succeeds if empty
+            if dirpath != cache_dir and not os.listdir(dirpath):
+                os.rmdir(dirpath)
         except OSError:
             pass
 
