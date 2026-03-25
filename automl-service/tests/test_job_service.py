@@ -27,6 +27,7 @@ from app.services.job_service import (
     build_job_model,
     create_job_with_context,
     extract_metrics_leaderboard,
+    get_job_or_404,
     get_queue_status,
     get_request_owner,
     normalize_job_leaderboard,
@@ -743,6 +744,66 @@ class TestQueueCapacity:
         with pytest.raises(HTTPException) as exc_info:
             await create_job_with_context(db_session, req)
         assert exc_info.value.status_code == 400
+
+
+# ===========================================================================
+# get_job_or_404
+# ===========================================================================
+
+
+class TestGetJobOr404:
+    """Tests for fetching jobs with optional Domino validation."""
+
+    @pytest.mark.asyncio
+    async def test_returns_local_job_without_domino_fetch(self, db_session, make_job):
+        job = make_job()
+        db_session.add(job)
+        await db_session.commit()
+
+        with patch(
+            "app.services.job_service._fetch_domino_job_or_throw",
+            new_callable=AsyncMock,
+        ) as mock_fetch:
+            result = await get_job_or_404(db_session, job.id)
+
+        assert result.id == job.id
+        mock_fetch.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_fetches_domino_job_when_domino_job_id_present(self, db_session, make_job):
+        job = make_job(execution_target="domino_job", domino_job_id="run-123")
+        db_session.add(job)
+        await db_session.commit()
+
+        with patch(
+            "app.services.job_service._fetch_domino_job_or_throw",
+            new_callable=AsyncMock,
+        ) as mock_fetch:
+            result = await get_job_or_404(db_session, job.id)
+
+        assert result.id == job.id
+        mock_fetch.assert_awaited_once_with("run-123")
+
+    @pytest.mark.asyncio
+    async def test_propagates_domino_fetch_error(self, db_session, make_job):
+        job = make_job(execution_target="domino_job", domino_job_id="run-123")
+        db_session.add(job)
+        await db_session.commit()
+
+        with patch(
+            "app.services.job_service._fetch_domino_job_or_throw",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("Domino failed"),
+        ):
+            with pytest.raises(RuntimeError, match="Domino failed"):
+                await get_job_or_404(db_session, job.id)
+
+    @pytest.mark.asyncio
+    async def test_raises_404_when_job_missing(self, db_session):
+        with pytest.raises(HTTPException) as exc_info:
+            await get_job_or_404(db_session, "missing-job-id")
+
+        assert exc_info.value.status_code == 404
 
 
 # ===========================================================================

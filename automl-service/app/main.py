@@ -17,7 +17,7 @@ from app.api.routes import health, jobs, datasets, predictions, profiling, regis
 from app.core.context.auth import set_request_auth_header
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=os.environ.get("LOG_LEVEL") or logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
@@ -110,6 +110,8 @@ def create_app() -> FastAPI:
     # Request context capture: store the forwarded auth header in a request-scoped ContextVar.
     @app.middleware("http")
     async def capture_request_context(request: Request, call_next):
+        logger.debug(f"Capture request metadata: {request.method} {request.url.path} {request.headers}")
+
         auth_header = request.headers.get("authorization")
         set_request_auth_header(auth_header)
         try:

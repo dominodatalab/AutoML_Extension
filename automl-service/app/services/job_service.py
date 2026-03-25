@@ -4,6 +4,7 @@ import asyncio
 import os
 import logging
 from typing import Optional
+from urllib.parse import quote
 
 from app.core.utils import utc_now
 
@@ -11,6 +12,8 @@ from fastapi import HTTPException, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.generated.domino_public_api_client.models.job_envelope_v1 import JobEnvelopeV1
+from app.api.generated.domino_public_api_client.api.jobs import get_job_details
 from app.api.schemas.job import (
     JobCreateRequest,
     JobListRequest,
@@ -23,6 +26,7 @@ from app.api.schemas.job import (
 from app.config import get_settings
 from app.core.authorization import require_storage_modify
 from app.core.context.user import get_viewing_user
+from app.core.domino_http import get_domino_public_api_client_sync
 from app.core.authorization import require_job_list
 from app.core.dataset_mounts import resolve_dataset_mount_paths
 from app.db.models import Job, JobStatus, ModelType, ProblemType
@@ -76,21 +80,10 @@ def _is_job_name_unique_violation(exc: IntegrityError) -> bool:
     )
 
 
-def get_request_owner(request: Optional[Request]) -> str:
-    """Determine the requesting username.
-
-    Priority:
-    - app.core.context.user.get_viewing_user().user_name
-    - 'domino-username' request header (fallback)
-    - 'anonymous' when unavailable
-    """
+def get_viewing_user_name() -> str:
     user = get_viewing_user()
     if user and user.user_name:
         return user.user_name
-    if request is not None:
-        header_user = request.headers.get("domino-username")
-        if header_user:
-            return header_user
     return "anonymous"
 
 
@@ -273,7 +266,8 @@ async def create_job_with_context(
     request: Optional[Request] = None,
 ) -> Job:
     """Validate, create, and enqueue a job using request-derived context."""
-    owner = get_request_owner(request)
+    # TODO can user launch job in project?
+    owner = get_viewing_user_name()
     project_id, project_name, project_owner = await get_project_context(request)
 
     logger.info(
@@ -459,7 +453,8 @@ async def get_job_logs(
     limit: int = 1000,
 ) -> list:
     """Return logs for a job after validating job existence."""
-    await get_job_or_404(db, job_id)
+    owner_user_name = get_viewing_user_name()
+    await get_job_or_404(db, job_id, owner_user_name)
     logs = await crud.get_job_logs(db, job_id, limit=limit)
     return list(logs)
 
@@ -492,7 +487,7 @@ def resolve_job_list_filters(
     if list_request.owner is not None:
         owner_filter = list_request.owner if list_request.owner else None
     else:
-        owner_filter = get_request_owner(request) if request else None
+        owner_filter = get_viewing_user_name()
 
     if list_request.project_name is not None:
         project_name_filter = list_request.project_name if list_request.project_name else None
@@ -582,11 +577,35 @@ async def find_orphans_checked(db: AsyncSession, project_id: Optional[str] = Non
     return await get_cleanup_service().find_orphans_checked(db)
 
 
-async def get_job_or_404(db: AsyncSession, job_id: str) -> Job:
-    """Get job by id or raise a 404."""
+def _fetch_domino_job_or_throw(domino_job_id: str):
+    """Fetch a Domino job via the Public API and raise on request failure."""
+    client = get_domino_public_api_client_sync()
+    # TODO can't use the public api client for getting a job because there is a
+    # bug with how enums are serialized for GitServiceProviderV1
+    kwargs = get_job_details._get_kwargs(job_id=domino_job_id)
+    response = client.get_httpx_client().request(
+        **kwargs,
+    )
+    if response.status_code > 399:
+        raise Exception(f"Failed to get job, status code: {response.status_code}, {response.content}")
+
+
+async def get_job_or_404(db: AsyncSession, job_id: str, owner_user_name: str) -> Job:
+    """Get job by id if user may retrieve the job"""
     job = await crud.get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.execution_target == "local":
+        # for local jobs, only the owner may retrieve
+        if job.owner != owner_user_name:
+            raise HTTPException(status_code=403, detail="Job not found")
+    else:
+        # for domino jobs, we use domino auth
+        if job.domino_job_id:
+            _fetch_domino_job_or_throw(job.domino_job_id)
+        else:
+            raise Exception("No domino job ID found for domino_job")
     return job
 
 
@@ -928,7 +947,8 @@ def normalize_job_leaderboard(job: Job) -> Job:
 
 async def get_job_response(db: AsyncSession, job_id: str) -> Job:
     """Get job payload normalized for API response compatibility."""
-    job = await get_job_or_404(db, job_id)
+    owner_user_name = get_viewing_user_name()
+    job = await get_job_or_404(db, job_id, owner_user_name)
     job = await _sync_domino_job_state(db, job, sync_terminal_metadata=True)
     job = normalize_job_leaderboard(job)
     return _attach_external_links(job)
@@ -947,7 +967,8 @@ def extract_metrics_leaderboard(job: Job) -> Optional[list[dict]]:
 
 async def get_job_status_response(db: AsyncSession, job_id: str) -> JobStatusResponse:
     """Build status response payload for a job."""
-    job = await get_job_or_404(db, job_id)
+    owner_user_name = get_viewing_user_name()
+    job = await get_job_or_404(db, job_id, owner_user_name)
     job = await _sync_domino_job_state(db, job, sync_terminal_metadata=True)
     return JobStatusResponse(
         id=job.id,
@@ -961,7 +982,8 @@ async def get_job_status_response(db: AsyncSession, job_id: str) -> JobStatusRes
 
 async def get_job_metrics_response(db: AsyncSession, job_id: str) -> JobMetricsResponse:
     """Build metrics response payload for a job."""
-    job = await get_job_or_404(db, job_id)
+    owner_user_name = get_viewing_user_name()
+    job = await get_job_or_404(db, job_id, owner_user_name)
     return JobMetricsResponse(
         id=job.id,
         metrics=job.metrics,
@@ -969,9 +991,10 @@ async def get_job_metrics_response(db: AsyncSession, job_id: str) -> JobMetricsR
     )
 
 
-async def get_job_progress_response(db: AsyncSession, job_id: str) -> JobProgressResponse:
+async def get_job_progress_response(db: AsyncSession, job_id: str)  -> JobProgressResponse:
     """Build progress response payload for a job."""
-    job = await get_job_or_404(db, job_id)
+    owner_user_name = get_viewing_user_name()
+    job = await get_job_or_404(db, job_id, owner_user_name)
     job = await _sync_domino_job_state(db, job, sync_terminal_metadata=True)
     return JobProgressResponse(
         id=job.id,
@@ -987,7 +1010,8 @@ async def get_job_progress_response(db: AsyncSession, job_id: str) -> JobProgres
 
 async def cancel_job(db: AsyncSession, job_id: str) -> dict:
     """Cancel a pending/running job and queue task."""
-    job = await get_job_or_404(db, job_id)
+    owner_user_name = get_viewing_user_name()
+    job = await get_job_or_404(db, job_id, owner_user_name)
 
     if job.status not in [JobStatus.PENDING, JobStatus.RUNNING]:
         raise HTTPException(
@@ -1038,8 +1062,9 @@ async def cancel_job(db: AsyncSession, job_id: str) -> dict:
 async def delete_job(db: AsyncSession, job_id: str) -> dict:
     """Delete job artifacts and DB row."""
     from app.core.cleanup_service import get_cleanup_service
-
-    job = await get_job_or_404(db, job_id)
+    # TODO needs own auth
+    owner_user_name = get_viewing_user_name()
+    job = await get_job_or_404(db, job_id, owner_user_name)
     cleanup_result = await get_cleanup_service().delete_job_artifacts(job, db)
     await crud.delete_job(db, job_id)
     return {"message": "Job deleted", "job_id": job_id, "cleanup": cleanup_result}
@@ -1048,6 +1073,7 @@ async def delete_job(db: AsyncSession, job_id: str) -> dict:
 async def bulk_delete_jobs(db: AsyncSession, job_ids: list[str]) -> dict:
     """Delete multiple jobs, cancelling active ones first. Continues on per-job failure."""
     from app.core.cleanup_service import get_cleanup_service
+    # TODO needs own auth
 
     deleted_job_ids: list[str] = []
     failed: list[dict[str, str]] = []
