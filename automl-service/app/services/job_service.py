@@ -400,7 +400,7 @@ async def list_jobs_filtered(
 
     logger.debug(
         f"[JOB LIST] Filters - owner: {owner_filter}, "
-        f"project_name: {project_name_filter}, status: {status_filter}"
+        f"project_name: {project_name_filter}, status: {status_filter}, "
         f"execution_target: {execution_target_filter}"
     )
 
