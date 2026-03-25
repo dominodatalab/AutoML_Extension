@@ -134,8 +134,8 @@ def create_app() -> FastAPI:
         auth_header = request.headers.get("authorization")
         # Store the forwarded token so outbound Domino API calls
         # (datasetrw, jobs, registry) run as the visiting user.
-        # The sidecar token is only used as fallback when no user token
-        # is present (background tasks, health checks).
+        # No sidecar fallback — if no user token is present, outbound
+        # calls will fail with MissingUserTokenError.
         set_request_auth_header(auth_header)
         try:
             response = await call_next(request)
