@@ -383,7 +383,7 @@ class TestResolveJobListFilters:
         status, model_type, owner, pid, pname = resolve_job_list_filters(lr, None)
         assert status is None
         assert model_type is None
-        assert owner is None
+        assert owner == "test-user"
         assert pid is None
         assert pname is None
 

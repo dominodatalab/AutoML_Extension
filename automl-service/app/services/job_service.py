@@ -385,13 +385,21 @@ async def list_jobs_filtered(
         project_id_filter,
         project_name_filter,
     ) = resolve_job_list_filters(list_request, request)
-    require_job_list(project_id_filter)
+
+    if project_id_filter:
+        # require domino job listing auth if project_id set
+        require_job_list(project_id_filter)
+        execution_target_filter = "domino_job"
+    else:
+        # disallow listing non-domino jobs
+        execution_target_filter = "local"
 
     await _sync_active_domino_jobs_for_overview(db)
 
     logger.debug(
         f"[JOB LIST] Filters - owner: {owner_filter}, "
         f"project_name: {project_name_filter}, status: {status_filter}"
+        f"execution_target: {execution_target_filter}"
     )
 
     jobs = await crud.get_jobs(
@@ -403,7 +411,9 @@ async def list_jobs_filtered(
         owner=owner_filter,
         project_id=project_id_filter,
         project_name=project_name_filter,
+        execution_target=execution_target_filter
     )
+
     return list(jobs)
 
 
@@ -480,7 +490,9 @@ def resolve_job_list_filters(
     Optional[str],
     Optional[str],
 ]:
-    """Resolve list filter values for status/model/user/project semantics."""
+    """Resolve list filter values for status/model/user/project semantics.
+
+    Always resolves an owner to list the jobs for"""
     status_filter = JobStatus(list_request.status) if list_request.status else None
     model_type_filter = ModelType(list_request.model_type) if list_request.model_type else None
 
