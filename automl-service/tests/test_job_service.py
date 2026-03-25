@@ -29,7 +29,6 @@ from app.services.job_service import (
     extract_metrics_leaderboard,
     get_job_or_404,
     get_queue_status,
-    get_request_owner,
     normalize_job_leaderboard,
     resolve_execution_target,
     resolve_job_list_filters,
@@ -598,36 +597,6 @@ class TestExtractMetricsLeaderboard:
 
 
 # ===========================================================================
-# get_request_owner
-# ===========================================================================
-
-
-class TestGetRequestOwner:
-    """Tests for get_request_owner."""
-
-    def test_from_header_when_no_viewing_user(self, monkeypatch):
-        # Without a viewing user available, header should be used
-        monkeypatch.setattr(
-            "app.services.job_service.get_viewing_user", lambda: None
-        )
-        req = _fake_request(headers={"domino-username": "charlie"})
-        assert get_request_owner(req) == "charlie"
-
-    def test_missing_header_returns_anonymous_when_no_viewing_user(self, monkeypatch):
-        monkeypatch.setattr(
-            "app.services.job_service.get_viewing_user", lambda: None
-        )
-        req = _fake_request(headers={})
-        assert get_request_owner(req) == "anonymous"
-
-    def test_none_request_returns_anonymous_when_no_viewing_user(self, monkeypatch):
-        monkeypatch.setattr(
-            "app.services.job_service.get_viewing_user", lambda: None
-        )
-        assert get_request_owner(None) == "anonymous"
-
-
-# ===========================================================================
 # _parse_statuses_csv
 # ===========================================================================
 
@@ -764,7 +733,7 @@ class TestGetJobOr404:
             "app.services.job_service._fetch_domino_job_or_throw",
             new_callable=AsyncMock,
         ) as mock_fetch:
-            result = await get_job_or_404(db_session, job.id)
+            result = await get_job_or_404(db_session, job.id, "test-user")
 
         assert result.id == job.id
         mock_fetch.assert_not_awaited()
@@ -777,12 +746,12 @@ class TestGetJobOr404:
 
         with patch(
             "app.services.job_service._fetch_domino_job_or_throw",
-            new_callable=AsyncMock,
+            new_callable=MagicMock,
         ) as mock_fetch:
-            result = await get_job_or_404(db_session, job.id)
+            result = await get_job_or_404(db_session, job.id, "test-user")
 
         assert result.id == job.id
-        mock_fetch.assert_awaited_once_with("run-123")
+        mock_fetch.assert_called_once_with("run-123")
 
     @pytest.mark.asyncio
     async def test_propagates_domino_fetch_error(self, db_session, make_job):
@@ -792,16 +761,16 @@ class TestGetJobOr404:
 
         with patch(
             "app.services.job_service._fetch_domino_job_or_throw",
-            new_callable=AsyncMock,
+            new_callable=MagicMock,
             side_effect=RuntimeError("Domino failed"),
         ):
             with pytest.raises(RuntimeError, match="Domino failed"):
-                await get_job_or_404(db_session, job.id)
+                await get_job_or_404(db_session, job.id, "test-user")
 
     @pytest.mark.asyncio
     async def test_raises_404_when_job_missing(self, db_session):
         with pytest.raises(HTTPException) as exc_info:
-            await get_job_or_404(db_session, "missing-job-id")
+            await get_job_or_404(db_session, "missing-job-id", "test-user")
 
         assert exc_info.value.status_code == 404
 
