@@ -619,7 +619,7 @@ async def get_job_or_404(db: AsyncSession, job_id: str, owner_user_name: str) ->
         if job.domino_job_id:
             _fetch_domino_job_or_throw(job.domino_job_id)
         else:
-            raise Exception("No domino job ID found for domino_job")
+            raise HTTPException(status_code=500, detail="No domino job ID exists for domino_job, so cannot authorize")
     return job
 
 
