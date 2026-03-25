@@ -601,7 +601,7 @@ def _fetch_domino_job_or_throw(domino_job_id: str):
         **kwargs,
     )
     if response.status_code > 399:
-        raise Exception(f"Failed to get job, status code: {response.status_code}, {response.content}")
+        raise HTTPException(status_code=response.status_code, message=f"Failed to get job. {response.content}")
 
 
 async def get_job_or_404(db: AsyncSession, job_id: str, owner_user_name: str) -> Job:
