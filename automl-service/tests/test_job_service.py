@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 import pytest_asyncio
 from fastapi import HTTPException
@@ -21,14 +22,16 @@ from app.services.job_service import (
     _is_domino_missing_error,
     _is_domino_terminal_status,
     _normalize_job_name,
+    _parse_get_job_details_response,
     _parse_statuses_csv,
     _terminal_status_from_domino,
     build_autogluon_config,
     build_job_model,
     create_job_with_context,
     extract_metrics_leaderboard,
+    get_job_or_404,
     get_queue_status,
-    get_request_owner,
+    list_jobs_filtered,
     normalize_job_leaderboard,
     resolve_execution_target,
     resolve_job_list_filters,
@@ -383,7 +386,7 @@ class TestResolveJobListFilters:
         status, model_type, owner, pid, pname = resolve_job_list_filters(lr, None)
         assert status is None
         assert model_type is None
-        assert owner is None
+        assert owner == "test-user"
         assert pid is None
         assert pname is None
 
@@ -399,13 +402,13 @@ class TestResolveJobListFilters:
         _, model_type, *_ = resolve_job_list_filters(lr, None)
         assert model_type == ModelType.TIMESERIES
 
-    def test_owner_always_from_header_ignores_body(self, mock_viewing_user):
-        """Client-supplied owner is ignored — always uses domino-username header."""
+    def test_client_supplied_owner_is_used(self, mock_viewing_user):
+        """Client-supplied owner is used when provided."""
         mock_viewing_user
         lr = _make_list_request(owner="alice")
         request = _fake_request(headers={"domino-username": "bob"})
         _, _, owner, *_ = resolve_job_list_filters(lr, request)
-        assert owner == "bob"
+        assert owner == "alice"
 
     def test_owner_from_http_request_header(self, monkeypatch):
         from app.core.context import user as user_ctx
@@ -421,12 +424,12 @@ class TestResolveJobListFilters:
         _, _, owner, *_ = resolve_job_list_filters(lr, request)
         assert owner == "bob"
 
-    def test_owner_none_without_request(self, mock_viewing_user):
-        """Without HTTP request, owner filter is None (local dev)."""
+    def test_client_owner_used_without_request(self, mock_viewing_user):
+        """Client-supplied owner is used even without an HTTP request."""
         mock_viewing_user
         lr = _make_list_request(owner="alice")
         _, _, owner, *_ = resolve_job_list_filters(lr, None)
-        assert owner is None
+        assert owner == "alice"
 
     def test_project_name_filter(self, mock_viewing_user):
         mock_viewing_user
@@ -439,6 +442,87 @@ class TestResolveJobListFilters:
         lr = _make_list_request(project_id="pid-42")
         _, _, _, pid, _ = resolve_job_list_filters(lr, None)
         assert pid == "pid-42"
+
+    @pytest.mark.asyncio
+    async def test_with_project_filters_includes_all_job_types(
+        self,
+        db_session,
+        make_job,
+        mock_viewing_user,
+    ):
+        mock_viewing_user
+        local_job = make_job(name="local-job", execution_target="local")
+        domino_job = make_job(
+            name="domino-job",
+            execution_target="domino_job",
+            status=JobStatus.COMPLETED,
+            domino_job_id="run-123",
+            project_name = "test-project",
+        )
+        db_session.add_all([local_job, domino_job])
+        await db_session.commit()
+
+        jobs = await list_jobs_filtered(
+            db=db_session,
+            list_request=_make_list_request(project_name="test-project"),
+            request=None,
+        )
+
+        assert set([j.name for j in jobs]) == set(["local-job", "domino-job"])
+
+    @pytest.mark.asyncio
+    async def test_no_project_filters_excludes_domino_jobs(
+        self,
+        db_session,
+        make_job,
+        mock_viewing_user,
+    ):
+        mock_viewing_user
+        local_job = make_job(name="local-job", execution_target="local")
+        domino_job = make_job(
+            name="domino-job",
+            execution_target="domino_job",
+            status=JobStatus.COMPLETED,
+            domino_job_id="run-123",
+        )
+        db_session.add_all([local_job, domino_job])
+        await db_session.commit()
+
+        jobs = await list_jobs_filtered(db=db_session, list_request=_make_list_request(), request=None)
+
+        returned_ids = {job.id for job in jobs}
+        assert local_job.id in returned_ids
+        assert domino_job.id not in returned_ids
+        assert all(job.execution_target != "domino_job" for job in jobs)
+
+    @pytest.mark.asyncio
+    async def test_blank_project_filters_exclude_domino_jobs(
+        self,
+        db_session,
+        make_job,
+        mock_viewing_user,
+    ):
+        mock_viewing_user
+        local_job = make_job(name="blank-local-job", execution_target="local")
+        domino_job = make_job(
+            name="blank-domino-job",
+            execution_target="domino_job",
+            status=JobStatus.COMPLETED,
+            domino_job_id="run-blank-123",
+        )
+        db_session.add_all([local_job, domino_job])
+        await db_session.commit()
+
+        jobs = await list_jobs_filtered(
+            db=db_session,
+            list_request=_make_list_request(project_id="", project_name=""),
+            request=None,
+        )
+
+        returned_ids = {job.id for job in jobs}
+        assert local_job.id in returned_ids
+        assert domino_job.id not in returned_ids
+        assert all(job.execution_target != "domino_job" for job in jobs)
 
 
 # ===========================================================================
@@ -600,54 +684,6 @@ class TestExtractMetricsLeaderboard:
 
 
 # ===========================================================================
-# get_request_owner
-# ===========================================================================
-
-
-class TestGetRequestOwner:
-    """Tests for get_request_owner."""
-
-    def test_header_preferred_over_viewing_user(self, monkeypatch):
-        # domino-username header takes priority even when viewing user exists
-        from app.core.context.user import User
-        monkeypatch.setattr(
-            "app.services.job_service.get_viewing_user",
-            lambda: User(id="u1", user_name="app-owner", roles=[]),
-        )
-        req = _fake_request(headers={"domino-username": "charlie"})
-        assert get_request_owner(req) == "charlie"
-
-    def test_falls_back_to_viewing_user_when_no_header(self, monkeypatch):
-        from app.core.context.user import User
-        monkeypatch.setattr(
-            "app.services.job_service.get_viewing_user",
-            lambda: User(id="u1", user_name="app-owner", roles=[]),
-        )
-        req = _fake_request(headers={})
-        assert get_request_owner(req) == "app-owner"
-
-    def test_from_header_when_no_viewing_user(self, monkeypatch):
-        monkeypatch.setattr(
-            "app.services.job_service.get_viewing_user", lambda: None
-        )
-        req = _fake_request(headers={"domino-username": "charlie"})
-        assert get_request_owner(req) == "charlie"
-
-    def test_missing_header_returns_anonymous_when_no_viewing_user(self, monkeypatch):
-        monkeypatch.setattr(
-            "app.services.job_service.get_viewing_user", lambda: None
-        )
-        req = _fake_request(headers={})
-        assert get_request_owner(req) == "anonymous"
-
-    def test_none_request_returns_anonymous_when_no_viewing_user(self, monkeypatch):
-        monkeypatch.setattr(
-            "app.services.job_service.get_viewing_user", lambda: None
-        )
-        assert get_request_owner(None) == "anonymous"
-
-
-# ===========================================================================
 # _parse_statuses_csv
 # ===========================================================================
 
@@ -764,6 +800,107 @@ class TestQueueCapacity:
         with pytest.raises(HTTPException) as exc_info:
             await create_job_with_context(db_session, req)
         assert exc_info.value.status_code == 400
+
+
+# ===========================================================================
+# get_job_details parsing
+# ===========================================================================
+
+
+class TestParseGetJobDetailsResponse:
+    """Tests for Domino job-details response normalization before parsing."""
+
+    def test_normalizes_git_service_provider_before_generated_parser(self):
+        client = MagicMock()
+        parsed = object()
+        response = httpx.Response(
+            200,
+            json={
+                "job": {
+                    "gitRepos": [
+                        {"serviceProvider": "Github"},
+                        {"serviceProvider": "githubEnterprise"},
+                    ]
+                },
+                "metadata": {},
+            },
+        )
+
+        def fake_parse_response(*, client, response):
+            body = response.json()
+            assert body["job"]["gitRepos"][0]["serviceProvider"] == "github"
+            assert body["job"]["gitRepos"][1]["serviceProvider"] == "githubEnterprise"
+            assert "content-encoding" not in response.headers
+            return parsed
+
+        with patch(
+            "app.services.job_service.get_job_details._parse_response",
+            side_effect=fake_parse_response,
+        ) as mock_parse_response:
+            result = _parse_get_job_details_response(client=client, response=response)
+
+        assert result is parsed
+        mock_parse_response.assert_called_once()
+
+
+# ===========================================================================
+# get_job_or_404
+# ===========================================================================
+
+
+class TestGetJobOr404:
+    """Tests for fetching jobs with optional Domino validation."""
+
+    @pytest.mark.asyncio
+    async def test_returns_local_job_without_domino_fetch(self, db_session, make_job):
+        job = make_job()
+        db_session.add(job)
+        await db_session.commit()
+
+        with patch(
+            "app.services.job_service._fetch_domino_job_or_throw",
+            new_callable=AsyncMock,
+        ) as mock_fetch:
+            result = await get_job_or_404(db_session, job.id, "test-user")
+
+        assert result.id == job.id
+        mock_fetch.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_fetches_domino_job_when_domino_job_id_present(self, db_session, make_job):
+        job = make_job(execution_target="domino_job", domino_job_id="run-123")
+        db_session.add(job)
+        await db_session.commit()
+
+        with patch(
+            "app.services.job_service._fetch_domino_job_or_throw",
+            new_callable=MagicMock,
+        ) as mock_fetch:
+            result = await get_job_or_404(db_session, job.id, "test-user")
+
+        assert result.id == job.id
+        mock_fetch.assert_called_once_with("run-123")
+
+    @pytest.mark.asyncio
+    async def test_propagates_domino_fetch_error(self, db_session, make_job):
+        job = make_job(execution_target="domino_job", domino_job_id="run-123")
+        db_session.add(job)
+        await db_session.commit()
+
+        with patch(
+            "app.services.job_service._fetch_domino_job_or_throw",
+            new_callable=MagicMock,
+            side_effect=RuntimeError("Domino failed"),
+        ):
+            with pytest.raises(RuntimeError, match="Domino failed"):
+                await get_job_or_404(db_session, job.id, "test-user")
+
+    @pytest.mark.asyncio
+    async def test_raises_404_when_job_missing(self, db_session):
+        with pytest.raises(HTTPException) as exc_info:
+            await get_job_or_404(db_session, "missing-job-id", "test-user")
+
+        assert exc_info.value.status_code == 404
 
 
 # ===========================================================================
