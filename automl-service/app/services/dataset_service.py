@@ -11,6 +11,12 @@ import numpy as np
 import pandas as pd
 from fastapi import HTTPException, UploadFile
 
+from app.core.domino_http import get_domino_public_api_client_sync,
+from app.api.generated.domino_public_api_client.api.dataset_rw import get_datasets_v2
+from app.api.generated.domino_public_api_client.models.dataset_rw_info_dto_v1 import DatasetRwInfoDtoV1
+from app.api.generated.domino_public_api_client.models.dataset_rw_permission_v1 import DatasetRwPermissionV1
+from app.api.generated.domino_public_api_client.types import Unset
+
 from app.api.schemas.dataset import (
     DatasetFileResponse,
     DatasetListResponse,
@@ -112,17 +118,8 @@ async def list_datasets_response(
     project_id: Optional[str] = None,
 ) -> DatasetListResponse:
     """List Domino datasets in API response shape."""
-    from app.core.domino_http import (
-        get_domino_public_api_client_sync,
-        resolve_domino_project_id,
-    )
-    from app.api.generated.domino_public_api_client.api.dataset_rw import get_datasets_v2
-    from app.api.generated.domino_public_api_client.models.dataset_rw_info_dto_v1 import DatasetRwInfoDtoV1
-    from app.api.generated.domino_public_api_client.models.dataset_rw_permission_v1 import DatasetRwPermissionV1
-    from app.api.generated.domino_public_api_client.types import Unset
-
     client = get_domino_public_api_client_sync()
-    resolved_project_id = project_id or resolve_domino_project_id()
+    resolved_project_id = project_id
     response = await get_datasets_v2.asyncio(
         client=client,
         minimum_permission=DatasetRwPermissionV1.READDATASETRWV2,
