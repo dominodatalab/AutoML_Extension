@@ -197,12 +197,43 @@ async def test_cleanup_routes_reject_users_without_extension_edit(app_client, mo
 
 
 @pytest.mark.asyncio
-async def test_list_jobs_empty(app_client):
+async def test_list_jobs_empty(app_client, monkeypatch):
     """POST /svc/v1/jobs/list on a fresh DB returns zero jobs."""
+    from app.core import authorization as auth
+
     with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
         response = await app_client.post(
             "/svc/v1/jobs/list",
             json={"owner": "", "project_name": ""},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 0
+    assert body["jobs"] == []
+
+
+@pytest.mark.asyncio
+async def test_list_jobs_empty_from_domino_project(app_client, monkeypatch):
+    """POST /svc/v1/jobs/list on a fresh DB returns zero jobs."""
+    from app.core import authorization as auth
+    from tests.fake_domino_client import FakeResponse, FakeHttpxClient, FakeDominoClient
+
+    fake_httpx = FakeHttpxClient(
+        post_payload={"actions": [{"id": "job.project.list_jobs-1", "result": True}]},
+    )
+    fake_client = FakeDominoClient(fake_httpx)
+    monkeypatch.setattr(
+        auth,
+        "get_domino_public_api_client_sync",
+        lambda: fake_client,
+        raising=True,
+    )
+
+    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
+        response = await app_client.post(
+            "/svc/v1/jobs/list",
+            json={"project_id": "1"},
         )
 
     assert response.status_code == 200

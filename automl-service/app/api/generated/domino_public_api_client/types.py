@@ -1,8 +1,9 @@
+from __future__ import annotations
 """Contains some shared types for properties"""
 
 from collections.abc import Mapping, MutableMapping
 from http import HTTPStatus
-from typing import IO, BinaryIO, Generic, Literal, TypeVar
+from typing import IO, BinaryIO, Generic, Literal, Optional, Tuple, TypeVar, Union
 
 from attrs import define
 
@@ -15,14 +16,14 @@ class Unset:
 UNSET: Unset = Unset()
 
 # The types that `httpx.Client(files=)` can accept, copied from that library.
-FileContent = IO[bytes] | bytes | str
-FileTypes = (
+FileContent = Union[IO[bytes], bytes, str]
+FileTypes = Union[
     # (filename, file (or bytes), content_type)
-    tuple[str | None, FileContent, str | None]
+    Tuple[Optional[str], FileContent, Optional[str]],
     # (filename, file (or bytes), content_type, headers)
-    | tuple[str | None, FileContent, str | None, Mapping[str, str]]
-)
-RequestFiles = list[tuple[str, FileTypes]]
+    Tuple[Optional[str], FileContent, Optional[str], Mapping[str, str]],
+]
+RequestFiles = list[Tuple[str, FileTypes]]
 
 
 @define

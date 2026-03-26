@@ -45,7 +45,7 @@ class TestSvcJobCleanup:
     """Tests for POST /svcjobcleanup."""
 
     @patch("app.api.compat.custom_jobs.get_db_session", new=_fake_db_session)
-    @patch("app.api.compat.custom_jobs.get_request_owner", return_value="testuser")
+    @patch("app.api.compat.custom_jobs.get_viewing_user_name", return_value="testuser")
     def test_calls_bulk_cleanup_with_parsed_body(self, mock_owner):
         """Body fields are parsed into a CleanupRequest and forwarded correctly."""
         app = _build_app()
@@ -81,7 +81,7 @@ class TestSvcJobCleanup:
         assert call_kwargs["owner"] == "testuser"
 
     @patch("app.api.compat.custom_jobs.get_db_session", new=_fake_db_session)
-    @patch("app.api.compat.custom_jobs.get_request_owner", return_value="someone")
+    @patch("app.api.compat.custom_jobs.get_viewing_user_name", return_value="someone")
     def test_uses_default_cleanup_request_values(self, mock_owner):
         """An empty body produces the CleanupRequest defaults."""
         app = _build_app()
