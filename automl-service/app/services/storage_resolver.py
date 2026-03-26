@@ -1,0 +1,748 @@
+"""Resolve project-scoped storage via Domino Datasets (auto-created).
+
+Ensures a writable ``automl-extension`` dataset exists for a given target
+project and returns the local mount path. The dataset is created via the
+Domino Dataset RW API (v1 for create, v2 with v1 fallback for listing) if it
+does not already exist.
+
+Usage::
+
+    resolver = get_storage_resolver()
+    mount_path = await resolver.ensure_project_storage(project_id)
+    # mount_path == "/domino/datasets/local/automl-extension" (or similar)
+"""
+
+import asyncio
+import hashlib
+import io
+import logging
+import os
+from dataclasses import dataclass, field
+from functools import lru_cache
+from typing import Optional
+
+import httpx
+from app.api.generated.domino_public_api_client.api.dataset_rw import (
+    get_dataset_snapshots,
+)
+from app.api.generated.domino_public_api_client.models.paginated_snapshot_envelope_v1 import (
+    PaginatedSnapshotEnvelopeV1,
+)
+from app.api.generated.domino_public_api_client.models.snapshot_details_v1 import (
+    SnapshotDetailsV1,
+)
+from app.api.generated.domino_public_api_client.models.snapshot_details_v1_status import (
+    SnapshotDetailsV1Status,
+)
+from app.core.domino_http import (
+    domino_request,
+    get_domino_public_api_client_sync,
+    resolve_domino_nucleus_host,
+)
+from app.services.domino_dataset_api import (
+    extract_dataset_list as _extract_project_dataset_list,
+    list_project_datasets,
+)
+
+logger = logging.getLogger(__name__)
+
+DATASET_NAME = "automl-extension"
+DATASET_DESCRIPTION = "AutoML Extension storage - auto-created by the AutoML App"
+
+# Upload settings (matching python-domino SDK defaults)
+_UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024  # 8 MB
+_UPLOAD_MAX_RETRIES = 10
+
+# Ordered list of mount path templates to probe after dataset creation.
+_MOUNT_TEMPLATES = [
+    "/domino/datasets/local/{name}",
+    "/domino/datasets/{name}",
+    "/mnt/data/{name}",
+    "/mnt/imported/data/{name}",
+]
+
+
+def _preferred_snapshot_api_base_url() -> Optional[str]:
+    """Prefer the direct Domino host for Dataset RW snapshot APIs."""
+    return resolve_domino_nucleus_host()
+
+
+@dataclass
+class ProjectPaths:
+    """Resolved storage paths for a specific target project."""
+
+    project_id: str
+    mount_path: str          # e.g. /domino/datasets/local/automl-extension
+    models_path: str         # {mount}/models
+    uploads_path: str        # {mount}/uploads
+    eda_results_path: str    # {mount}/eda_results
+    temp_path: str           # {mount}/temp
+
+
+@dataclass
+class DatasetInfo:
+    """Lightweight handle for a resolved dataset."""
+
+    dataset_id: str
+    name: str
+    project_id: str
+    mount_path: Optional[str] = None
+    rw_snapshot_id: Optional[str] = None
+
+
+@dataclass
+class ProjectStorageResolver:
+    """Manages per-project ``automl-extension`` dataset lifecycle.
+
+    * ``ensure_project_storage(project_id)`` — idempotent: list → create
+      → probe mount → return path.
+    * Results are cached in-memory so repeated calls for the same project
+      hit the API at most once.
+    """
+
+    # project_id → DatasetInfo
+    _cache: dict[str, DatasetInfo] = field(default_factory=dict)
+    # dataset_id → rw_snapshot_id (dedicated cache so lookups don't
+    # depend on the dataset having been resolved via ensure_dataset_exists)
+    _rw_cache: dict[str, str] = field(default_factory=dict)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    async def ensure_dataset_exists(self, project_id: str) -> Optional[DatasetInfo]:
+        """Pre-create the automl-extension dataset in a project (best-effort).
+
+        Unlike ``ensure_project_storage``, this does NOT probe for a local
+        mount — the mount only appears inside a Domino Job that boots
+        *after* the dataset exists.  Call this before launching a Job so
+        the dataset mount is available when the Job starts.
+
+        Returns ``DatasetInfo`` on success, ``None`` on failure (never raises).
+        """
+        try:
+            info = await self._resolve_or_create(project_id)
+            logger.info(
+                "Pre-launch dataset ready: '%s' (id=%s) in project %s",
+                info.name,
+                info.dataset_id,
+                project_id,
+            )
+            return info
+        except Exception:
+            logger.warning(
+                "Pre-launch dataset creation failed for project %s; "
+                "job will proceed without pre-created dataset",
+                project_id,
+                exc_info=True,
+            )
+            return None
+
+    async def get_dataset_info(self, project_id: str) -> Optional[DatasetInfo]:
+        """Return cached dataset info for a project, or None."""
+        if project_id in self._cache:
+            return self._cache[project_id]
+        return await self._find_existing(project_id)
+
+    async def delete_dataset(self, dataset_id: str) -> None:
+        """Delete a dataset via the v1 API and remove it from the cache."""
+        await self._dataset_rw_write_request(
+            "DELETE",
+            f"/api/datasetrw/v1/datasets/{dataset_id}",
+        )
+        self._cache = {k: v for k, v in self._cache.items() if v.dataset_id != dataset_id}
+        self._rw_cache.pop(dataset_id, None)
+        logger.info("Deleted dataset %s", dataset_id)
+
+    async def _dataset_rw_write_request(
+        self,
+        method: str,
+        path: str,
+        **kwargs,
+    ):
+        """Call Dataset RW write endpoints, preferring the direct host first."""
+        last_exc: Optional[Exception] = None
+        base_urls: list[Optional[str]] = []
+        nucleus = _preferred_snapshot_api_base_url()
+        if nucleus:
+            base_urls.append(nucleus)
+        base_urls.append(None)
+
+        for index, base_url in enumerate(base_urls):
+            request_kwargs = dict(kwargs)
+            if base_url is not None:
+                request_kwargs.setdefault("max_retries", 0)
+            is_last = index == len(base_urls) - 1
+            try:
+                return await domino_request(
+                    method,
+                    path,
+                    base_url=base_url,
+                    **request_kwargs,
+                )
+            except httpx.HTTPStatusError as exc:
+                last_exc = exc
+                resp_body = ""
+                try:
+                    resp_body = exc.response.text[:300]
+                except Exception:
+                    pass
+                if is_last:
+                    raise
+                logger.warning(
+                    "Domino Dataset RW %s %s returned HTTP %s via direct host; "
+                    "falling back to the default host. Body: %s",
+                    method,
+                    path,
+                    exc.response.status_code,
+                    resp_body,
+                )
+            except Exception as exc:
+                last_exc = exc
+                if is_last:
+                    raise
+                logger.warning(
+                    "Domino Dataset RW %s %s failed via direct host (%s); "
+                    "falling back to the default host",
+                    method,
+                    path,
+                    exc,
+                )
+
+        raise last_exc or RuntimeError(f"Domino Dataset RW {method} {path} failed")
+
+    @staticmethod
+    def _list_snapshots_typed(
+        dataset_id: str,
+        *,
+        limit: Optional[int] = None,
+    ) -> list[SnapshotDetailsV1]:
+        """List snapshots for a dataset using the generated API client.
+
+        Returns typed ``SnapshotDetailsV1`` objects.  Returns an empty list
+        on any error so callers can fall through gracefully.
+        """
+        client = get_domino_public_api_client_sync()
+        kwargs: dict = {}
+        if limit is not None:
+            kwargs["limit"] = limit
+        result = get_dataset_snapshots.sync(dataset_id, client=client, **kwargs)
+        if isinstance(result, PaginatedSnapshotEnvelopeV1):
+            return list(result.snapshots)
+        return []
+
+    async def get_latest_snapshot_status(self, dataset_id: str) -> Optional[str]:
+        """Return the status of the latest snapshot for a dataset.
+
+        Returns the status string (``"active"``, ``"pending"``, ``"copying"``,
+        ``"failed"``, etc.) or ``None`` if no snapshot exists.
+        """
+        try:
+            snapshots = self._list_snapshots_typed(dataset_id, limit=1)
+            if snapshots:
+                return str(snapshots[0].status.value)
+        except Exception:
+            logger.debug("Failed to get snapshot status for dataset %s", dataset_id, exc_info=True)
+        return None
+
+    async def get_rw_snapshot_id(self, dataset_id: str) -> Optional[str]:
+        """Return the read-write (mutable head) snapshot ID for a dataset.
+
+        Checks the in-memory cache first, then calls the dataset details API.
+        """
+        # Fast path: dedicated RW cache
+        if dataset_id in self._rw_cache:
+            return self._rw_cache[dataset_id]
+
+        # Check project cache
+        for info in self._cache.values():
+            if info.dataset_id == dataset_id and info.rw_snapshot_id:
+                self._rw_cache[dataset_id] = info.rw_snapshot_id
+                return info.rw_snapshot_id
+
+        # Preferred path: the v1 snapshots endpoint is the most reliable and
+        # already gives us the active RW head without an extra detail lookup.
+        rw_sid = await self._resolve_rw_snapshot_v1(dataset_id)
+        if rw_sid:
+            return rw_sid
+
+        # Fallback: retry the v1 snapshots endpoint (same generated client).
+        try:
+            snapshots = self._list_snapshots_typed(dataset_id)
+            for s in snapshots:
+                if s.status == SnapshotDetailsV1Status.ACTIVE:
+                    self._backfill_rw_cache(dataset_id, s.id)
+                    return s.id
+        except Exception:
+            logger.debug(
+                "Failed to list v1 snapshots for dataset %s",
+                dataset_id,
+                exc_info=True,
+            )
+
+        return None
+
+    def _backfill_rw_cache(self, dataset_id: str, rw_sid: str) -> None:
+        """Store a discovered RW snapshot ID in both caches."""
+        self._rw_cache[dataset_id] = rw_sid
+        for info in self._cache.values():
+            if info.dataset_id == dataset_id:
+                info.rw_snapshot_id = rw_sid
+                return
+
+    async def _resolve_rw_snapshot_v1(self, dataset_id: str) -> Optional[str]:
+        """Try the v1 snapshots endpoint to find the RW snapshot ID."""
+        try:
+            snapshots = self._list_snapshots_typed(dataset_id)
+            for s in snapshots:
+                if s.status == SnapshotDetailsV1Status.ACTIVE:
+                    logger.debug(
+                        "Resolved RW snapshot %s for dataset %s via v1 API",
+                        s.id, dataset_id,
+                    )
+                    return s.id
+        except Exception:
+            logger.debug(
+                "Failed to resolve RW snapshot via v1 for dataset %s",
+                dataset_id,
+                exc_info=True,
+            )
+        return None
+
+    async def list_snapshot_files(
+        self,
+        snapshot_id: str,
+        path: str = "",
+    ) -> list[dict]:
+        """List files in a dataset snapshot via the v4 files API.
+
+        Returns a flat list of dicts with keys: ``fileName``, ``isDirectory``,
+        ``sizeInBytes``, ``lastModified``.
+        """
+        try:
+            resp = await domino_request(
+                "GET",
+                f"/v4/datasetrw/files/{snapshot_id}",
+                params={"path": path},
+            )
+            data = resp.json()
+            rows = data.get("rows", [])
+            # Flatten the nested structure
+            result: list[dict] = []
+            for row in rows:
+                name_info = row.get("name", {})
+                size_info = row.get("size", {})
+                result.append({
+                    "fileName": name_info.get("fileName") or name_info.get("label", ""),
+                    "isDirectory": name_info.get("isDirectory", False),
+                    "sizeInBytes": (
+                        size_info.get("sizeInBytes")
+                        or name_info.get("sizeInBytes")
+                        or 0
+                    ),
+                    "lastModified": row.get("lastModified"),
+                    "url": name_info.get("url"),
+                })
+            return result
+        except Exception:
+            logger.debug(
+                "Failed to list files for snapshot %s at path '%s'",
+                snapshot_id,
+                path,
+                exc_info=True,
+            )
+            return []
+
+    async def delete_snapshot_files(
+        self,
+        snapshot_id: str,
+        relative_paths: list[str],
+    ) -> bool:
+        """Delete files from a dataset snapshot (best-effort).
+
+        Returns True on success, False on failure.
+        """
+        if not relative_paths:
+            return True
+        try:
+            await self._dataset_rw_write_request(
+                "DELETE",
+                f"/v4/datasetrw/snapshot/{snapshot_id}/files",
+                json={"relativePaths": relative_paths},
+            )
+            logger.info(
+                "Deleted %d file(s) from snapshot %s: %s",
+                len(relative_paths),
+                snapshot_id,
+                relative_paths,
+            )
+            return True
+        except Exception:
+            logger.warning(
+                "Failed to delete files from snapshot %s: %s",
+                snapshot_id,
+                relative_paths,
+                exc_info=True,
+            )
+            return False
+
+    async def _get_latest_snapshot_id(self, dataset_id: str) -> Optional[str]:
+        """Return the latest snapshot ID for a dataset, or None."""
+        try:
+            snapshots = self._list_snapshots_typed(dataset_id, limit=1)
+            if snapshots:
+                return snapshots[0].id
+        except Exception:
+            logger.debug("Failed to get snapshot ID for dataset %s", dataset_id, exc_info=True)
+        return None
+
+    async def upload_file(
+        self,
+        dataset_id: str,
+        file_path: str,
+        file_content: bytes,
+        collision_setting: str = "Overwrite",
+        chunk_size: int = _UPLOAD_CHUNK_SIZE,
+    ) -> None:
+        """Upload a file to a dataset via the v4 chunked upload API.
+
+        Supports files of any size by splitting into chunks (default 8 MB).
+        This follows the same workflow as the python-domino SDK:
+          1. POST .../snapshot/file/start → get upload_key
+          2. POST .../snapshot/file (multipart chunk) → upload data (repeated per chunk)
+          3. GET  .../snapshot/file/end/{key} → finalize
+
+        Upload requests go through the proxy (``domino_request`` default)
+        rather than the nucleus-first wrapper because the Domino app proxy
+        injects auth headers that the v4 multipart endpoints require.
+        """
+        # Step 1: Start upload session
+        resp = await domino_request(
+            "POST",
+            f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/start",
+            json={
+                "filePaths": [file_path],
+                "fileCollisionSetting": collision_setting,
+            },
+        )
+        upload_key = resp.json()
+        if not isinstance(upload_key, str):
+            upload_key = upload_key.get("upload_key") or upload_key.get("uploadKey") or upload_key.get("key")
+        if not upload_key:
+            raise RuntimeError(f"Failed to start upload session for dataset {dataset_id}")
+
+        logger.debug("Upload session started for dataset %s, key=%s", dataset_id, upload_key)
+
+        try:
+            await self._upload_chunks(
+                dataset_id, upload_key, file_path, file_content, chunk_size
+            )
+
+            # Step 3: Finalize
+            await domino_request(
+                "GET",
+                f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/end/{upload_key}",
+            )
+            logger.info(
+                "Uploaded '%s' (%d bytes, %d chunk(s)) to dataset %s",
+                file_path,
+                len(file_content),
+                max(1, (len(file_content) + chunk_size - 1) // chunk_size),
+                dataset_id,
+            )
+
+        except Exception:
+            # Cancel on failure
+            try:
+                await domino_request(
+                    "GET",
+                    f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file/cancel/{upload_key}",
+                )
+            except Exception:
+                pass
+            raise
+
+    async def _upload_chunks(
+        self,
+        dataset_id: str,
+        upload_key: str,
+        file_path: str,
+        file_content: bytes,
+        chunk_size: int,
+    ) -> None:
+        """Split *file_content* into chunks and upload each sequentially."""
+        total_size = len(file_content)
+        total_chunks = max(1, (total_size + chunk_size - 1) // chunk_size)
+        identifier = file_path.replace(".", "-").replace("/", "-")
+
+        for chunk_num in range(1, total_chunks + 1):
+            start = (chunk_num - 1) * chunk_size
+            end = min(start + chunk_size, total_size)
+            chunk_data = file_content[start:end]
+            chunk_checksum = hashlib.md5(chunk_data).hexdigest()
+
+            chunk_params = {
+                "key": upload_key,
+                "resumableChunkNumber": chunk_num,
+                "resumableChunkSize": chunk_size,
+                "resumableCurrentChunkSize": len(chunk_data),
+                "resumableTotalChunks": total_chunks,
+                "resumableIdentifier": identifier,
+                "resumableRelativePath": file_path,
+                "checksum": chunk_checksum,
+            }
+
+            for attempt in range(_UPLOAD_MAX_RETRIES):
+                try:
+                    await domino_request(
+                        "POST",
+                        f"/v4/datasetrw/datasets/{dataset_id}/snapshot/file",
+                        params=chunk_params,
+                        files={file_path: (file_path, io.BytesIO(chunk_data), "application/octet-stream")},
+                        headers={"Csrf-Token": "nocheck"},
+                        max_retries=0,  # we handle retries here
+                    )
+                    break
+                except Exception:
+                    if attempt == _UPLOAD_MAX_RETRIES - 1:
+                        raise
+                    backoff = 2 ** attempt
+                    logger.warning(
+                        "Chunk %d/%d upload failed, retrying in %ds (attempt %d/%d)",
+                        chunk_num, total_chunks, backoff, attempt + 1, _UPLOAD_MAX_RETRIES,
+                    )
+                    await asyncio.sleep(backoff)
+
+            if total_chunks > 1:
+                logger.debug(
+                    "Uploaded chunk %d/%d (%d bytes) for '%s'",
+                    chunk_num, total_chunks, len(chunk_data), file_path,
+                )
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    async def _resolve_or_create(self, project_id: str) -> DatasetInfo:
+        """Find or create the automl-extension dataset for *project_id*.
+
+        Tries to create first (``POST /dataset``) which is a single fast
+        call through the proxy.  If the dataset already exists (HTTP 400),
+        falls back to listing to resolve the existing ID.  This avoids the
+        listing step entirely for new datasets and works in App environments
+        where the proxy disconnects on GET listing requests.
+        """
+        logger.info("Ensuring dataset '%s' exists in project %s", DATASET_NAME, project_id)
+        try:
+            created = await self._create_dataset(project_id)
+            self._cache[project_id] = created
+            return created
+        except Exception:
+            # Creation failed — dataset likely already exists.
+            logger.debug(
+                "Create failed for project %s, looking up existing dataset",
+                project_id,
+                exc_info=True,
+            )
+
+        existing = await self._find_existing(project_id)
+        if existing:
+            logger.info(
+                "Dataset '%s' already exists for project %s (id=%s)",
+                DATASET_NAME,
+                project_id,
+                existing.dataset_id,
+            )
+            self._cache[project_id] = existing
+            return existing
+
+        raise RuntimeError(
+            f"Failed to create or find dataset '{DATASET_NAME}' in project {project_id}"
+        )
+
+    async def _find_existing(self, project_id: str) -> Optional[DatasetInfo]:
+        """List datasets for *project_id* and return ours if it exists."""
+        try:
+            datasets = await list_project_datasets(project_id)
+        except Exception:
+            logger.exception("Failed to list datasets for project %s", project_id)
+            return None
+
+        for ds in datasets:
+            name = ds.get("datasetName") or ds.get("name") or ""
+            if name == DATASET_NAME:
+                ds_id = str(ds.get("datasetId") or ds.get("id") or "")
+                rw_sid = ds.get("readWriteSnapshotId") or None
+                mount = self._probe_mount(name)
+                logger.debug(
+                    "Found dataset '%s' (id=%s) rw_snapshot=%s mount=%s",
+                    name, ds_id, rw_sid, mount,
+                )
+                # If the v2 listing didn't include the RW snapshot ID,
+                # resolve it eagerly via the v1 snapshots endpoint.
+                if not rw_sid and ds_id:
+                    rw_sid = await self._resolve_rw_snapshot_v1(ds_id)
+                info = DatasetInfo(
+                    dataset_id=ds_id,
+                    name=name,
+                    project_id=project_id,
+                    mount_path=mount,
+                    rw_snapshot_id=rw_sid,
+                )
+                return info
+
+        return None
+
+    async def _create_dataset(self, project_id: str) -> DatasetInfo:
+        """POST to create the dataset, trying known endpoints in order.
+
+        Uses the same endpoints and payloads as the original pre-refactor
+        code.  The v1 endpoint with ``name`` is the path that works
+        reliably through the Domino App proxy.  The ``/dataset`` endpoint
+        works from workspaces but the App proxy disconnects on it.
+        """
+        # Each entry is (endpoint, payload).
+        # Order matches the original: v1 with both payload shapes first
+        # (the App proxy routes v1 reliably), then /dataset as fallback.
+        attempts: list[tuple[str, dict]] = [
+            (
+                "/api/datasetrw/v1/datasets",
+                {
+                    "name": DATASET_NAME,
+                    "projectId": project_id,
+                    "description": DATASET_DESCRIPTION,
+                },
+            ),
+            (
+                "/api/datasetrw/v1/datasets",
+                {
+                    "name": DATASET_NAME,
+                    "projectId": project_id,
+                },
+            ),
+            (
+                "/dataset",
+                {
+                    "datasetName": DATASET_NAME,
+                    "projectId": project_id,
+                    "description": DATASET_DESCRIPTION,
+                },
+            ),
+        ]
+
+        last_error: Optional[str] = None
+        for endpoint, payload in attempts:
+            try:
+                resp = await domino_request(
+                    "POST",
+                    endpoint,
+                    json=payload,
+                    # One retry — the first attempt may hit a stale connection
+                    # (Server disconnected), but the client is recreated and
+                    # the second attempt gets a fresh TCP connection.
+                    max_retries=1,
+                )
+                body = resp.json()
+                ds_id = str(
+                    body.get("datasetId")
+                    or body.get("id")
+                    or body.get("dataset", {}).get("id")
+                    or ""
+                )
+                ds_name = (
+                    body.get("datasetName")
+                    or body.get("name")
+                    or body.get("dataset", {}).get("name")
+                    or DATASET_NAME
+                )
+                logger.info(
+                    "Created dataset '%s' (id=%s) in project %s via %s",
+                    ds_name,
+                    ds_id,
+                    project_id,
+                    endpoint,
+                )
+                mount = self._probe_mount(ds_name)
+                return DatasetInfo(
+                    dataset_id=ds_id,
+                    name=ds_name,
+                    project_id=project_id,
+                    mount_path=mount,
+                )
+            except httpx.HTTPStatusError as exc:
+                last_error = self._format_http_error(exc)
+                # If the dataset is stuck in deletion, no retry will help —
+                # a Domino admin must complete the purge.
+                if "marked for deletion" in (last_error or ""):
+                    raise RuntimeError(
+                        f"Dataset '{DATASET_NAME}' exists in project {project_id} "
+                        f"but is marked for deletion. A Domino admin must complete "
+                        f"the deletion before the name can be reused."
+                    )
+            except Exception as exc:
+                last_error = str(exc)
+
+            logger.warning(
+                "Create attempt failed on %s with payload keys %s: %s",
+                endpoint,
+                list(payload.keys()),
+                last_error,
+            )
+
+        raise RuntimeError(
+            f"Failed to create dataset '{DATASET_NAME}' in project {project_id}. "
+            f"Last error: {last_error}"
+        )
+
+    @staticmethod
+    def _format_http_error(exc: httpx.HTTPStatusError) -> str:
+        """Return a compact error string including response text when present."""
+        response = exc.response
+        if response is None:
+            return str(exc)
+        try:
+            detail = response.text.strip()
+        except Exception:
+            detail = ""
+        if detail:
+            detail = " ".join(detail.split())
+            if len(detail) > 300:
+                detail = f"{detail[:297]}..."
+            return f"{exc} body={detail}"
+        return str(exc)
+
+    @staticmethod
+    def _probe_mount(dataset_name: str) -> Optional[str]:
+        """Check known mount locations for a writable directory."""
+        for template in _MOUNT_TEMPLATES:
+            path = template.format(name=dataset_name)
+            if os.path.isdir(path) and os.access(path, os.W_OK):
+                return path
+        # Also check env-provided mount roots
+        for env_key in ("DOMINO_DATASET_MOUNT_PATH", "DOMINO_MOUNT_PATHS"):
+            val = os.environ.get(env_key)
+            if not val:
+                continue
+            for part in val.replace(",", ":").replace(";", ":").split(":"):
+                part = part.strip()
+                if not part:
+                    continue
+                candidate = os.path.join(part, dataset_name)
+                if os.path.isdir(candidate) and os.access(candidate, os.W_OK):
+                    return candidate
+        return None
+
+
+def _extract_dataset_list(data: object) -> list[dict]:
+    """Normalize the Dataset RW API list response into a list of dicts.
+
+    The v2 response wraps each item as ``{"dataset": {...}}``; this helper
+    unwraps to the inner dict so callers can access fields directly.
+    """
+    return _extract_project_dataset_list(data)
+
+
+@lru_cache()
+def get_storage_resolver() -> ProjectStorageResolver:
+    """Singleton ``ProjectStorageResolver`` instance."""
+    return ProjectStorageResolver()
