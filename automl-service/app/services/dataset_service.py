@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 from fastapi import HTTPException, UploadFile
 
-from app.core.domino_http import get_domino_public_api_client_sync,
+from app.core.domino_http import get_domino_public_api_client_sync
 from app.api.generated.domino_public_api_client.api.dataset_rw import get_datasets_v2
 from app.api.generated.domino_public_api_client.models.dataset_rw_info_dto_v1 import DatasetRwInfoDtoV1
 from app.api.generated.domino_public_api_client.models.dataset_rw_permission_v1 import DatasetRwPermissionV1
@@ -115,15 +115,14 @@ def filter_local_datasets(
 
 async def list_datasets_response(
     dataset_manager: DominoDatasetManager,
-    project_id: Optional[str] = None,
+    project_id: str,
 ) -> DatasetListResponse:
     """List Domino datasets in API response shape."""
     client = get_domino_public_api_client_sync()
-    resolved_project_id = project_id
     response = await get_datasets_v2.asyncio(
         client=client,
         minimum_permission=DatasetRwPermissionV1.READDATASETRWV2,
-        project_ids_to_include=[resolved_project_id],
+        project_ids_to_include=[project_id],
         include_project_info=True,
         offset=0,
         limit=100,
