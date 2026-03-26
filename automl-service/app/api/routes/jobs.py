@@ -35,7 +35,6 @@ from app.services.job_service import (
     get_job_response,
     get_job_status_response,
     get_queue_status as get_queue_status_service,
-    list_jobs_basic,
     list_jobs_filtered,
     preview_cleanup as preview_cleanup_service,
     register_model_for_job,
@@ -56,24 +55,6 @@ async def create_job(
     and project (from DOMINO_PROJECT_ID environment variable).
     """
     return await create_job_with_context(db=db, job_request=job_request, request=request)
-
-
-@router.get("", response_model=JobListResponse)
-async def list_jobs(
-    skip: int = 0,
-    limit: int = 100,
-    status: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
-):
-    """List all training jobs."""
-    jobs = await list_jobs_basic(db=db, skip=skip, limit=limit, status=status)
-
-    return JobListResponse(
-        jobs=[JobResponse.model_validate(j) for j in jobs],
-        total=len(jobs),
-        skip=skip,
-        limit=limit,
-    )
 
 
 @router.get("/queue/status")
