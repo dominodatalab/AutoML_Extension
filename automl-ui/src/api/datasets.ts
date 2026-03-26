@@ -1,4 +1,4 @@
-import api from './index'
+import api, { getProjectIdFromUrl } from './index'
 import { Dataset, DatasetPreview, DatasetSchema, FileUploadResponse } from '../types/dataset'
 
 interface DatasetListResponse {
@@ -16,6 +16,14 @@ export async function getDataset(datasetId: string): Promise<Dataset | undefined
   // Datasets are listed from mounted paths, find by id
   const { datasets } = await getDatasets()
   return datasets.find(d => d.id === datasetId)
+}
+
+export async function getDatasetFiles(datasetId: string): Promise<Dataset | undefined> {
+  const projectId = getProjectIdFromUrl()
+  const response = await api.get<DatasetListResponse>(`/svcdataset/${encodeURIComponent(datasetId)}/files`, {
+    params: { projectId }
+  })
+  return response.data.datasets[0]
 }
 
 export async function getDatasetPreview(

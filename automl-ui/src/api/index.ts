@@ -4,7 +4,7 @@ import { getBasePath } from '../utils/basePath'
  * Read projectId from URL query parameter (?projectId=...).
  * Returns the value when present, undefined otherwise.
  */
-function getProjectIdFromUrl(): string | undefined {
+export function getProjectIdFromUrl(): string | undefined {
   try {
     const params = new URLSearchParams(window.location.search)
     return params.get('projectId') ?? undefined
@@ -60,8 +60,8 @@ class ApiClient {
 
     let fullUrl: string
     if (DOMINO_MODE) {
-      // Convert to single-segment Domino-safe path (convention: "svc" + endpoint)
-      const mappedPath = toDominoPath(cleanEndpoint)
+      // Preserve explicit compat paths and map everything else to the single-segment convention.
+      const mappedPath = cleanEndpoint.startsWith('svc') ? cleanEndpoint : toDominoPath(cleanEndpoint)
       const basePath = getBasePath()
       fullUrl = `${basePath}/${mappedPath}`
     } else {
