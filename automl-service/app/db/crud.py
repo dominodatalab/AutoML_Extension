@@ -142,6 +142,7 @@ async def get_jobs(
     project_id: Optional[str] = None,
     project_name: Optional[str] = None,
     summary_only: bool = False,
+    execution_target: Optional[str] = None,
 ) -> Sequence[Job]:
     """Get all jobs with optional filtering.
 
@@ -154,6 +155,7 @@ async def get_jobs(
         owner: Filter by owner username (from Domino header)
         project_id: Filter by project ID (from Domino environment)
         project_name: Filter by project name (from Domino environment)
+        execution_target: Filter by job execution target. If none, fetches all
     """
     query = select(Job).order_by(desc(Job.created_at))
     if summary_only:
@@ -187,6 +189,9 @@ async def get_jobs(
                 Job.completed_at,
             )
         )
+
+    if execution_target:
+        query = query.where(Job.execution_target == execution_target)
 
     if status:
         query = query.where(Job.status == status)

@@ -19,7 +19,7 @@ from app.services.job_service import (
     delete_orphans as delete_orphans_service,
     build_job_list_item_response,
     get_job_logs as get_job_logs_service,
-    get_request_owner,
+    get_viewing_user_name,
     list_jobs_filtered,
     preview_cleanup as preview_cleanup_service,
     register_model_for_job,
@@ -81,7 +81,7 @@ def register_custom_job_routes(app: FastAPI) -> None:
     @app.post("/svcjobcleanuppreview")
     async def svc_job_cleanup_preview(request: Request, body: dict = Body(default={})):
         project_id = get_request_project_id(request)
-        owner = get_request_owner(request)
+        owner = get_viewing_user_name()
         async with get_db_session() as db:
             return await preview_cleanup_service(
                 db=db,
@@ -104,7 +104,7 @@ def register_custom_job_routes(app: FastAPI) -> None:
         from app.api.schemas.job import CleanupRequest as CleanupReq
         cleanup_req = CleanupReq(**body)
         project_id = get_request_project_id(request)
-        owner = get_request_owner(request)
+        owner = get_viewing_user_name()
         async with get_db_session() as db:
             return await bulk_cleanup_service(
                 db=db,
@@ -120,7 +120,7 @@ def register_custom_job_routes(app: FastAPI) -> None:
         job_id = body.get("job_id")
         limit = body.get("limit", 100)
         async with get_db_session() as db:
-            logs = await get_job_logs_service(db=db, job_id=job_id, limit=limit, request=request)
+            logs = await get_job_logs_service(db=db, job_id=job_id, limit=limit)
         return [JobLogResponse.model_validate(log) for log in logs]
 
     @app.post("/svcjobcleanuporphans")

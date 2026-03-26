@@ -40,3 +40,28 @@ def require_storage_modify(project_id: Optional[str] = None) -> None:
             status_code=403,
             detail="This operation requires permission to edit the extension.",
         )
+
+
+def _current_user_can_list_jobs(client, project_id: str) -> bool:
+    action = AuthorizedActionRequestItem(
+        id=f"job.project.list_jobs-{project_id}",
+        code="job.project.list_jobs",
+        context={"projectId": project_id},
+    )
+    return authorized_action_allowed(client, action)
+
+def current_user_can_list_jobs(project_id: Optional[str] = None) -> bool:
+    try:
+        client = get_domino_public_api_client_sync()
+        effective_project_id = project_id or resolve_domino_project_id()
+        return _current_user_can_list_jobs(client, effective_project_id)
+    except Exception:
+        logger.exception("Failed to resolve project job listing permissions")
+        return False
+
+def require_job_list(project_id: Optional[str] = None) -> None:
+    if not current_user_can_list_jobs(project_id=project_id):
+        raise HTTPException(
+            status_code=403,
+            detail="This operation requires permission to list jobs in the target project",
+        )

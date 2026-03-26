@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Contains all the data models used in inputs/outputs"""
 
 from .action import Action
