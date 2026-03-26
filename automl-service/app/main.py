@@ -16,6 +16,7 @@ from app.core.websocket_manager import get_websocket_manager
 from app.db.database import create_tables
 from app.api.routes import health, jobs, datasets, predictions, profiling, registry, export, deployments
 from app.core.context.auth import set_request_auth_header
+from app.core.context.user import clear_viewing_user
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL") or logging.INFO,
@@ -126,6 +127,7 @@ def create_app() -> FastAPI:
             response = await call_next(request)
         finally:
             set_request_auth_header(None)
+            clear_viewing_user()
         return response
 
     # Exception handlers

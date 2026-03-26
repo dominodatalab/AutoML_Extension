@@ -435,6 +435,41 @@ class JobResponse(BaseModel):
         from_attributes = True
 
 
+class JobListItemResponse(BaseModel):
+    """Lightweight response schema for job list views."""
+
+    id: str
+    name: str
+    description: Optional[str] = None
+    owner: Optional[str] = None
+    project_id: Optional[str] = None
+    project_name: Optional[str] = None
+    model_type: str
+    problem_type: Optional[str] = None
+    status: str
+    execution_target: str = "local"
+    domino_job_id: Optional[str] = None
+    domino_job_status: Optional[str] = None
+    progress: Optional[int] = None
+    current_step: Optional[str] = None
+    data_source: str
+    dataset_id: Optional[str] = None
+    file_path: Optional[str] = None
+    experiment_name: Optional[str] = None
+    error_message: Optional[str] = None
+    is_registered: bool = False
+    registered_model_name: Optional[str] = None
+    registered_model_version: Optional[str] = None
+    best_model_name: Optional[str] = None
+    best_model_score: Optional[float] = None
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 class JobStatusResponse(BaseModel):
     """Response schema for job status."""
 
@@ -521,7 +556,7 @@ class BulkDeleteJobsResponse(BaseModel):
 class JobListResponse(BaseModel):
     """Response schema for job list."""
 
-    jobs: List[JobResponse]
+    jobs: List[JobListItemResponse]
     total: int
     skip: int
     limit: int

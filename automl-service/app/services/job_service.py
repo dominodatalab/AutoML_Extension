@@ -1,8 +1,10 @@
 """Service helpers for job route orchestration."""
+from __future__ import annotations
 
 import asyncio
 import logging
 import os
+from time import monotonic
 from typing import Optional
 
 from app.core.utils import utc_now
@@ -23,6 +25,7 @@ from app.api.generated.domino_public_api_client.models.job_envelope_v1 import Jo
 
 from app.api.schemas.job import (
     JobCreateRequest,
+    JobListItemResponse,
     JobListRequest,
     JobMetricsResponse,
     JobProgressResponse,
@@ -66,6 +69,14 @@ _DOMINO_MISSING_ERROR_MARKERS = (
 _CANONICAL_GIT_SERVICE_PROVIDER_VALUES = {
     provider.value.lower(): provider.value for provider in GitServiceProviderV1
 }
+_OVERVIEW_SYNC_MIN_INTERVAL_SECONDS = 5.0
+_JOB_SYNC_MIN_INTERVAL_SECONDS = 2.0
+
+_overview_sync_task: Optional[asyncio.Task] = None
+_overview_sync_started_at = 0.0
+_job_sync_tasks: dict[str, asyncio.Task] = {}
+_job_sync_started_at: dict[str, float] = {}
+_background_sync_lock = asyncio.Lock()
 
 
 def _normalize_job_name(name: str) -> str:
@@ -382,12 +393,76 @@ async def create_job_with_context(
     return _attach_external_links(job)
 
 
+def build_job_list_item_response(job: Job) -> dict:
+    """Build a lightweight response dict for job list views."""
+    metrics = job.metrics if hasattr(job, "metrics") else None
+    best_model_name = None
+    best_model_score = None
+    if isinstance(metrics, dict):
+        best_model_name = metrics.get("best_model")
+        best_model_score = metrics.get("best_score") or metrics.get("score_val")
+
+    return {
+        "id": job.id,
+        "name": job.name,
+        "description": job.description,
+        "owner": job.owner,
+        "project_id": job.project_id,
+        "project_name": job.project_name,
+        "model_type": job.model_type.value if hasattr(job.model_type, "value") else str(job.model_type),
+        "problem_type": job.problem_type.value if job.problem_type and hasattr(job.problem_type, "value") else None,
+        "status": job.status.value if hasattr(job.status, "value") else str(job.status),
+        "execution_target": getattr(job, "execution_target", "local") or "local",
+        "domino_job_id": job.domino_job_id,
+        "domino_job_status": job.domino_job_status,
+        "progress": getattr(job, "progress", None),
+        "current_step": getattr(job, "current_step", None),
+        "data_source": job.data_source,
+        "dataset_id": job.dataset_id,
+        "file_path": job.file_path,
+        "experiment_name": job.experiment_name,
+        "error_message": job.error_message,
+        "is_registered": getattr(job, "is_registered", False) or False,
+        "registered_model_name": getattr(job, "registered_model_name", None),
+        "registered_model_version": getattr(job, "registered_model_version", None),
+        "best_model_name": best_model_name,
+        "best_model_score": best_model_score,
+        "created_at": job.created_at,
+        "started_at": job.started_at,
+        "completed_at": job.completed_at,
+    }
+
+
+async def _fail_zombie_local_jobs(db: AsyncSession) -> None:
+    """Detect local jobs marked RUNNING whose asyncio task no longer exists."""
+    try:
+        from app.core.job_queue import get_job_queue
+        queue = get_job_queue()
+
+        running_local = await crud.get_jobs_by_statuses(
+            db,
+            [JobStatus.RUNNING],
+            execution_target="local",
+        )
+        for job in running_local:
+            if job.id not in queue._tasks or queue._tasks[job.id].done():
+                await crud.update_job_status(
+                    db, job.id, JobStatus.FAILED,
+                    error_message="Training process died unexpectedly (likely out of memory)",
+                    completed_at=utc_now(),
+                )
+                logger.warning("Marked zombie local job as FAILED: %s (%s)", job.id, job.name)
+    except Exception:
+        logger.exception("Error checking for zombie local jobs")
+
+
 async def list_jobs_filtered(
     db: AsyncSession,
     list_request: JobListRequest,
     request: Optional[Request] = None,
 ) -> list[Job]:
     """List jobs using advanced POST filters."""
+    await _fail_zombie_local_jobs(db)
     (
         status_filter,
         model_type_filter,
@@ -423,7 +498,8 @@ async def list_jobs_filtered(
         owner=owner_filter,
         project_id=project_id_filter,
         project_name=project_name_filter,
-        execution_target=execution_target_filter
+        summary_only=True,
+        execution_target=execution_target_filter,
     )
 
     return list(jobs)
@@ -545,6 +621,7 @@ async def preview_cleanup(
     statuses: str = "failed,cancelled",
     older_than_days: Optional[int] = None,
     project_id: Optional[str] = None,
+    owner: Optional[str] = None,
 ) -> dict:
     """Preview what would be removed by bulk cleanup."""
     require_storage_modify(project_id=project_id)
@@ -553,7 +630,7 @@ async def preview_cleanup(
 
     cleanup = get_cleanup_service()
     status_list = _parse_statuses_csv(statuses)
-    preview = await cleanup.preview_cleanup(db, status_list, older_than_days, project_id=project_id)
+    preview = await cleanup.preview_cleanup(db, status_list, older_than_days, project_id=project_id, owner=owner)
     orphans = await cleanup.find_orphans_checked(db)
     return {**preview, "orphans": orphans}
 
@@ -564,6 +641,7 @@ async def bulk_cleanup(
     older_than_days: Optional[int] = None,
     include_orphans: bool = False,
     project_id: Optional[str] = None,
+    owner: Optional[str] = None,
 ) -> dict:
     """Delete artifacts and DB rows for jobs matching given criteria."""
     require_storage_modify(project_id=project_id)
@@ -572,7 +650,7 @@ async def bulk_cleanup(
 
     cleanup = get_cleanup_service()
     status_list = [JobStatus(s) for s in statuses]
-    result = await cleanup.bulk_cleanup(db, status_list, older_than_days, project_id=project_id)
+    result = await cleanup.bulk_cleanup(db, status_list, older_than_days, project_id=project_id, owner=owner)
 
     if include_orphans:
         orphan_result = await cleanup.delete_orphans(db)
