@@ -11,6 +11,7 @@ LABEL description="AutoGluon AutoML environment for Domino Data Lab"
 LABEL version="1.0.0"
 
 ARG EXTENSION_VERSION=main
+ARG GITHUB_ORG=dominodatalab
 ARG DUSER=ubuntu
 ARG DGROUP=ubuntu
 ARG DEBIAN_FRONTEND=noninteractive
@@ -60,7 +61,7 @@ RUN chown -R ${DOMINO_USER}:${DOMINO_GROUP} "/home/${DOMINO_USER}"
 WORKDIR /home/${DOMINO_USER}
 
 # TODO refactor the pip installations to also use this
-RUN git clone https://github.com/niole/AutoML_Extension.git --depth 1 --branch $EXTENSION_VERSION
+RUN git clone https://github.com/$GITHUB_ORG/AutoML_Extension.git --depth 1 --branch $EXTENSION_VERSION
 
 WORKDIR /home/${DOMINO_USER}/AutoML_Extension
 
