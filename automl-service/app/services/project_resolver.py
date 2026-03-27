@@ -44,8 +44,9 @@ async def resolve_project(project_id: str) -> Optional[ProjectInfo]:
             return None
 
         data = response.json()
-        name = data.get("name")
-        owner = data.get("ownerUsername")
+        project = data.get("project", data)
+        name = project.get("name")
+        owner = project.get("ownerUsername")
 
         if not name or not owner:
             logger.warning(
