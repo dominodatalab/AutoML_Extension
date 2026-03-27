@@ -215,22 +215,40 @@ def create_app() -> FastAPI:
         manager = get_websocket_manager()
         await manager.connect(websocket, job_id)
         try:
-            from app.api.routes.jobs import get_job_progress
+            from app.db import crud
             from app.services.job_service import _sync_domino_job_state
-            from app.db.models import JobStatus
 
             terminal_statuses = {"completed", "failed", "cancelled"}
             last_status = None
 
+            # Send initial job state (read directly from DB, no auth check)
             async with get_db_session() as db:
                 try:
-                    progress = await get_job_progress(job_id, db)
-                    last_status = progress.status if hasattr(progress, "status") else None
-                    await websocket.send_json({
-                        "type": "initial",
-                        "job_id": job_id,
-                        **jsonable_encoder(progress)
-                    })
+                    job = await crud.get_job(db, job_id)
+                    if job:
+                        if getattr(job, "execution_target", "local") == "domino_job" and job.domino_job_id:
+                            try:
+                                job = await _sync_domino_job_state(db, job, sync_terminal_metadata=True)
+                            except Exception:
+                                pass  # Use stale status if sync fails
+                        last_status = job.status.value if hasattr(job.status, "value") else str(job.status)
+                        await websocket.send_json({
+                            "type": "initial",
+                            "job_id": job_id,
+                            "status": last_status,
+                            "progress": job.progress if hasattr(job, "progress") and job.progress else 0,
+                            "current_step": job.current_step if hasattr(job, "current_step") else None,
+                            "models_trained": job.models_trained if hasattr(job, "models_trained") else 0,
+                            "current_model": job.current_model if hasattr(job, "current_model") else None,
+                            "eta_seconds": job.eta_seconds if hasattr(job, "eta_seconds") else None,
+                            "domino_job_status": getattr(job, "domino_job_status", None),
+                            "started_at": job.started_at.isoformat() if getattr(job, "started_at", None) else None,
+                            "completed_at": job.completed_at.isoformat() if getattr(job, "completed_at", None) else None,
+                        })
+                    else:
+                        await websocket.send_json({
+                            "type": "error", "job_id": job_id, "message": "Job not found"
+                        })
                 except Exception as e:
                     await websocket.send_json({
                         "type": "error", "job_id": job_id, "message": str(e)
@@ -243,20 +261,29 @@ def create_app() -> FastAPI:
                     await asyncio.sleep(5)
                     try:
                         async with get_db_session() as db:
-                            from app.db import crud
                             job = await crud.get_job(db, job_id)
                             if not job:
                                 break
                             if getattr(job, "execution_target", "local") == "domino_job" and job.domino_job_id:
-                                job = await _sync_domino_job_state(db, job, sync_terminal_metadata=True)
+                                try:
+                                    job = await _sync_domino_job_state(db, job, sync_terminal_metadata=True)
+                                except Exception:
+                                    pass
                             current_status = job.status.value if hasattr(job.status, "value") else str(job.status)
                             if current_status != last_status:
                                 last_status = current_status
-                                progress = await get_job_progress(job_id, db)
                                 await websocket.send_json({
                                     "type": "job_update",
                                     "job_id": job_id,
-                                    **jsonable_encoder(progress)
+                                    "status": current_status,
+                                    "progress": job.progress if hasattr(job, "progress") and job.progress else 0,
+                                    "current_step": job.current_step if hasattr(job, "current_step") else None,
+                                    "models_trained": job.models_trained if hasattr(job, "models_trained") else 0,
+                                    "current_model": job.current_model if hasattr(job, "current_model") else None,
+                                    "eta_seconds": job.eta_seconds if hasattr(job, "eta_seconds") else None,
+                                    "domino_job_status": getattr(job, "domino_job_status", None),
+                                    "started_at": job.started_at.isoformat() if getattr(job, "started_at", None) else None,
+                                    "completed_at": job.completed_at.isoformat() if getattr(job, "completed_at", None) else None,
                                 })
                             if current_status in terminal_statuses:
                                 break
