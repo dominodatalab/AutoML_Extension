@@ -985,7 +985,10 @@ async def get_job_or_404(db: AsyncSession, job_id: str, owner_user_name: str) ->
         if job.domino_job_id:
             await asyncio.to_thread(_fetch_domino_job_or_throw, job.domino_job_id)
         else:
-            raise HTTPException(status_code=500, detail="No domino job ID exists for domino_job, so cannot authorize")
+            # No domino_job_id yet (pending submission or failed before launch) —
+            # fall back to owner check
+            if job.owner != owner_user_name:
+                raise HTTPException(status_code=403, detail="Forbidden")
     return job
 
 
