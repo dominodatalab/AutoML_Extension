@@ -2,6 +2,7 @@
 
 from fastapi import Body, FastAPI, File, UploadFile, Request, HTTPException
 from typing import Optional
+from app.api.schemas.dataset import CompatDatasetPreviewRequest
 from app.services.dataset_service import (
     build_compat_dataset_preview_payload,
     get_dataset_manager,
@@ -27,8 +28,13 @@ def register_custom_dataset_routes(app: FastAPI) -> None:
         return await list_datasets_response(get_dataset_manager(), project_id)
 
     @app.post("/svcdatasetpreview")
-    async def svc_dataset_preview(body: dict = Body(default={})):
-        return await build_compat_dataset_preview_payload(get_dataset_manager(), body)
+    async def svc_dataset_preview(
+        body: CompatDatasetPreviewRequest = Body(default_factory=CompatDatasetPreviewRequest),
+    ):
+        return await build_compat_dataset_preview_payload(
+            get_dataset_manager(),
+            body,
+        )
 
     @app.post("/svcupload")
     async def svc_upload_file(file: UploadFile = File(...)):

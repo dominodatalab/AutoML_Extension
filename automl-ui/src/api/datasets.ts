@@ -29,10 +29,12 @@ export async function getDatasetFiles(datasetId: string): Promise<Dataset | unde
 export async function getDatasetPreview(
   filePath: string,
   limit: number = 100,
-  offset: number = 0
+  offset: number = 0,
+  datasetId: string | undefined = undefined,
 ): Promise<DatasetPreview> {
   // Use POST with file_path in body (no query params in Domino)
   const response = await api.post<DatasetPreview>('/datasetpreview', {
+    dataset_id: datasetId,
     file_path: filePath,
     limit,
     offset

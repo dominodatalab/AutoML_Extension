@@ -30,6 +30,7 @@ from app.services.dataset_service import (
     MAX_PREVIEW_LIMIT,
     _safe_int,
     build_preview_payload,
+    build_compat_dataset_preview_payload,
     coerce_preview_response,
     list_dataset_files_response,
     list_datasets_response,
@@ -369,6 +370,122 @@ class TestCoercePreviewResponse:
 
         result = coerce_preview_response(DualModel())
         assert result["dataset_id"] == "from-model-dump"
+
+
+# ---------------------------------------------------------------------------
+# build_compat_dataset_preview_payload
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_build_compat_dataset_preview_payload_fetches_dataset_file_over_api(monkeypatch):
+    calls = []
+
+    async def fake_get_snapshots(dataset_id):
+        calls.append(("snapshots", dataset_id))
+        return [
+            {"id": "snap-old", "version": 1, "creationTime": 100},
+            {"id": "snap-new", "version": 2, "creationTime": 200},
+        ]
+
+    async def fake_get_file_metadata(snapshot_id, path):
+        calls.append(("metadata", snapshot_id, path))
+        return {"fileSize": 14, "exceedsSizeLimit": False}
+
+    async def fake_get_file_raw(snapshot_id, path):
+        calls.append(("raw", snapshot_id, path))
+        return b"id,target\n1,0\n"
+
+    monkeypatch.setattr(
+        "app.services.dataset_service.domino_http.domino_get_dataset_rw_snapshots",
+        fake_get_snapshots,
+    )
+    monkeypatch.setattr(
+        "app.services.dataset_service.domino_http.domino_get_dataset_snapshot_file_metadata",
+        fake_get_file_metadata,
+    )
+    monkeypatch.setattr(
+        "app.services.dataset_service.domino_http.domino_get_dataset_snapshot_file_raw",
+        fake_get_file_raw,
+    )
+
+    result = await build_compat_dataset_preview_payload(
+        dataset_manager=_ExplodingDatasetManager(),
+        body={
+            "dataset_id": "ds-123",
+            "file_path": "folder/train.csv",
+            "limit": 25,
+            "offset": 10,
+        },
+    )
+
+    assert calls == [
+        ("snapshots", "ds-123"),
+        ("metadata", "snap-new", "folder/train.csv"),
+        ("raw", "snap-new", "folder/train.csv"),
+    ]
+    assert result["dataset_id"] == "ds-123"
+    assert result["file_path"] == "folder/train.csv"
+    assert result["file_name"] == "train.csv"
+    assert result["columns"] == ["placeholder_column"]
+    assert result["rows"] == [{"placeholder_column": "fetched_14_bytes"}]
+    assert result["dtypes"] == {"placeholder_column": "string"}
+    assert result["total_rows"] == 1
+    assert result["preview_rows"] == 1
+
+
+@pytest.mark.asyncio
+async def test_build_compat_dataset_preview_payload_rejects_large_remote_file(monkeypatch):
+    calls = []
+
+    async def fake_get_snapshots(dataset_id):
+        calls.append(("snapshots", dataset_id))
+        return [{"id": "snap-large", "version": 7, "creationTime": 700}]
+
+    async def fake_get_file_metadata(snapshot_id, path):
+        calls.append(("metadata", snapshot_id, path))
+        return {"fileSize": 524288001, "exceedsSizeLimit": False}
+
+    async def fake_get_file_raw(snapshot_id, path):
+        raise AssertionError("raw file download should not happen for oversized previews")
+
+    monkeypatch.setattr(
+        "app.services.dataset_service.domino_http.domino_get_dataset_rw_snapshots",
+        fake_get_snapshots,
+    )
+    monkeypatch.setattr(
+        "app.services.dataset_service.domino_http.domino_get_dataset_snapshot_file_metadata",
+        fake_get_file_metadata,
+    )
+    monkeypatch.setattr(
+        "app.services.dataset_service.domino_http.domino_get_dataset_snapshot_file_raw",
+        fake_get_file_raw,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await build_compat_dataset_preview_payload(
+            dataset_manager=object(),
+            body={"dataset_id": "ds-large", "file_path": "folder/huge.parquet"},
+        )
+
+    assert exc_info.value.status_code == 413
+    assert "Dataset file is too large to preview over API" in exc_info.value.detail
+    assert calls == [
+        ("snapshots", "ds-large"),
+        ("metadata", "snap-large", "folder/huge.parquet"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_build_compat_dataset_preview_payload_rejects_incomplete_request():
+    with pytest.raises(HTTPException) as exc_info:
+        await build_compat_dataset_preview_payload(
+            dataset_manager=object(),
+            body={"dataset_id": "ds-456", "limit": 7},
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "dataset_id and file_path are required"
 
 
 # ---------------------------------------------------------------------------
