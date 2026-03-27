@@ -332,7 +332,7 @@ async def list_datasets_response(
             id=dataset.id,
             name=dataset.name,
             path=None,
-            description=dataset.description,
+            description=_first_defined(dataset.description),
             size_bytes=0,
             created_at=dataset.created_at,
             updated_at=None,

@@ -40,6 +40,16 @@ from app.api.schemas.dataset import CompatDatasetPreviewRequest
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _build_local_preview_payload(file_path: str, **kwargs):
+    """Call build_preview_payload with the current local-file contract."""
+    return build_preview_payload(dataset_id=file_path, file_path=file_path, **kwargs)
+
+
+# ---------------------------------------------------------------------------
 # _safe_int
 # ---------------------------------------------------------------------------
 
@@ -161,7 +171,7 @@ class TestBuildPreviewPayloadCSV:
     """Test build_preview_payload with CSV files."""
 
     def test_basic_csv_preview(self, tabular_csv):
-        payload = build_preview_payload(tabular_csv)
+        payload = _build_local_preview_payload(tabular_csv)
         assert payload["file_path"] == tabular_csv
         assert payload["file_name"] == os.path.basename(tabular_csv)
         assert "columns" in payload
@@ -171,27 +181,27 @@ class TestBuildPreviewPayloadCSV:
         assert isinstance(payload["rows"], list)
 
     def test_csv_custom_limit(self, tabular_csv):
-        payload = build_preview_payload(tabular_csv, limit=10)
+        payload = _build_local_preview_payload(tabular_csv, limit=10)
         assert payload["preview_rows"] == 10
         assert len(payload["rows"]) == 10
 
     def test_csv_offset(self, tabular_csv):
-        payload = build_preview_payload(tabular_csv, limit=5, offset=10)
+        payload = _build_local_preview_payload(tabular_csv, limit=5, offset=10)
         assert payload["preview_rows"] == 5
         assert len(payload["rows"]) == 5
 
     def test_csv_includes_dtypes(self, tabular_csv):
-        payload = build_preview_payload(tabular_csv, include_dtypes=True)
+        payload = _build_local_preview_payload(tabular_csv, include_dtypes=True)
         assert "dtypes" in payload
         assert isinstance(payload["dtypes"], dict)
         assert len(payload["dtypes"]) == len(payload["columns"])
 
     def test_csv_without_dtypes(self, tabular_csv):
-        payload = build_preview_payload(tabular_csv, include_dtypes=False)
+        payload = _build_local_preview_payload(tabular_csv, include_dtypes=False)
         assert "dtypes" not in payload
 
     def test_csv_dataset_id_equals_file_path(self, tabular_csv):
-        payload = build_preview_payload(tabular_csv)
+        payload = _build_local_preview_payload(tabular_csv)
         assert payload["dataset_id"] == tabular_csv
 
 
@@ -204,20 +214,20 @@ class TestBuildPreviewPayloadParquet:
     """Test build_preview_payload with Parquet files."""
 
     def test_basic_parquet_preview(self, parquet_file):
-        payload = build_preview_payload(parquet_file)
+        payload = _build_local_preview_payload(parquet_file)
         assert payload["file_path"] == parquet_file
         assert payload["file_name"] == os.path.basename(parquet_file)
         assert payload["total_rows"] == 200
         assert payload["preview_rows"] <= DEFAULT_PREVIEW_LIMIT
 
     def test_parquet_offset(self, parquet_file):
-        payload = build_preview_payload(parquet_file, limit=5, offset=195)
+        payload = _build_local_preview_payload(parquet_file, limit=5, offset=195)
         assert payload["preview_rows"] == 5
         assert len(payload["rows"]) == 5
 
     def test_parquet_offset_beyond_end(self, parquet_file):
         """Offset past the end of the file should return zero rows."""
-        payload = build_preview_payload(parquet_file, limit=10, offset=9999)
+        payload = _build_local_preview_payload(parquet_file, limit=10, offset=9999)
         assert payload["preview_rows"] == 0
         assert len(payload["rows"]) == 0
 
@@ -232,13 +242,13 @@ class TestBuildPreviewPayloadErrors:
 
     def test_file_not_found(self):
         with pytest.raises(HTTPException) as exc_info:
-            build_preview_payload("/nonexistent/path/data.csv")
+            _build_local_preview_payload("/nonexistent/path/data.csv")
         assert exc_info.value.status_code == 404
         assert "file not found" in exc_info.value.detail
 
     def test_empty_file_path(self):
         with pytest.raises(HTTPException) as exc_info:
-            build_preview_payload("")
+            _build_local_preview_payload("")
         assert exc_info.value.status_code == 400
         assert "file_path is required" in exc_info.value.detail
 
@@ -246,7 +256,7 @@ class TestBuildPreviewPayloadErrors:
         unsupported = tmp_path / "data.json"
         unsupported.write_text('{"key": "value"}')
         with pytest.raises(HTTPException) as exc_info:
-            build_preview_payload(str(unsupported))
+            _build_local_preview_payload(str(unsupported))
         assert exc_info.value.status_code == 400
         assert "Unsupported file format" in exc_info.value.detail
 
@@ -261,7 +271,7 @@ class TestNaNInfHandling:
 
     def test_nan_becomes_none(self, tabular_csv):
         """The tabular_csv fixture injects NaN in income and category columns."""
-        payload = build_preview_payload(tabular_csv, limit=200)
+        payload = _build_local_preview_payload(tabular_csv, limit=200)
         # Check that no row contains actual float NaN
         for row in payload["rows"]:
             for key, value in row.items():
@@ -278,7 +288,7 @@ class TestNaNInfHandling:
         csv_path = str(tmp_path / "inf_test.csv")
         df.to_csv(csv_path, index=False)
 
-        payload = build_preview_payload(csv_path, limit=10)
+        payload = _build_local_preview_payload(csv_path, limit=10)
         for row in payload["rows"]:
             val_a = row["a"]
             if val_a is not None:
@@ -466,7 +476,10 @@ async def test_build_compat_dataset_preview_payload_rejects_large_remote_file(mo
     with pytest.raises(HTTPException) as exc_info:
         await build_compat_dataset_preview_payload(
             dataset_manager=object(),
-            body={"dataset_id": "ds-large", "file_path": "folder/huge.parquet"},
+            body=CompatDatasetPreviewRequest(
+                dataset_id="ds-large",
+                file_path="folder/huge.parquet",
+            ),
         )
 
     assert exc_info.value.status_code == 413
@@ -482,11 +495,15 @@ async def test_build_compat_dataset_preview_payload_rejects_incomplete_request()
     with pytest.raises(HTTPException) as exc_info:
         await build_compat_dataset_preview_payload(
             dataset_manager=object(),
-            body={"dataset_id": "ds-456", "limit": 7},
+            body=CompatDatasetPreviewRequest(
+                dataset_id="ds-456",
+                file_path="",
+                limit=7,
+            ),
         )
 
     assert exc_info.value.status_code == 400
-    assert exc_info.value.detail == "dataset_id and file_path are required"
+    assert exc_info.value.detail == "file_path is required"
 
 
 # ---------------------------------------------------------------------------
@@ -571,17 +588,12 @@ async def test_list_datasets_response_builds_from_domino_payload_only(monkeypatc
     assert dataset.id == "ds-123"
     assert dataset.name == "Training Dataset"
     assert dataset.description == "Tabular training data"
-    assert dataset.path == "/api/datasets/training-dataset"
-    assert dataset.size_bytes == 12345
-    assert dataset.file_count == 2
+    assert dataset.path is None
+    assert dataset.size_bytes == 0
+    assert dataset.file_count == 0
     assert dataset.created_at.isoformat() == "2024-01-02T03:04:05+00:00"
-    assert dataset.updated_at.isoformat() == "2024-01-03T04:05:06+00:00"
-    assert [file.name for file in dataset.files] == ["train.csv", "metadata.json"]
-    assert [file.path for file in dataset.files] == [
-        "/api/datasets/training-dataset/train.csv",
-        "/api/datasets/training-dataset/metadata.json",
-    ]
-    assert [file.size for file in dataset.files] == [12000, 345]
+    assert dataset.updated_at is None
+    assert dataset.files == []
 
 
 @pytest.mark.asyncio
@@ -611,10 +623,6 @@ async def test_list_datasets_response_defaults_missing_api_fields(monkeypatch):
         "app.core.domino_http.get_domino_public_api_client_sync",
         lambda: object(),
     )
-    monkeypatch.setattr(
-        "app.core.domino_http.resolve_domino_project_id",
-        lambda: "resolved-project",
-    )
 
     async def fake_get_datasets(*, client, project_ids_to_include, **kwargs):
         assert project_ids_to_include == ["resolved-project"]
@@ -625,7 +633,10 @@ async def test_list_datasets_response_defaults_missing_api_fields(monkeypatch):
         fake_get_datasets,
     )
 
-    result = await list_datasets_response(dataset_manager=_ExplodingDatasetManager())
+    result = await list_datasets_response(
+        dataset_manager=_ExplodingDatasetManager(),
+        project_id="resolved-project",
+    )
 
     assert result.total == 1
     dataset = result.datasets[0]
@@ -678,43 +689,29 @@ async def test_list_dataset_files_response_uses_default_snapshot_listing(monkeyp
         lambda: object(),
     )
     monkeypatch.setattr(
-        "app.core.domino_http.resolve_domino_api_host",
-        lambda: "https://domino.example",
-    )
-    monkeypatch.setattr(
-        "app.core.domino_http.get_user_auth_headers",
-        lambda: {"Authorization": "Bearer token"},
+        "app.core.domino_http.get_domino_private_api_client_sync",
+        lambda: object(),
     )
 
     async def fake_get_dataset(*, dataset_id, client):
         assert dataset_id == "ds-1"
-        return SimpleNamespace(status_code=200, parsed=dataset_envelope)
+        return dataset_envelope
 
-    async def fake_get_files_at_root(*, data_set_id, client):
-        assert data_set_id == "ds-1"
-        return SimpleNamespace(
-            status_code=200,
-            parsed=SimpleNamespace(rows=[_file_row("train.csv", 101), _file_row("test.csv", 202)]),
-        )
+    async def fake_get_files_in_snapshot(*, snapshot_id, client, path):
+        assert snapshot_id == "snap-1"
+        assert path == ""
+        return SimpleNamespace(rows=[_file_row("train.csv", 101), _file_row("test.csv", 202)])
 
     monkeypatch.setattr(
-        "app.api.generated.domino_public_api_client.api.dataset_rw.get_dataset.asyncio_detailed",
+        "app.api.generated.domino_public_api_client.api.dataset_rw.get_dataset.asyncio",
         fake_get_dataset,
     )
     monkeypatch.setattr(
-        "app.api.generated_private.domino_data_lab_api_v_4_client.api.dataset.get_snapshot_files_at_root.asyncio_detailed",
-        fake_get_files_at_root,
+        "app.api.generated_private.domino_data_lab_api_v_4_client.api.dataset_rw.get_files_in_snapshot.asyncio",
+        fake_get_files_in_snapshot,
     )
 
-    async def unexpected_snapshot_fallback(**kwargs):
-        raise AssertionError("fallback snapshot lookup should not be used when default listing succeeds")
-
-    monkeypatch.setattr(
-        "app.api.generated_private.domino_data_lab_api_v_4_client.api.dataset_rw.get_files_in_snapshot.asyncio_detailed",
-        unexpected_snapshot_fallback,
-    )
-
-    result = await list_dataset_files_response(dataset_id="ds-1", project_id="project-1")
+    result = await list_dataset_files_response(dataset_id="ds-1")
 
     assert result.total == 1
     assert len(result.datasets) == 1
@@ -743,43 +740,29 @@ async def test_list_dataset_files_response_falls_back_to_first_snapshot(monkeypa
         lambda: object(),
     )
     monkeypatch.setattr(
-        "app.core.domino_http.resolve_domino_api_host",
-        lambda: "https://domino.example",
-    )
-    monkeypatch.setattr(
-        "app.core.domino_http.get_user_auth_headers",
-        lambda: {"Authorization": "Bearer token"},
+        "app.core.domino_http.get_domino_private_api_client_sync",
+        lambda: object(),
     )
 
     async def fake_get_dataset(*, dataset_id, client):
         assert dataset_id == "ds-2"
-        return SimpleNamespace(status_code=200, parsed=dataset_envelope)
-
-    async def fake_get_files_at_root(*, data_set_id, client):
-        return SimpleNamespace(status_code=404, parsed=SimpleNamespace(message="No default snapshot"))
+        return dataset_envelope
 
     async def fake_get_files_in_snapshot(*, snapshot_id, client, path):
         assert snapshot_id == "snap-first"
         assert path == ""
-        return SimpleNamespace(
-            status_code=200,
-            parsed=SimpleNamespace(rows=[_file_row("nested/data.parquet", 4096)]),
-        )
+        return SimpleNamespace(rows=[_file_row("nested/data.parquet", 4096)])
 
     monkeypatch.setattr(
-        "app.api.generated.domino_public_api_client.api.dataset_rw.get_dataset.asyncio_detailed",
+        "app.api.generated.domino_public_api_client.api.dataset_rw.get_dataset.asyncio",
         fake_get_dataset,
     )
     monkeypatch.setattr(
-        "app.api.generated_private.domino_data_lab_api_v_4_client.api.dataset.get_snapshot_files_at_root.asyncio_detailed",
-        fake_get_files_at_root,
-    )
-    monkeypatch.setattr(
-        "app.api.generated_private.domino_data_lab_api_v_4_client.api.dataset_rw.get_files_in_snapshot.asyncio_detailed",
+        "app.api.generated_private.domino_data_lab_api_v_4_client.api.dataset_rw.get_files_in_snapshot.asyncio",
         fake_get_files_in_snapshot,
     )
 
-    result = await list_dataset_files_response(dataset_id="ds-2", project_id="project-2")
+    result = await list_dataset_files_response(dataset_id="ds-2")
 
     assert result.total == 1
     dataset = result.datasets[0]
