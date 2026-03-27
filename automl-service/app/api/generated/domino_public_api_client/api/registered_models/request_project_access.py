@@ -1,3 +1,4 @@
+from __future__ import annotations
 from http import HTTPStatus
 from typing import Any, cast
 from urllib.parse import quote

@@ -9,7 +9,6 @@ import os
 import logging
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
-from datetime import datetime
 import httpx
 
 from app.config import get_settings
@@ -37,18 +36,6 @@ class DominoModelAPIClient:
                 "Domino API host is not configured. Set DOMINO_API_PROXY or DOMINO_API_HOST."
             )
         return api_host.rstrip("/")
-
-    async def _get_ephemeral_token(self) -> Optional[str]:
-        """Get a short-lived Domino access token for this request."""
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as token_client:
-                # TODO this url must be dynamically resolved
-                response = await token_client.get("http://localhost:8899/access-token")
-            if response.status_code == 200 and response.text:
-                return response.text.strip()
-        except Exception as exc:
-            logger.debug(f"Local token endpoint not available: {exc}")
-        return None
 
     @staticmethod
     def _extract_error(response: httpx.Response) -> str:

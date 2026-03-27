@@ -7,8 +7,6 @@ import uuid
 from functools import lru_cache
 from typing import Any, Optional, Sequence
 
-import numpy as np
-import pandas as pd
 from fastapi import HTTPException, UploadFile
 
 from app.api.schemas.dataset import (
@@ -21,6 +19,10 @@ from app.api.schemas.dataset import (
 from app.config import get_settings
 from app.core.dataset_mounts import resolve_dataset_mount_paths
 from app.core.dataset_manager import DominoDatasetManager
+from app.core.tabular_data import (
+    get_tabular_metadata,
+    read_tabular_preview,
+)
 
 ALLOWED_UPLOAD_EXTENSIONS = (".csv", ".parquet", ".pq")
 DEFAULT_PREVIEW_LIMIT = 100
@@ -108,17 +110,34 @@ def filter_local_datasets(
 
 async def list_datasets_response(
     dataset_manager: DominoDatasetManager,
+    project_id: Optional[str] = None,
+    include_files: bool = True,
 ) -> DatasetListResponse:
-    """List available local datasets in API response shape."""
-    datasets = await dataset_manager.list_datasets()
-    dataset_mount_roots = get_dataset_mount_roots()
-    filtered_datasets = filter_local_datasets(datasets, local_paths=dataset_mount_roots)
+    """List available datasets in API response shape.
+
+    When *project_id* is provided, the Domino Dataset API is used to return
+    only datasets that belong to the given project. Falls back to the
+    legacy filesystem-scan approach otherwise.
+    """
+    datasets = await dataset_manager.list_datasets(
+        project_id=project_id,
+        include_files=include_files,
+    )
+
+    # When datasets came from the API (project-scoped), no extra local
+    # filtering is needed. Only apply the mount-path filter for the
+    # filesystem-scan fallback (no project_id).
+    if project_id:
+        filtered_datasets = datasets
+    else:
+        dataset_mount_roots = get_dataset_mount_roots()
+        filtered_datasets = filter_local_datasets(datasets, local_paths=dataset_mount_roots)
 
     logger.info(
-        "Returning %s datasets (filtered from %s) using roots %s",
+        "Returning %s datasets (from %s total, project_id=%s)",
         len(filtered_datasets),
         len(datasets),
-        ", ".join(dataset_mount_roots) if dataset_mount_roots else "(none)",
+        project_id or "(none)",
     )
     return DatasetListResponse(datasets=filtered_datasets, total=len(filtered_datasets))
 
@@ -126,9 +145,10 @@ async def list_datasets_response(
 async def get_dataset_or_404(
     dataset_manager: DominoDatasetManager,
     dataset_id: str,
+    include_files: bool = True,
 ) -> DatasetResponse:
     """Get dataset details or raise a 404."""
-    dataset = await dataset_manager.get_dataset(dataset_id)
+    dataset = await dataset_manager.get_dataset(dataset_id, include_files=include_files)
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
     return dataset
@@ -190,34 +210,27 @@ def build_preview_payload(
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
 
-    file_ext = os.path.splitext(file_path)[1].lower()
+    try:
+        preview = read_tabular_preview(
+            file_path,
+            limit=limit,
+            offset=offset,
+            include_dtypes=include_dtypes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Unsupported file format") from exc
 
-    if file_ext == ".csv":
-        with open(file_path, "r") as f:
-            total_rows = max(sum(1 for _ in f) - 1, 0)
-        if offset > 0:
-            df = pd.read_csv(file_path, skiprows=range(1, offset + 1), nrows=limit)
-        else:
-            df = pd.read_csv(file_path, nrows=limit)
-    elif file_ext in [".parquet", ".pq"]:
-        df_full = pd.read_parquet(file_path)
-        total_rows = len(df_full)
-        df = df_full.iloc[offset : offset + limit]
-    else:
-        raise HTTPException(status_code=400, detail="Unsupported file format")
-
-    safe_df = df.replace({np.nan: None, np.inf: None, -np.inf: None})
     payload: dict[str, Any] = {
         "dataset_id": file_path,
         "file_path": file_path,
         "file_name": os.path.basename(file_path),
-        "columns": list(df.columns),
-        "rows": safe_df.to_dict(orient="records"),
-        "total_rows": total_rows,
-        "preview_rows": len(df),
+        "columns": preview["columns"],
+        "rows": preview["rows"],
+        "total_rows": preview["total_rows"],
+        "preview_rows": preview["preview_rows"],
     }
     if include_dtypes:
-        payload["dtypes"] = {col: str(dtype) for col, dtype in df.dtypes.items()}
+        payload["dtypes"] = preview.get("dtypes", {})
 
     return payload
 
@@ -288,7 +301,9 @@ async def build_compat_dataset_preview_payload(
     raise HTTPException(status_code=400, detail="Either file_path or dataset_id is required")
 
 
-async def save_uploaded_file(file: UploadFile) -> FileUploadResponse:
+async def save_uploaded_file(
+    file: UploadFile, upload_dir: Optional[str] = None
+) -> FileUploadResponse:
     """Save an uploaded dataset file and return metadata."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
@@ -300,7 +315,8 @@ async def save_uploaded_file(file: UploadFile) -> FileUploadResponse:
             detail=f"File type not supported. Allowed: {list(ALLOWED_UPLOAD_EXTENSIONS)}",
         )
 
-    upload_dir = get_settings().uploads_path
+    if upload_dir is None:
+        upload_dir = get_settings().uploads_path
     os.makedirs(upload_dir, exist_ok=True)
 
     unique_id = str(uuid.uuid4())[:8]
@@ -314,15 +330,9 @@ async def save_uploaded_file(file: UploadFile) -> FileUploadResponse:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {exc}") from exc
 
     try:
-        if file_ext == ".csv":
-            header_df = pd.read_csv(file_path, nrows=0)
-            with open(file_path, "r") as f:
-                row_count = max(sum(1 for _ in f) - 1, 0)
-        else:
-            header_df = pd.read_parquet(file_path)
-            row_count = len(header_df)
-
-        columns = list(header_df.columns)
+        metadata = get_tabular_metadata(file_path)
+        columns = metadata.columns
+        row_count = metadata.total_rows
         file_size = os.path.getsize(file_path)
     except Exception as exc:
         os.remove(file_path)

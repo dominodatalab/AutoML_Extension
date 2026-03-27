@@ -53,15 +53,21 @@ class CleanupService:
         if (
             job.data_source == "upload"
             and job.file_path
-            and os.path.exists(job.file_path)
         ):
             try:
                 ref_count = await crud.count_jobs_with_file_path(db, job.file_path)
                 # ref_count includes the current job (not yet deleted from DB)
                 if ref_count <= 1:
-                    os.remove(job.file_path)
-                    upload_file_deleted = True
-                    logger.info(f"Deleted upload file {job.file_path}")
+                    # Delete from local filesystem if present
+                    if os.path.exists(job.file_path):
+                        os.remove(job.file_path)
+                        upload_file_deleted = True
+                        logger.info(f"Deleted upload file {job.file_path}")
+
+                    # Also delete from the Domino dataset snapshot (best-effort)
+                    await self._delete_file_from_dataset(job, errors)
+                    if not upload_file_deleted:
+                        upload_file_deleted = True
                 else:
                     logger.info(
                         f"Skipped upload file {job.file_path} — "
@@ -118,9 +124,10 @@ class CleanupService:
         statuses: list[JobStatus],
         older_than_days: Optional[int] = None,
         project_id: Optional[str] = None,
+        owner: Optional[str] = None,
     ) -> dict:
         """Dry-run: summarize what would be deleted without actually deleting."""
-        jobs = await crud.get_jobs_for_cleanup(db, statuses, older_than_days, project_id=project_id)
+        jobs = await crud.get_jobs_for_cleanup(db, statuses, older_than_days, project_id=project_id, owner=owner)
 
         total_model_size = 0
         total_upload_size = 0
@@ -177,9 +184,10 @@ class CleanupService:
         statuses: list[JobStatus],
         older_than_days: Optional[int] = None,
         project_id: Optional[str] = None,
+        owner: Optional[str] = None,
     ) -> dict:
         """Delete artifacts and DB rows for all matching jobs."""
-        jobs = await crud.get_jobs_for_cleanup(db, statuses, older_than_days, project_id=project_id)
+        jobs = await crud.get_jobs_for_cleanup(db, statuses, older_than_days, project_id=project_id, owner=owner)
 
         total_model_size = 0
         total_upload_files = 0
@@ -210,6 +218,70 @@ class CleanupService:
             "errors": all_errors,
         }
 
+    async def _delete_file_from_dataset(self, job: Job, errors: list) -> None:
+        """Best-effort deletion of an uploaded file from the Domino dataset snapshot."""
+        try:
+            from app.services.storage_resolver import get_storage_resolver, DATASET_NAME
+
+            dataset_id = getattr(job, "dataset_id", None)
+            file_path = job.file_path or ""
+
+            if not dataset_id or not file_path:
+                return
+
+            # Derive the relative path within the dataset.
+            # Mount paths end with /{dataset_name}/, so split on that.
+            marker = f"/{DATASET_NAME}/"
+            if marker in file_path:
+                relative_path = file_path.split(marker, 1)[1]
+            else:
+                # Fallback: use just the uploads/... portion
+                parts = file_path.split("/uploads/", 1)
+                if len(parts) == 2:
+                    relative_path = f"uploads/{parts[1]}"
+                else:
+                    logger.debug(
+                        "Cannot derive relative dataset path from %s", file_path
+                    )
+                    return
+
+            resolver = get_storage_resolver()
+            rw_sid = await resolver.get_rw_snapshot_id(dataset_id)
+            if not rw_sid:
+                logger.debug(
+                    "No RW snapshot ID for dataset %s, skipping dataset file deletion",
+                    dataset_id,
+                )
+                return
+
+            await resolver.delete_snapshot_files(rw_sid, [relative_path])
+        except Exception as e:
+            errors.append(f"dataset_file_delete: {e}")
+            logger.warning(
+                "Failed to delete file from dataset snapshot for job %s: %s",
+                job.id,
+                e,
+            )
+
+    def _collect_artifact_roots(self) -> tuple[list[str], list[str]]:
+        """Return (model_roots, upload_roots) including dataset mount paths."""
+        from app.services.storage_resolver import _MOUNT_TEMPLATES, DATASET_NAME
+
+        model_roots = [self.settings.models_path]
+        upload_roots = [self.settings.uploads_path]
+
+        # Probe known dataset mount locations for automl-extension
+        for template in _MOUNT_TEMPLATES:
+            mount = template.format(name=DATASET_NAME)
+            models_candidate = os.path.join(mount, "models")
+            uploads_candidate = os.path.join(mount, "uploads")
+            if os.path.isdir(models_candidate) and models_candidate not in model_roots:
+                model_roots.append(models_candidate)
+            if os.path.isdir(uploads_candidate) and uploads_candidate not in upload_roots:
+                upload_roots.append(uploads_candidate)
+
+        return model_roots, upload_roots
+
     def find_orphans(self) -> dict:
         """Scan model, upload, and mlruns directories for orphaned artifacts.
 
@@ -220,28 +292,30 @@ class CleanupService:
         orphaned_models = []
         orphaned_uploads = []
 
-        # Scan models directory for job_* dirs
-        models_path = self.settings.models_path
-        if os.path.isdir(models_path):
-            for entry in os.scandir(models_path):
-                if entry.is_dir() and entry.name.startswith("job_"):
-                    size = _dir_size(entry.path)
-                    orphaned_models.append({
-                        "path": entry.path,
-                        "size_bytes": size,
-                        "name": entry.name,
-                    })
+        model_roots, upload_roots = self._collect_artifact_roots()
 
-        # Scan uploads directory
-        uploads_path = self.settings.uploads_path
-        if os.path.isdir(uploads_path):
-            for entry in os.scandir(uploads_path):
-                if entry.is_file():
-                    orphaned_uploads.append({
-                        "path": entry.path,
-                        "size_bytes": entry.stat().st_size,
-                        "name": entry.name,
-                    })
+        # Scan models directories for job_* dirs
+        for models_path in model_roots:
+            if os.path.isdir(models_path):
+                for entry in os.scandir(models_path):
+                    if entry.is_dir() and entry.name.startswith("job_"):
+                        size = _dir_size(entry.path)
+                        orphaned_models.append({
+                            "path": entry.path,
+                            "size_bytes": size,
+                            "name": entry.name,
+                        })
+
+        # Scan uploads directories
+        for uploads_path in upload_roots:
+            if os.path.isdir(uploads_path):
+                for entry in os.scandir(uploads_path):
+                    if entry.is_file():
+                        orphaned_uploads.append({
+                            "path": entry.path,
+                            "size_bytes": entry.stat().st_size,
+                            "name": entry.name,
+                        })
 
         # Scan mlruns directory for run folders
         orphaned_mlflow_runs = _scan_mlruns_for_orphans()

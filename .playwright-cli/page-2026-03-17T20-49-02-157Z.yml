@@ -1,0 +1,50 @@
+- main [ref=e4]:
+  - generic [ref=e55]:
+    - generic [ref=e56]:
+      - navigation [ref=e57]:
+        - link "AutoML" [ref=e58] [cursor=pointer]:
+          - /url: /dashboard
+        - generic [ref=e59]: /
+        - generic [ref=e60]: New training job
+      - generic [ref=e62]:
+        - heading "New training job" [level=1] [ref=e63]
+        - paragraph [ref=e64]: Configure and run an AutoGluon training job
+    - navigation "Progress" [ref=e66]:
+      - list [ref=e67]:
+        - listitem [ref=e68]:
+          - button [ref=e71] [cursor=pointer]:
+            - img [ref=e128]
+          - generic [ref=e73]: Data Source
+        - listitem [ref=e74]:
+          - button [ref=e79] [cursor=pointer]
+          - generic [ref=e81]: Model Type
+        - listitem [ref=e82]:
+          - button [disabled] [ref=e87]
+          - generic [ref=e89]: Configuration
+        - listitem [ref=e90]:
+          - button [disabled] [ref=e93]
+          - generic [ref=e95]: Review
+    - generic [ref=e130]:
+      - generic [ref=e131]:
+        - heading "Select Model Type" [level=2] [ref=e132]
+        - paragraph [ref=e133]: Choose the AutoGluon predictor that best fits your use case
+      - generic [ref=e134]:
+        - button "Tabular For structured data with rows and columns Classification & regression Equipment failure prediction Well log analysis" [ref=e135] [cursor=pointer]:
+          - img [ref=e136]
+          - heading "Tabular" [level=3] [ref=e138]
+          - paragraph [ref=e139]: For structured data with rows and columns
+          - list [ref=e140]:
+            - listitem [ref=e141]: Classification & regression
+            - listitem [ref=e143]: Equipment failure prediction
+            - listitem [ref=e145]: Well log analysis
+        - button "Time Series For forecasting sequential data Production forecasting Demand prediction Anomaly detection" [ref=e147] [cursor=pointer]:
+          - img [ref=e148]
+          - heading "Time Series" [level=3] [ref=e150]
+          - paragraph [ref=e151]: For forecasting sequential data
+          - list [ref=e152]:
+            - listitem [ref=e153]: Production forecasting
+            - listitem [ref=e155]: Demand prediction
+            - listitem [ref=e157]: Anomaly detection
+    - generic [ref=e121]:
+      - button "Back" [ref=e122] [cursor=pointer]
+      - button "Continue" [disabled] [ref=e123]

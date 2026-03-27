@@ -1,11 +1,12 @@
 import { useCallback, useState, useEffect, useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { useDatasets, useUploadFile, useDatasetPreview } from '../hooks/useDatasets'
+import { useDataset, useDatasets, useUploadFile, useDatasetPreview, useDatasetSchema, useSnapshotVerification } from '../hooks/useDatasets'
 import { useEdaAsyncProfiling } from '../hooks/useEdaAsyncProfiling'
 import { useProfiling } from '../hooks/useProfiling'
 import { useStore } from '../store'
-import { Dataset, DatasetFile } from '../types/dataset'
+import { Dataset, DatasetFile, FileUploadResponse } from '../types/dataset'
 import type { TransformConfig } from '../types/eda'
+import type { ColumnProfile } from '../types/profiling'
 import { generateEDANotebook } from '../utils/notebookGenerator'
 import { getFileName } from '../utils/path'
 import { useCapabilities } from '../hooks/useCapabilities'
@@ -16,7 +17,6 @@ import { TimeSeriesConfigPanel } from '../components/eda/TimeSeriesConfigPanel'
 function EDAAnalysis() {
   const { dominoJobs } = useCapabilities()
   const [searchParams] = useSearchParams()
-  const { data: datasetsData, isLoading: loadingDatasets, error: datasetsError } = useDatasets()
   const uploadMutation = useUploadFile()
   const addNotification = useStore((state) => state.addNotification)
   const {
@@ -38,6 +38,9 @@ function EDAAnalysis() {
   const [stratifyColumn, setStratifyColumn] = useState('')
   const [edaExecutionTarget, setEdaExecutionTarget] = useState<'local' | 'domino_job'>('local')
   const [edaMode, setEdaMode] = useState<'tabular' | 'timeseries'>('tabular')
+  const [hasAnalyzed, setHasAnalyzed] = useState(false)
+  const [uploadResult, setUploadResult] = useState<FileUploadResponse | null>(null)
+  const { isVerifying, isVerified, error: verifyError } = useSnapshotVerification(uploadResult)
 
   // Force local if Domino Jobs capability is unavailable
   useEffect(() => {
@@ -50,9 +53,20 @@ function EDAAnalysis() {
   const [idColumn, setIdColumn] = useState('')
   const [rollingWindow, setRollingWindow] = useState('')
   const [querySelectionApplied, setQuerySelectionApplied] = useState(false)
+  const shouldLoadDatasets = sourceType === 'dataset'
+    || !!searchParams.get('dataset_id')
+    || ['domino_dataset', 'mounted'].includes(searchParams.get('data_source') || '')
+  const { data: datasetsData, isLoading: loadingDatasets, error: datasetsError } = useDatasets({
+    enabled: shouldLoadDatasets,
+    includeFiles: false,
+  })
+  const { data: selectedDatasetDetails, isLoading: loadingSelectedDatasetFiles } = useDataset(
+    selectedDataset?.id || ''
+  )
 
   const datasets = datasetsData?.datasets || []
   const datasetLoadError = datasetsError instanceof Error ? datasetsError.message : null
+  const selectedDatasetFiles = selectedDatasetDetails?.files || selectedDataset?.files || []
 
   useEffect(() => {
     if (querySelectionApplied) return
@@ -95,8 +109,11 @@ function EDAAnalysis() {
   const { data: preview, isLoading: previewLoading, error: previewError } = useDatasetPreview(
     selectedFilePath || '',
     pageSize,
-    offset
+    offset,
+    hasAnalyzed
   )
+  // Fetch schema (column names + dtypes) immediately so TS config panel can render before Analyze
+  const { data: schema } = useDatasetSchema(selectedFilePath || '')
 
   const {
     asyncDominoJobId,
@@ -114,15 +131,13 @@ function EDAAnalysis() {
     addNotification,
   })
 
+  // Once snapshot is verified, set file path to trigger profiling
   useEffect(() => {
-    if (!selectedFilePath) return
-    if (edaExecutionTarget === 'local') {
-      resetAsyncState()
-      void profileFile(selectedFilePath)
-      return
+    if (isVerified && uploadResult) {
+      setSelectedFilePath(uploadResult.file_path)
+      setSelectedFileName(uploadResult.file_name)
     }
-    void startAsyncTabularProfiling(selectedFilePath, sampleSize, samplingStrategy, stratifyColumn || undefined)
-  }, [selectedFilePath, edaExecutionTarget, profileFile, resetAsyncState, startAsyncTabularProfiling])
+  }, [isVerified, uploadResult])
 
   const onDrop = useCallback(
     async (acceptedFiles: File[]) => {
@@ -130,8 +145,7 @@ function EDAAnalysis() {
       const file = acceptedFiles[0]
       try {
         const result = await uploadMutation.mutateAsync(file)
-        setSelectedFilePath(result.file_path)
-        setSelectedFileName(result.file_name)
+        setUploadResult(result)
       } catch (error) {
         addNotification(
           error instanceof Error ? error.message : 'Upload failed',
@@ -151,6 +165,9 @@ function EDAAnalysis() {
     setSelectedFilePath(file.path)
     setSelectedFileName(file.name)
     setTransforms([])
+    setProfileData(null)
+    setTsProfileData(null)
+    setHasAnalyzed(false)
   }
 
   const handleChangeFile = () => {
@@ -160,6 +177,11 @@ function EDAAnalysis() {
     setTransforms([])
     setProfileData(null)
     setTsProfileData(null)
+    setTimeColumn('')
+    setTargetColumn('')
+    setIdColumn('')
+    setRollingWindow('')
+    setHasAnalyzed(false)
   }
 
   const formatSize = (bytes: number): string => {
@@ -168,12 +190,50 @@ function EDAAnalysis() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   }
 
+  // Build lightweight column profiles from profile, preview, or schema (whichever is available first)
+  const effectiveColumns: ColumnProfile[] | null = useMemo(() => {
+    if (profile?.columns) return profile.columns
+    if (preview?.columns && preview?.dtypes) {
+      return preview.columns.map((name) => {
+        const dtype = preview.dtypes?.[name] || 'object'
+        const isDt = dtype.includes('datetime')
+        const isNum = dtype.startsWith('int') || dtype.startsWith('float')
+        return {
+          name,
+          dtype,
+          missing_count: 0,
+          missing_percentage: 0,
+          unique_count: 0,
+          unique_percentage: 0,
+          semantic_type: isDt ? 'datetime' : isNum ? 'numeric' : 'category',
+        } as ColumnProfile
+      })
+    }
+    // Fall back to schema (available before Analyze is clicked)
+    if (schema?.columns) {
+      return schema.columns.map(({ name, dtype }) => {
+        const isDt = dtype.includes('datetime')
+        const isNum = dtype.startsWith('int') || dtype.startsWith('float')
+        return {
+          name,
+          dtype,
+          missing_count: 0,
+          missing_percentage: 0,
+          unique_count: 0,
+          unique_percentage: 0,
+          semantic_type: isDt ? 'datetime' : isNum ? 'numeric' : 'category',
+        } as ColumnProfile
+      })
+    }
+    return null
+  }, [profile, preview, schema])
+
   const hasDatetimeColumns = useMemo(() => {
-    if (!profile?.columns) return false
-    return profile.columns.some(
+    if (!effectiveColumns) return false
+    return effectiveColumns.some(
       (c) => c.semantic_type === 'datetime' || c.dtype.includes('datetime')
     )
-  }, [profile])
+  }, [effectiveColumns])
 
   const handleRunTSAnalysis = (tc: string, tgt: string, id: string, size: number, strategy: string, rw: string) => {
     if (!selectedFilePath) return
@@ -195,6 +255,21 @@ function EDAAnalysis() {
       sampling_strategy: strategy,
       rolling_window: Number(rw) || undefined,
     })
+  }
+
+  const handleAnalyze = () => {
+    if (!selectedFilePath) return
+    setHasAnalyzed(true)
+    if (edaExecutionTarget === 'local') {
+      resetAsyncState()
+      void profileFile(selectedFilePath, sampleSize, samplingStrategy, stratifyColumn || undefined)
+    } else {
+      void startAsyncTabularProfiling(selectedFilePath, sampleSize, samplingStrategy, stratifyColumn || undefined)
+    }
+    // In time series mode, also run TS profiling if columns are configured
+    if (edaMode === 'timeseries' && timeColumn && targetColumn && timeColumn !== targetColumn) {
+      handleRunTSAnalysis(timeColumn, targetColumn, idColumn, sampleSize, samplingStrategy, rollingWindow)
+    }
   }
 
   const handleReanalyze = (strategy: string, size: number, stratifyCol: string) => {
@@ -271,6 +346,15 @@ function EDAAnalysis() {
     ? (edaMode === 'timeseries' ? asyncProfileError : null)
     : tsError
 
+  // Notify user when time series analysis completes
+  const [prevTsLoading, setPrevTsLoading] = useState(false)
+  useEffect(() => {
+    if (prevTsLoading && !effectiveTsLoading && tsProfile && !effectiveTsError) {
+      addNotification('Time series analysis complete', 'success')
+    }
+    setPrevTsLoading(effectiveTsLoading)
+  }, [effectiveTsLoading, tsProfile, effectiveTsError])
+
   // If no file selected, show file selection UI
   if (!selectedFilePath) {
     return (
@@ -291,11 +375,20 @@ function EDAAnalysis() {
           loadingDatasets={loadingDatasets}
           datasetsError={datasetLoadError}
           selectedDataset={selectedDataset}
+          selectedDatasetFiles={selectedDatasetFiles}
+          loadingSelectedDatasetFiles={loadingSelectedDatasetFiles}
           uploadIsPending={uploadMutation.isPending}
           onDrop={onDrop}
           onSelectDataset={handleSelectDataset}
           onSelectFile={handleSelectFile}
           formatSize={formatSize}
+          isVerifying={isVerifying}
+          verifyError={verifyError}
+          uploadedFileName={uploadResult?.file_name}
+          onProceedAnyway={uploadResult ? () => {
+            setSelectedFilePath(uploadResult.file_path)
+            setSelectedFileName(uploadResult.file_name)
+          } : undefined}
         />
       </div>
     )
@@ -350,12 +443,25 @@ function EDAAnalysis() {
           <option value="local">Local (In App)</option>
           {dominoJobs && <option value="domino_job">Domino Job</option>}
         </select>
+        <button
+          onClick={handleAnalyze}
+          disabled={
+            !selectedFilePath ||
+            profilingLoading ||
+            effectiveTsLoading ||
+            ['starting', 'pending', 'running'].includes(asyncProfileStatus) ||
+            (edaMode === 'timeseries' && effectiveColumns != null && (!timeColumn || !targetColumn || timeColumn === targetColumn))
+          }
+          className="h-[32px] px-[15px] text-sm font-normal rounded-[2px] text-white bg-domino-accent-purple hover:bg-domino-accent-purple-hover disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+        >
+          {profilingLoading || effectiveTsLoading || ['starting', 'pending', 'running'].includes(asyncProfileStatus) ? 'Analyzing...' : 'Analyze'}
+        </button>
       </div>
 
       {edaExecutionTarget === 'domino_job' && asyncProfileStatus !== 'idle' && (
-        <div className="border border-domino-border bg-domino-bg-tertiary p-3 text-sm text-domino-text-secondary">
+        <div className={`border p-3 text-sm ${asyncProfileStatus === 'completed' ? 'border-domino-accent-green/30 bg-domino-accent-green/5 text-domino-accent-green' : 'border-domino-border bg-domino-bg-tertiary text-domino-text-secondary'}`}>
           <p>
-            Async profiling status: <span className="font-medium capitalize">{asyncProfileStatus}</span>
+            <span className="font-medium capitalize">{asyncProfileStatus === 'completed' ? 'Completed' : asyncProfileStatus}</span>
             {asyncDominoJobId ? ` | Domino Job ID: ${asyncDominoJobId}` : ''}
           </p>
           {asyncProfileError && (
@@ -365,11 +471,9 @@ function EDAAnalysis() {
       )}
 
       {/* Time Series Config Panel */}
-      {edaMode === 'timeseries' && profile?.columns && (
+      {edaMode === 'timeseries' && effectiveColumns && (
         <TimeSeriesConfigPanel
-          columns={profile.columns}
-          totalRows={profile.summary.total_rows}
-          onRunAnalysis={handleRunTSAnalysis}
+          columns={effectiveColumns}
           loading={effectiveTsLoading}
           timeColumn={timeColumn}
           targetColumn={targetColumn}
@@ -379,6 +483,8 @@ function EDAAnalysis() {
           onIdColumnChange={setIdColumn}
           rollingWindow={rollingWindow}
           onRollingWindowChange={setRollingWindow}
+          analysisComplete={!!tsProfile}
+          error={effectiveTsError}
         />
       )}
 

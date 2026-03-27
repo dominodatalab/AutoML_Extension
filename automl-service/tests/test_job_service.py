@@ -402,10 +402,12 @@ class TestResolveJobListFilters:
         _, model_type, *_ = resolve_job_list_filters(lr, None)
         assert model_type == ModelType.TIMESERIES
 
-    def test_owner_from_list_request(self, mock_viewing_user):
+    def test_client_supplied_owner_is_used(self, mock_viewing_user):
+        """Client-supplied owner is used when provided."""
         mock_viewing_user
         lr = _make_list_request(owner="alice")
-        _, _, owner, *_ = resolve_job_list_filters(lr, None)
+        request = _fake_request(headers={"domino-username": "bob"})
+        _, _, owner, *_ = resolve_job_list_filters(lr, request)
         assert owner == "alice"
 
     def test_owner_from_http_request_header(self, monkeypatch):
@@ -422,11 +424,12 @@ class TestResolveJobListFilters:
         _, _, owner, *_ = resolve_job_list_filters(lr, request)
         assert owner == "bob"
 
-    def test_owner_explicit_empty_string_gives_none(self, mock_viewing_user):
+    def test_client_owner_used_without_request(self, mock_viewing_user):
+        """Client-supplied owner is used even without an HTTP request."""
         mock_viewing_user
-        lr = _make_list_request(owner="")
+        lr = _make_list_request(owner="alice")
         _, _, owner, *_ = resolve_job_list_filters(lr, None)
-        assert owner is None
+        assert owner == "alice"
 
     def test_project_name_filter(self, mock_viewing_user):
         mock_viewing_user

@@ -167,6 +167,8 @@ export interface Job {
   registered_model_name?: string
   registered_model_version?: string
   model_registry_url?: string
+  best_model_name?: string
+  best_model_score?: number
   created_at: string
   started_at?: string
   completed_at?: string

@@ -4,11 +4,13 @@ export interface FeatureImportance {
   feature: string
   importance: number
   std?: number
+  stddev?: number
   p_value?: number
 }
 
 export interface FeatureImportanceResult {
-  model_path: string
+  job_id?: string
+  model_path?: string
   model_type: string
   method: string
   features: FeatureImportance[]

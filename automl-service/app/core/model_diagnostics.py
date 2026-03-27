@@ -8,14 +8,41 @@ import os
 import logging
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
-from pathlib import Path
 
 import pandas as pd
 import numpy as np
 
+from app.core.leaderboard_utils import normalize_leaderboard_rows
 from app.core.model_loader import load_predictor, load_dataframe
 
 logger = logging.getLogger(__name__)
+
+
+def _importance_frame_to_features(importance: pd.DataFrame) -> list[dict[str, Any]]:
+    """Convert an AutoGluon feature-importance frame into UI-ready rows."""
+    if importance is None or len(importance) == 0:
+        return []
+
+    features: list[dict[str, Any]] = []
+    for idx, row in importance.iterrows():
+        feature = {
+            "feature": str(idx),
+            "importance": float(row.get("importance", row.iloc[0])) if isinstance(row, pd.Series) else float(row),
+        }
+
+        if isinstance(row, pd.Series):
+            if "stddev" in row and pd.notna(row.get("stddev")):
+                feature["stddev"] = float(row["stddev"])
+            elif "stdev" in row and pd.notna(row.get("stdev")):
+                feature["stddev"] = float(row["stdev"])
+
+            if "p_value" in row and pd.notna(row.get("p_value")):
+                feature["p_value"] = float(row["p_value"])
+
+        features.append(feature)
+
+    features.sort(key=lambda x: abs(x["importance"]), reverse=True)
+    return features
 
 
 class ModelDiagnostics:
@@ -58,28 +85,15 @@ class ModelDiagnostics:
                     importance = predictor.feature_importance(silent=True)
 
                 if importance is not None and len(importance) > 0:
-                    # Convert to list of dicts for UI charting
-                    features = []
-                    for idx, row in importance.iterrows():
-                        features.append({
-                            "feature": str(idx),
-                            "importance": float(row.get('importance', row.iloc[0])) if isinstance(row, pd.Series) else float(row),
-                            "stddev": float(row.get('stddev', 0)) if isinstance(row, pd.Series) and 'stddev' in row else 0,
-                            "p_value": float(row.get('p_value', 0)) if isinstance(row, pd.Series) and 'p_value' in row else None
-                        })
-
-                    # Sort by importance (highest first)
-                    features.sort(key=lambda x: abs(x["importance"]), reverse=True)
-                    result["features"] = features
+                    result["features"] = _importance_frame_to_features(importance)
 
             elif model_type == "timeseries":
                 predictor = load_predictor(model_path, model_type)
 
                 try:
                     importance = predictor.feature_importance()
-                    if importance is not None:
-                        features = [{"feature": str(k), "importance": float(v)} for k, v in importance.items()]
-                        result["features"] = features
+                    if isinstance(importance, pd.DataFrame):
+                        result["features"] = _importance_frame_to_features(importance)
                 except Exception as e:
                     logger.warning(f"Could not get timeseries feature importance: {e}")
 
@@ -119,7 +133,7 @@ class ModelDiagnostics:
                             else:
                                 model_data[col] = val
                         models.append(model_data)
-                    result["models"] = models
+                    result["models"] = normalize_leaderboard_rows(models) or []
                     result["best_model"] = predictor.model_best
                     result["eval_metric"] = predictor.eval_metric.name if hasattr(predictor.eval_metric, 'name') else str(predictor.eval_metric)
 
@@ -140,7 +154,7 @@ class ModelDiagnostics:
                             else:
                                 model_data[col] = val
                         models.append(model_data)
-                    result["models"] = models
+                    result["models"] = normalize_leaderboard_rows(models) or []
 
         except Exception as e:
             logger.error(f"Error getting leaderboard: {e}")
@@ -492,7 +506,7 @@ class ModelDiagnostics:
                             "pred_time_val": float(row.get('pred_time_val', 0)) if pd.notna(row.get('pred_time_val')) else 0
                         }
                         models.append(model_data)
-                    result["models"] = models
+                    result["models"] = normalize_leaderboard_rows(models) or []
 
             elif model_type == "timeseries":
                 predictor = load_predictor(model_path, model_type)
@@ -511,7 +525,7 @@ class ModelDiagnostics:
                             else:
                                 model_data[col] = str(val)
                         models.append(model_data)
-                    result["models"] = models
+                    result["models"] = normalize_leaderboard_rows(models) or []
 
         except Exception as e:
             logger.error(f"Error getting learning curves: {e}")
@@ -634,6 +648,59 @@ class ModelDiagnostics:
             result["error"] = str(e)
 
         return result
+
+
+    def compute_all_diagnostics(
+        self,
+        model_path: str,
+        model_type: str,
+        data_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Compute all diagnostics at once and return a dict keyed by method name.
+
+        Called during training (in the Domino Job) while the model and data are
+        on the local filesystem.  The returned dict is stored in the DB so the
+        App can serve diagnostics without needing the model files.
+        """
+        stored: Dict[str, Any] = {}
+
+        # --- leaderboard ---
+        stored["get_leaderboard"] = self.get_leaderboard(model_path, model_type)
+
+        # --- feature importance ---
+        stored["get_feature_importance"] = self.get_feature_importance(
+            model_path, model_type, data_path=data_path
+        )
+
+        # --- learning curves ---
+        stored["get_learning_curves"] = self.get_learning_curves(model_path, model_type)
+
+        if not data_path or not os.path.exists(data_path):
+            return stored
+
+        # Diagnostics that require the data file:
+
+        # --- confusion matrix (classification only) ---
+        cm = self.get_confusion_matrix(model_path, model_type, data_path)
+        if not cm.get("error"):
+            stored["get_confusion_matrix"] = cm
+
+        # --- ROC curve (binary classification only) ---
+        roc = self.get_roc_curve(model_path, model_type, data_path)
+        if not roc.get("error"):
+            stored["get_roc_curve"] = roc
+
+        # --- precision-recall curve (binary classification only) ---
+        pr = self.get_precision_recall_curve(model_path, model_type, data_path)
+        if not pr.get("error"):
+            stored["get_precision_recall_curve"] = pr
+
+        # --- regression diagnostics ---
+        reg = self.get_regression_diagnostics(model_path, model_type, data_path)
+        if not reg.get("error"):
+            stored["get_regression_diagnostics"] = reg
+
+        return stored
 
 
 @lru_cache()
