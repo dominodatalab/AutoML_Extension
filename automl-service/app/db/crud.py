@@ -72,6 +72,7 @@ async def get_jobs(
     owner: Optional[str] = None,
     project_id: Optional[str] = None,
     project_name: Optional[str] = None,
+    summary_only: bool = False,
     execution_target: Optional[str] = None,
 ) -> Sequence[Job]:
     """Get all jobs with optional filtering.
@@ -85,9 +86,25 @@ async def get_jobs(
         owner: Filter by owner username (from Domino header)
         project_id: Filter by project ID (from Domino environment)
         project_name: Filter by project name (from Domino environment)
+        summary_only: Load only list-view columns (skip large blobs)
         execution_target: Filter by job execution target. If none, fetches all
     """
     query = select(Job).order_by(desc(Job.created_at))
+    if summary_only:
+        from sqlalchemy.orm import load_only
+        query = query.options(
+            load_only(
+                Job.id, Job.name, Job.description, Job.owner,
+                Job.project_id, Job.project_name, Job.model_type,
+                Job.problem_type, Job.status, Job.execution_target,
+                Job.domino_job_id, Job.domino_job_status, Job.progress,
+                Job.current_step, Job.data_source, Job.dataset_id,
+                Job.file_path, Job.metrics, Job.experiment_name,
+                Job.error_message, Job.is_registered,
+                Job.registered_model_name, Job.registered_model_version,
+                Job.created_at, Job.started_at, Job.completed_at,
+            )
+        )
 
     if execution_target:
         query = query.where(Job.execution_target == execution_target)
@@ -304,13 +321,16 @@ async def get_registered_model(
 async def get_registered_models(
     db: AsyncSession,
     project_id: Optional[str] = None,
+    owner: Optional[str] = None,
 ) -> Sequence[RegisteredModel]:
-    """Get all registered models, optionally filtered by project via job FK."""
+    """Get all registered models, optionally filtered by project/owner via job FK."""
     query = select(RegisteredModel)
-    if project_id:
-        query = query.join(Job, RegisteredModel.job_id == Job.id).where(
-            Job.project_id == project_id
-        )
+    if project_id or owner:
+        query = query.join(Job, RegisteredModel.job_id == Job.id)
+        if project_id:
+            query = query.where(Job.project_id == project_id)
+        if owner:
+            query = query.where(Job.owner == owner)
     query = query.order_by(desc(RegisteredModel.created_at))
     result = await db.execute(query)
     return result.scalars().all()
@@ -345,6 +365,7 @@ async def get_jobs_for_cleanup(
     statuses: list[JobStatus],
     older_than_days: Optional[int] = None,
     project_id: Optional[str] = None,
+    owner: Optional[str] = None,
 ) -> Sequence[Job]:
     """Get jobs matching statuses and optional age filter, ordered by created_at."""
     query = select(Job).where(Job.status.in_(statuses))
@@ -353,6 +374,8 @@ async def get_jobs_for_cleanup(
         query = query.where(Job.created_at < cutoff)
     if project_id:
         query = query.where(Job.project_id == project_id)
+    if owner:
+        query = query.where(Job.owner == owner)
     return (await db.execute(query.order_by(Job.created_at))).scalars().all()
 
 

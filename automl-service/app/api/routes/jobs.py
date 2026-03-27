@@ -11,6 +11,7 @@ from app.api.schemas.job import (
     BulkDeleteJobsRequest,
     BulkDeleteJobsResponse,
     JobCreateRequest,
+    JobListItemResponse,
     JobResponse,
     JobStatusResponse,
     JobMetricsResponse,
@@ -23,6 +24,7 @@ from app.api.schemas.job import (
     RegisterModelResponse,
 )
 from app.services.job_service import (
+    build_job_list_item_response,
     bulk_cleanup as bulk_cleanup_service,
     bulk_delete_jobs as bulk_delete_jobs_service,
     cancel_job as cancel_job_service,
@@ -71,10 +73,12 @@ async def preview_cleanup(
     request: Request = None,
 ):
     """Preview what would be deleted by a bulk cleanup."""
+    from app.services.job_service import get_viewing_user_name
     return await preview_cleanup_service(
         db=db,
         statuses=statuses,
         older_than_days=older_than_days,
+        owner=get_viewing_user_name(),
         project_id=request.headers.get("X-Project-Id") if request else None,
     )
 
@@ -86,11 +90,13 @@ async def bulk_cleanup(
     http_request: Request = None,
 ):
     """Delete artifacts and DB rows for jobs matching the given criteria."""
+    from app.services.job_service import get_viewing_user_name
     return await bulk_cleanup_service(
         db=db,
         statuses=request.statuses,
         older_than_days=request.older_than_days,
         include_orphans=request.include_orphans,
+        owner=get_viewing_user_name(),
         project_id=http_request.headers.get("X-Project-Id") if http_request else None,
     )
 
@@ -174,7 +180,7 @@ async def list_jobs_post(
     jobs = await list_jobs_filtered(db=db, list_request=list_request, request=request)
 
     return JobListResponse(
-        jobs=[JobResponse.model_validate(j) for j in jobs],
+        jobs=[JobListItemResponse.model_validate(build_job_list_item_response(j)) for j in jobs],
         total=len(jobs),
         skip=list_request.skip,
         limit=list_request.limit,
