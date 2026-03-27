@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from datetime import timezone
 from functools import lru_cache
 from typing import Dict
 
@@ -56,7 +57,7 @@ class JobQueueManager:
                 execution_target="domino_job",
             )
             for job in stuck_domino_jobs:
-                if job.started_at and (utc_now() - job.started_at).total_seconds() > 3600:
+                if job.started_at and (utc_now() - job.started_at.replace(tzinfo=timezone.utc)).total_seconds() > 3600:
                     await crud.update_job_status(
                         db, job.id, JobStatus.FAILED,
                         error_message="Domino job appears stuck — marked failed on restart",
