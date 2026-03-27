@@ -22,6 +22,13 @@ export function useProjectUserSummary(): ProjectUserSummary {
     refetchOnWindowFocus: false,
   })
 
-  return data;
+  return data ?? {
+    username: '',
+    initials: '',
+    project_id: '',
+    project_name: '',
+    project_owner: '',
+    is_domino_environment: false,
+  };
 }
 
