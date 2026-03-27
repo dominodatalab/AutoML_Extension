@@ -1,0 +1,255 @@
+from http import HTTPStatus
+from typing import Any
+from urllib.parse import quote
+
+import httpx
+
+from ... import errors
+from ...client import AuthenticatedClient, Client
+from ...models.domino_api_error_response import DominoApiErrorResponse
+from ...models.domino_jobs_interface_logs_with_problem_suggestion import DominoJobsInterfaceLogsWithProblemSuggestion
+from ...models.get_logs_with_problem_suggestions_log_type import GetLogsWithProblemSuggestionsLogType
+from ...types import UNSET, Response, Unset
+
+
+def _get_kwargs(
+    job_id: str,
+    *,
+    log_type: GetLogsWithProblemSuggestionsLogType | Unset = GetLogsWithProblemSuggestionsLogType.CONSOLE,
+    limit: float | Unset = 10000.0,
+    offset: float | Unset = 0.0,
+    latest_time_nano: str | Unset = "0",
+) -> dict[str, Any]:
+
+    params: dict[str, Any] = {}
+
+    json_log_type: str | Unset = UNSET
+    if not isinstance(log_type, Unset):
+        json_log_type = log_type.value
+
+    params["logType"] = json_log_type
+
+    params["limit"] = limit
+
+    params["offset"] = offset
+
+    params["latestTimeNano"] = latest_time_nano
+
+    params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
+
+    _kwargs: dict[str, Any] = {
+        "method": "get",
+        "url": "/jobs/{job_id}/logsWithProblemSuggestions".format(
+            job_id=quote(str(job_id), safe=""),
+        ),
+        "params": params,
+    }
+
+    return _kwargs
+
+
+def _parse_response(
+    *, client: AuthenticatedClient | Client, response: httpx.Response
+) -> DominoApiErrorResponse | DominoJobsInterfaceLogsWithProblemSuggestion | None:
+    if response.status_code == 200:
+        response_200 = DominoJobsInterfaceLogsWithProblemSuggestion.from_dict(response.json())
+
+        return response_200
+
+    if response.status_code == 400:
+        response_400 = DominoApiErrorResponse.from_dict(response.json())
+
+        return response_400
+
+    if response.status_code == 401:
+        response_401 = DominoApiErrorResponse.from_dict(response.json())
+
+        return response_401
+
+    if response.status_code == 403:
+        response_403 = DominoApiErrorResponse.from_dict(response.json())
+
+        return response_403
+
+    if response.status_code == 500:
+        response_500 = DominoApiErrorResponse.from_dict(response.json())
+
+        return response_500
+
+    if client.raise_on_unexpected_status:
+        raise errors.UnexpectedStatus(response.status_code, response.content)
+    else:
+        return None
+
+
+def _build_response(
+    *, client: AuthenticatedClient | Client, response: httpx.Response
+) -> Response[DominoApiErrorResponse | DominoJobsInterfaceLogsWithProblemSuggestion]:
+    return Response(
+        status_code=HTTPStatus(response.status_code),
+        content=response.content,
+        headers=response.headers,
+        parsed=_parse_response(client=client, response=response),
+    )
+
+
+def sync_detailed(
+    job_id: str,
+    *,
+    client: AuthenticatedClient | Client,
+    log_type: GetLogsWithProblemSuggestionsLogType | Unset = GetLogsWithProblemSuggestionsLogType.CONSOLE,
+    limit: float | Unset = 10000.0,
+    offset: float | Unset = 0.0,
+    latest_time_nano: str | Unset = "0",
+) -> Response[DominoApiErrorResponse | DominoJobsInterfaceLogsWithProblemSuggestion]:
+    """Get the suggestion when problem occurs in a job along with the logs
+
+    Args:
+        job_id (str):
+        log_type (GetLogsWithProblemSuggestionsLogType | Unset):  Default:
+            GetLogsWithProblemSuggestionsLogType.CONSOLE. Example: console  |  stdout  |  stderr  |
+            stdoutstderr  |  prepareoutput.
+        limit (float | Unset):  Default: 10000.0.
+        offset (float | Unset):  Default: 0.0.
+        latest_time_nano (str | Unset):  Default: '0'. Example: 1543538813745986325.
+
+    Raises:
+        errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
+        httpx.TimeoutException: If the request takes longer than Client.timeout.
+
+    Returns:
+        Response[DominoApiErrorResponse | DominoJobsInterfaceLogsWithProblemSuggestion]
+    """
+
+    kwargs = _get_kwargs(
+        job_id=job_id,
+        log_type=log_type,
+        limit=limit,
+        offset=offset,
+        latest_time_nano=latest_time_nano,
+    )
+
+    response = client.get_httpx_client().request(
+        **kwargs,
+    )
+
+    return _build_response(client=client, response=response)
+
+
+def sync(
+    job_id: str,
+    *,
+    client: AuthenticatedClient | Client,
+    log_type: GetLogsWithProblemSuggestionsLogType | Unset = GetLogsWithProblemSuggestionsLogType.CONSOLE,
+    limit: float | Unset = 10000.0,
+    offset: float | Unset = 0.0,
+    latest_time_nano: str | Unset = "0",
+) -> DominoApiErrorResponse | DominoJobsInterfaceLogsWithProblemSuggestion | None:
+    """Get the suggestion when problem occurs in a job along with the logs
+
+    Args:
+        job_id (str):
+        log_type (GetLogsWithProblemSuggestionsLogType | Unset):  Default:
+            GetLogsWithProblemSuggestionsLogType.CONSOLE. Example: console  |  stdout  |  stderr  |
+            stdoutstderr  |  prepareoutput.
+        limit (float | Unset):  Default: 10000.0.
+        offset (float | Unset):  Default: 0.0.
+        latest_time_nano (str | Unset):  Default: '0'. Example: 1543538813745986325.
+
+    Raises:
+        errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
+        httpx.TimeoutException: If the request takes longer than Client.timeout.
+
+    Returns:
+        DominoApiErrorResponse | DominoJobsInterfaceLogsWithProblemSuggestion
+    """
+
+    return sync_detailed(
+        job_id=job_id,
+        client=client,
+        log_type=log_type,
+        limit=limit,
+        offset=offset,
+        latest_time_nano=latest_time_nano,
+    ).parsed
+
+
+async def asyncio_detailed(
+    job_id: str,
+    *,
+    client: AuthenticatedClient | Client,
+    log_type: GetLogsWithProblemSuggestionsLogType | Unset = GetLogsWithProblemSuggestionsLogType.CONSOLE,
+    limit: float | Unset = 10000.0,
+    offset: float | Unset = 0.0,
+    latest_time_nano: str | Unset = "0",
+) -> Response[DominoApiErrorResponse | DominoJobsInterfaceLogsWithProblemSuggestion]:
+    """Get the suggestion when problem occurs in a job along with the logs
+
+    Args:
+        job_id (str):
+        log_type (GetLogsWithProblemSuggestionsLogType | Unset):  Default:
+            GetLogsWithProblemSuggestionsLogType.CONSOLE. Example: console  |  stdout  |  stderr  |
+            stdoutstderr  |  prepareoutput.
+        limit (float | Unset):  Default: 10000.0.
+        offset (float | Unset):  Default: 0.0.
+        latest_time_nano (str | Unset):  Default: '0'. Example: 1543538813745986325.
+
+    Raises:
+        errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
+        httpx.TimeoutException: If the request takes longer than Client.timeout.
+
+    Returns:
+        Response[DominoApiErrorResponse | DominoJobsInterfaceLogsWithProblemSuggestion]
+    """
+
+    kwargs = _get_kwargs(
+        job_id=job_id,
+        log_type=log_type,
+        limit=limit,
+        offset=offset,
+        latest_time_nano=latest_time_nano,
+    )
+
+    response = await client.get_async_httpx_client().request(**kwargs)
+
+    return _build_response(client=client, response=response)
+
+
+async def asyncio(
+    job_id: str,
+    *,
+    client: AuthenticatedClient | Client,
+    log_type: GetLogsWithProblemSuggestionsLogType | Unset = GetLogsWithProblemSuggestionsLogType.CONSOLE,
+    limit: float | Unset = 10000.0,
+    offset: float | Unset = 0.0,
+    latest_time_nano: str | Unset = "0",
+) -> DominoApiErrorResponse | DominoJobsInterfaceLogsWithProblemSuggestion | None:
+    """Get the suggestion when problem occurs in a job along with the logs
+
+    Args:
+        job_id (str):
+        log_type (GetLogsWithProblemSuggestionsLogType | Unset):  Default:
+            GetLogsWithProblemSuggestionsLogType.CONSOLE. Example: console  |  stdout  |  stderr  |
+            stdoutstderr  |  prepareoutput.
+        limit (float | Unset):  Default: 10000.0.
+        offset (float | Unset):  Default: 0.0.
+        latest_time_nano (str | Unset):  Default: '0'. Example: 1543538813745986325.
+
+    Raises:
+        errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
+        httpx.TimeoutException: If the request takes longer than Client.timeout.
+
+    Returns:
+        DominoApiErrorResponse | DominoJobsInterfaceLogsWithProblemSuggestion
+    """
+
+    return (
+        await asyncio_detailed(
+            job_id=job_id,
+            client=client,
+            log_type=log_type,
+            limit=limit,
+            offset=offset,
+            latest_time_nano=latest_time_nano,
+        )
+    ).parsed

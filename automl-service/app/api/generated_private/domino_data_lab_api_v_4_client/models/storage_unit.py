@@ -1,0 +1,42 @@
+from enum import Enum
+
+
+class StorageUnit(str, Enum):
+    B = "B"
+    BIT = "bit"
+    EB = "EB"
+    EBIT = "Ebit"
+    EIB = "EiB"
+    EIBIT = "Eibit"
+    GB = "GB"
+    GBIT = "Gbit"
+    GIB = "GiB"
+    GIBIT = "Gibit"
+    KB = "KB"
+    KBIT = "Kbit"
+    KIB = "KiB"
+    KIBIT = "Kibit"
+    MB = "MB"
+    MBIT = "Mbit"
+    MIB = "MiB"
+    MIBIT = "Mibit"
+    O = "o"
+    PB = "PB"
+    PBIT = "Pbit"
+    PIB = "PiB"
+    PIBIT = "Pibit"
+    TB = "TB"
+    TBIT = "Tbit"
+    TIB = "TiB"
+    TIBIT = "Tibit"
+    YB = "YB"
+    YBIT = "Ybit"
+    YIB = "YiB"
+    YIBIT = "Yibit"
+    ZB = "ZB"
+    ZBIT = "Zbit"
+    ZIB = "ZiB"
+    ZIBIT = "Zibit"
+
+    def __str__(self) -> str:
+        return str(self.value)
