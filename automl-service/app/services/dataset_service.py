@@ -2,6 +2,7 @@
 
 import logging
 import os
+from io import BytesIO
 import shutil
 import uuid
 from functools import lru_cache
@@ -9,9 +10,21 @@ from typing import Any, Optional, Sequence
 
 import numpy as np
 import pandas as pd
+import httpx
 from fastapi import HTTPException, UploadFile
 
+import app.core.domino_http as domino_http
+from app.api.generated.domino_public_api_client.api.dataset_rw import get_dataset, get_datasets_v2
+from app.api.generated.domino_public_api_client.models.dataset_rw_info_dto_v1 import DatasetRwInfoDtoV1
+from app.api.generated.domino_public_api_client.models.dataset_rw_permission_v1 import DatasetRwPermissionV1
+from app.api.generated_private.domino_data_lab_api_v_4_client.api.dataset import get_snapshot_files_at_root
+from app.api.generated_private.domino_data_lab_api_v_4_client.api.dataset_rw import get_files_in_snapshot
+from app.api.generated_private.domino_data_lab_api_v_4_client.client import Client as DominoPrivateApiClient
+from app.core.domino_http import get_user_auth_headers
+
 from app.api.schemas.dataset import (
+    CompatDatasetPreviewRequest,
+    DatasetFileResponse,
     DatasetListResponse,
     DatasetPreviewResponse,
     DatasetResponse,
@@ -25,6 +38,7 @@ from app.core.dataset_manager import DominoDatasetManager
 ALLOWED_UPLOAD_EXTENSIONS = (".csv", ".parquet", ".pq")
 DEFAULT_PREVIEW_LIMIT = 100
 MAX_PREVIEW_LIMIT = 1000
+MAX_REMOTE_PREVIEW_FILE_BYTES = 500 * 1024 * 1024
 
 logger = logging.getLogger(__name__)
 
@@ -106,21 +120,231 @@ def filter_local_datasets(
     return filtered_datasets
 
 
-async def list_datasets_response(
-    dataset_manager: DominoDatasetManager,
-) -> DatasetListResponse:
-    """List available local datasets in API response shape."""
-    datasets = await dataset_manager.list_datasets()
-    dataset_mount_roots = get_dataset_mount_roots()
-    filtered_datasets = filter_local_datasets(datasets, local_paths=dataset_mount_roots)
+def _is_unset(value: Any) -> bool:
+    return value.__class__.__name__ == "Unset"
+
+
+def _first_defined(*values: Any) -> Any:
+    for value in values:
+        if value is None or _is_unset(value):
+            continue
+        return value
+    return None
+
+
+def _coerce_optional_int(*values: Any) -> int:
+    for value in values:
+        if value is None or _is_unset(value):
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _build_dataset_file_rows(dataset_id: str, dataset_name: str, rows: Sequence[Any], base_path: str = "") -> list[DatasetFileResponse]:
+    normalized_rows: list[DatasetFileResponse] = []
+    normalized_base_path = base_path.strip("/")
+
+    for row in rows:
+        name_entry = row.name
+        size_entry = row.size
+
+        file_name = name_entry.sortable_name or name_entry.file_name or name_entry.label
+
+        if not file_name:
+            logger.debug(f"Unable to resolve the file name for row {name_entry.label} in dataset {dataset_name} {dataset_id}")
+            continue
+
+        full_path = file_name if not normalized_base_path else f"{normalized_base_path}/{file_name}"
+        normalized_rows.append(
+            DatasetFileResponse(
+                name=file_name,
+                path=full_path,
+                size=size_entry.size_in_bytes,
+            )
+        )
+
+    return normalized_rows
+
+
+def _normalize_dataset_preview_file_path(file_path: str) -> str:
+    normalized_path = str(file_path or "").strip().lstrip("/")
+    if not normalized_path:
+        raise HTTPException(status_code=400, detail="file_path is required")
+    return normalized_path
+
+
+def _snapshot_sort_key(snapshot: dict[str, Any]) -> tuple[int, int]:
+    return (
+        _coerce_optional_int(snapshot.get("version")),
+        _coerce_optional_int(snapshot.get("creationTime")),
+    )
+
+
+async def _fetch_domino_dataset_file_bytes(
+    dataset_id: str,
+    file_path: str,
+) -> bytes:
+    normalized_path = _normalize_dataset_preview_file_path(file_path)
+
+    try:
+        snapshots_payload = await domino_http.domino_get_dataset_rw_snapshots(dataset_id)
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+        if status_code == 404:
+            raise HTTPException(status_code=404, detail=f"Dataset not found: {dataset_id}") from exc
+        raise HTTPException(
+            status_code=status_code,
+            detail=f"Failed to resolve snapshots for dataset {dataset_id}",
+        ) from exc
+
+    if not isinstance(snapshots_payload, list) or not snapshots_payload:
+        raise HTTPException(status_code=404, detail=f"No snapshots found for dataset {dataset_id}")
+
+    latest_snapshot = max(snapshots_payload, key=_snapshot_sort_key)
+    snapshot_id = latest_snapshot.get("id")
+    if not snapshot_id:
+        raise HTTPException(status_code=500, detail=f"Failed to resolve a snapshot for dataset {dataset_id}")
+
+    try:
+        metadata_payload = await domino_http.domino_get_dataset_snapshot_file_metadata(
+            snapshot_id=snapshot_id,
+            path=normalized_path,
+        )
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+        if status_code == 404:
+            raise HTTPException(
+                status_code=404,
+                detail=f"File not found in dataset {dataset_id}: {normalized_path}",
+            ) from exc
+        raise HTTPException(
+            status_code=status_code,
+            detail=f"Failed to fetch metadata for dataset file {normalized_path}",
+        ) from exc
+
+    file_size = _coerce_optional_int(metadata_payload.get("fileSize"))
+    if metadata_payload.get("exceedsSizeLimit") is True or file_size > MAX_REMOTE_PREVIEW_FILE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Dataset file is too large to preview over API: {normalized_path} "
+                f"({file_size} bytes, limit {MAX_REMOTE_PREVIEW_FILE_BYTES} bytes)"
+            ),
+        )
+
+    try:
+        file_bytes = await domino_http.domino_get_dataset_snapshot_file_raw(
+            snapshot_id=snapshot_id,
+            path=normalized_path,
+        )
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+        if status_code == 404:
+            raise HTTPException(
+                status_code=404,
+                detail=f"File not found in dataset {dataset_id}: {normalized_path}",
+            ) from exc
+        raise HTTPException(
+            status_code=status_code,
+            detail=f"Failed to fetch dataset file {normalized_path} for dataset {dataset_id}",
+        ) from exc
 
     logger.info(
-        "Returning %s datasets (filtered from %s) using roots %s",
-        len(filtered_datasets),
-        len(datasets),
-        ", ".join(dataset_mount_roots) if dataset_mount_roots else "(none)",
+        "Fetched dataset file %s for dataset %s from snapshot %s (%s bytes)",
+        normalized_path,
+        dataset_id,
+        snapshot_id,
+        len(file_bytes),
     )
-    return DatasetListResponse(datasets=filtered_datasets, total=len(filtered_datasets))
+    return file_bytes
+
+
+async def list_dataset_files_response(dataset_id: str):
+    public_client = domino_http.get_domino_public_api_client_sync()
+    private_client = domino_http.get_domino_private_api_client_sync()
+
+    dataset_result = await get_dataset.asyncio(dataset_id=dataset_id, client=public_client)
+    if dataset_result is None:
+        raise HTTPException(500, "Empty response when getting root snapshot files for dataset")
+
+    dataset = dataset_result.dataset
+    snapshot_ids = dataset.snapshot_ids
+
+    if len(snapshot_ids) == 0:
+        logger.debug(f"Found no snapshots for dataset {dataset_id}")
+        return DatasetListResponse(datasets=[], total=0)
+
+    root_files_result = await get_files_in_snapshot.asyncio(
+        snapshot_id=snapshot_ids[0],
+        client=private_client,
+        path=""
+    )
+
+    if root_files_result is None:
+        raise HTTPException(500, "Empty response when getting root snapshot files for dataset")
+
+    file_rows = _build_dataset_file_rows(dataset.id, dataset.name, root_files_result.rows)
+
+    dataset_response = DatasetResponse(
+        id=dataset.id,
+        name=dataset.name,
+        path=None,
+        description=_first_defined(dataset.description),
+        size_bytes=sum(file.size for file in file_rows),
+        created_at=dataset.created_at,
+        updated_at=None,
+        file_count=len(file_rows),
+        files=file_rows,
+    )
+
+    logger.debug(
+        "Returning %s files for dataset %s",
+        dataset_response.file_count,
+        dataset_id,
+    )
+    return DatasetListResponse(datasets=[dataset_response], total=1)
+
+async def list_datasets_response(
+    dataset_manager: DominoDatasetManager,
+    project_id: str,
+) -> DatasetListResponse:
+    """List Domino datasets in API response shape."""
+
+    client = domino_http.get_domino_public_api_client_sync()
+    response = await get_datasets_v2.asyncio(
+        client=client,
+        minimum_permission=DatasetRwPermissionV1.READDATASETRWV2,
+        project_ids_to_include=[project_id],
+        include_project_info=True,
+        offset=0,
+        limit=100,
+    )
+
+    if response is None:
+        raise HTTPException(status_code=500, detail="Failed to list datasets from Domino. No response")
+
+    def build_details(d: DatasetRwInfoDtoV1) -> DatasetResponse:
+        dataset = d.dataset
+        return DatasetResponse(
+            id=dataset.id,
+            name=dataset.name,
+            path=None,
+            description=_first_defined(dataset.description),
+            size_bytes=0,
+            created_at=dataset.created_at,
+            updated_at=None,
+            file_count=0,
+            files=[],
+        )
+
+    datasets = [build_details(d) for d in response.datasets]
+    total = response.metadata.total_count or len(datasets)
+
+    logger.info("Returning %s Domino datasets for project %s", len(datasets), project_id)
+    return DatasetListResponse(datasets=datasets, total=total)
 
 
 async def get_dataset_or_404(
@@ -178,29 +402,46 @@ def normalize_preview_pagination(
 
 
 def build_preview_payload(
+    dataset_id: str,
     file_path: str,
     limit: int = DEFAULT_PREVIEW_LIMIT,
     offset: int = 0,
     include_dtypes: bool = False,
+    file_bytes: Optional[bytes] = None,
 ) -> dict[str, Any]:
     """Read and paginate a local CSV/Parquet file preview."""
+    bytes_io_object = None
+    if file_bytes is not None:
+        bytes_io_object = BytesIO(file_bytes)
+
     if not file_path:
         raise HTTPException(status_code=400, detail="file_path is required")
 
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+    if not os.path.exists(file_path) and not bytes_io_object:
+        raise HTTPException(status_code=404, detail=f"Content not provided and file not found: {file_path}")
 
     file_ext = os.path.splitext(file_path)[1].lower()
 
+    df_content = bytes_io_object or file_path
+
     if file_ext == ".csv":
-        with open(file_path, "r") as f:
-            total_rows = max(sum(1 for _ in f) - 1, 0)
+        # if df_conetnt is bytes in memory, total_rows is length of dataset
+
+        total_rows = None
+        if not bytes_io_object:
+            with open(file_path, "r") as f:
+                total_rows = max(sum(1 for _ in f) - 1, 0)
+
         if offset > 0:
-            df = pd.read_csv(file_path, skiprows=range(1, offset + 1), nrows=limit)
+            df = pd.read_csv(df_content, skiprows=range(1, offset + 1), nrows=limit)
         else:
-            df = pd.read_csv(file_path, nrows=limit)
+            df = pd.read_csv(df_content, nrows=limit)
+
+        if total_rows is None:
+            total_rows = len(df)
+
     elif file_ext in [".parquet", ".pq"]:
-        df_full = pd.read_parquet(file_path)
+        df_full = pd.read_parquet(df_content)
         total_rows = len(df_full)
         df = df_full.iloc[offset : offset + limit]
     else:
@@ -208,7 +449,7 @@ def build_preview_payload(
 
     safe_df = df.replace({np.nan: None, np.inf: None, -np.inf: None})
     payload: dict[str, Any] = {
-        "dataset_id": file_path,
+        "dataset_id": dataset_id,
         "file_path": file_path,
         "file_name": os.path.basename(file_path),
         "columns": list(df.columns),
@@ -223,6 +464,7 @@ def build_preview_payload(
 
 
 def preview_file_response(
+    dataset_id: str,
     file_path: str,
     limit: Optional[Any] = None,
     rows: Optional[Any] = None,
@@ -262,30 +504,26 @@ def coerce_preview_response(preview: Any, include_dtypes: bool = False) -> dict[
 
 async def build_compat_dataset_preview_payload(
     dataset_manager: DominoDatasetManager,
-    body: dict[str, Any],
+    body: CompatDatasetPreviewRequest,
 ) -> dict[str, Any]:
     """Build compat dataset preview payload from request body."""
-    file_path = body.get("file_path")
-    dataset_id = body.get("dataset_id")
+    file_path = body.file_path
+    dataset_id = body.dataset_id
     limit, offset = normalize_preview_pagination(
-        limit=body.get("limit"),
-        rows=body.get("rows"),
-        offset=body.get("offset", 0),
+        limit=body.limit,
+        rows=body.rows,
+        offset=body.offset,
     )
+    file_bytes = await _fetch_domino_dataset_file_bytes(dataset_id=dataset_id, file_path=file_path)
 
-    if file_path:
-        return build_preview_payload(
-            file_path=file_path,
-            limit=limit,
-            offset=offset,
-            include_dtypes=True,
-        )
-
-    if dataset_id:
-        preview = await preview_dataset_response(dataset_manager, dataset_id, rows=limit)
-        return coerce_preview_response(preview, include_dtypes=True)
-
-    raise HTTPException(status_code=400, detail="Either file_path or dataset_id is required")
+    return build_preview_payload(
+        dataset_id=dataset_id,
+        file_path=file_path,
+        limit=limit,
+        offset=offset,
+        include_dtypes=True,
+        file_bytes=file_bytes
+    )
 
 
 async def save_uploaded_file(file: UploadFile) -> FileUploadResponse:

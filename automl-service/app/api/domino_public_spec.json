@@ -16008,23 +16008,23 @@
       },
       "GitReferenceTypeV1": {
         "enum": [
-          "head",
-          "branch",
-          "tag",
-          "commit"
+          "Head",
+          "Branch",
+          "Tag",
+          "Commit"
         ],
         "type": "string"
       },
       "GitServiceProviderV1": {
         "description": "Git service provider",
         "enum": [
-          "bitbucket",
-          "bitbucketServer",
-          "github",
-          "githubEnterprise",
-          "gitLab",
-          "gitLabEnterprise",
-          "unknown"
+          "Bitbucket",
+          "BitbucketServer",
+          "Github",
+          "GithubEnterprise",
+          "GitLab",
+          "GitLabEnterprise",
+          "Unknown"
         ],
         "type": "string"
       },
@@ -22283,9 +22283,9 @@
       "ProjectVisibilityV1": {
         "description": "Project visibility",
         "enum": [
-          "public",
-          "searchable",
-          "private"
+          "Public",
+          "Searchable",
+          "Private"
         ],
         "type": "string"
       },

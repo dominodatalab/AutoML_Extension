@@ -16,10 +16,14 @@ import pytest
 from app.core.domino_http import (
     MissingUserTokenError,
     domino_download,
+    domino_get_dataset_rw_snapshots,
+    domino_get_dataset_snapshot_file_metadata,
+    domino_get_dataset_snapshot_file_raw,
     domino_request,
     get_user_auth_headers,
     get_user_auth_headers_async,
     resolve_domino_api_host,
+    resolve_domino_v4_api_base_url,
 )
 
 
@@ -68,6 +72,13 @@ class TestResolveDominoApiHost:
                 resolve_domino_api_host()
         finally:
             cfg._settings_instance = old
+
+
+class TestResolveDominoV4ApiBaseUrl:
+
+    def test_appends_v4_suffix(self, monkeypatch):
+        monkeypatch.setenv("DOMINO_API_PROXY", "https://proxy.example.com/")
+        assert resolve_domino_v4_api_base_url() == "https://proxy.example.com/v4"
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +264,96 @@ class TestDominoRequest:
 
         assert resp.status_code == 200
         assert call_count == 2
+
+
+class TestDatasetRwHelpers:
+
+    @pytest.mark.asyncio
+    async def test_get_dataset_rw_snapshots_uses_v4_helper(self, monkeypatch):
+        seen = {}
+
+        class FakeResponse:
+            def json(self):
+                return [{"id": "snap-1"}]
+
+        async def fake_domino_request(method, path, **kwargs):
+            seen["call"] = (method, path, kwargs)
+            return FakeResponse()
+
+        monkeypatch.setattr("app.core.domino_http.domino_request", fake_domino_request)
+        monkeypatch.setattr(
+            "app.core.domino_http.resolve_domino_v4_api_base_url",
+            lambda: "https://domino.example/v4",
+        )
+
+        result = await domino_get_dataset_rw_snapshots("ds-1")
+
+        assert result == [{"id": "snap-1"}]
+        assert seen["call"] == (
+            "GET",
+            "/datasetrw/snapshots/ds-1",
+            {"base_url": "https://domino.example/v4"},
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_dataset_snapshot_file_metadata_uses_v4_helper(self, monkeypatch):
+        seen = {}
+
+        class FakeResponse:
+            def json(self):
+                return {"fileSize": 123}
+
+        async def fake_domino_request(method, path, **kwargs):
+            seen["call"] = (method, path, kwargs)
+            return FakeResponse()
+
+        monkeypatch.setattr("app.core.domino_http.domino_request", fake_domino_request)
+        monkeypatch.setattr(
+            "app.core.domino_http.resolve_domino_v4_api_base_url",
+            lambda: "https://domino.example/v4",
+        )
+
+        result = await domino_get_dataset_snapshot_file_metadata("snap-1", "folder/train.csv")
+
+        assert result == {"fileSize": 123}
+        assert seen["call"] == (
+            "GET",
+            "/datasetrw/snapshot/snap-1/file/meta",
+            {
+                "params": {"path": "folder/train.csv"},
+                "base_url": "https://domino.example/v4",
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_dataset_snapshot_file_raw_uses_v4_helper(self, monkeypatch):
+        seen = {}
+
+        class FakeResponse:
+            content = b"abc"
+
+        async def fake_domino_request(method, path, **kwargs):
+            seen["call"] = (method, path, kwargs)
+            return FakeResponse()
+
+        monkeypatch.setattr("app.core.domino_http.domino_request", fake_domino_request)
+        monkeypatch.setattr(
+            "app.core.domino_http.resolve_domino_v4_api_base_url",
+            lambda: "https://domino.example/v4",
+        )
+
+        result = await domino_get_dataset_snapshot_file_raw("snap-1", "folder/train.csv")
+
+        assert result == b"abc"
+        assert seen["call"] == (
+            "GET",
+            "/datasetrw/snapshot/snap-1/file/raw",
+            {
+                "params": {"path": "folder/train.csv"},
+                "headers": {"Accept": "application/octet-stream"},
+                "base_url": "https://domino.example/v4",
+            },
+        )
 
 
 # ---------------------------------------------------------------------------

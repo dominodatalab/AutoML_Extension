@@ -7,6 +7,7 @@ import NewJob from './pages/NewJob'
 import JobDetail from './pages/JobDetail'
 import EDAAnalysis from './pages/EDAAnalysis'
 import { getBasePath } from './utils/basePath'
+import { buildAppPath } from './utils/appPath'
 
 // Fallback for unmatched routes
 function NoRouteMatch() {
@@ -25,7 +26,7 @@ function NoRouteMatch() {
       <p><strong>Path:</strong> {location.pathname}</p>
       <p style={{ color: '#6b7280', fontSize: '14px' }}>Full URL: {window.location.href}</p>
       <button
-        onClick={() => window.location.href = window.location.origin + getBasePath() + '/dashboard'}
+        onClick={() => window.location.href = window.location.origin + getBasePath() + buildAppPath('/dashboard')}
         style={{ marginTop: '16px', padding: '8px 16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
       >
         Go to Dashboard
@@ -36,13 +37,15 @@ function NoRouteMatch() {
 
 function App() {
   const basename = getBasePath()
+  const redirectPath = buildAppPath('/dashboard', new URLSearchParams(window.location.search))
+  console.error('App', redirectPath);
 
   return (
     <ErrorBoundary>
       <BrowserRouter basename={basename}>
         <Routes>
           <Route path="/" element={<Layout />}>
-            <Route index element={<Navigate to="/dashboard" replace />} />
+            <Route index element={<Navigate to={redirectPath} replace />} />
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="eda" element={<EDAAnalysis />} />
             <Route path="jobs/new" element={<NewJob />} />

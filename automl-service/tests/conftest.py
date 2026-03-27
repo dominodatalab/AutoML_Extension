@@ -515,6 +515,10 @@ async def app_client(async_engine, tmp_data_dir, monkeypatch, mock_viewing_user)
 
     Overrides the DB dependency and settings for isolated testing.
     """
+    import fastapi.dependencies.utils as fastapi_utils
+    from contextvars import ContextVar
+    from types import SimpleNamespace
+
     # Override settings before importing the app
     monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
     monkeypatch.setenv("MODELS_PATH", str(tmp_data_dir["models"]))
@@ -522,6 +526,7 @@ async def app_client(async_engine, tmp_data_dir, monkeypatch, mock_viewing_user)
     monkeypatch.setenv("DATASETS_PATH", str(tmp_data_dir["datasets"]))
     monkeypatch.setenv("TEMP_PATH", str(tmp_data_dir["temp"]))
     monkeypatch.setenv("EDA_RESULTS_PATH", str(tmp_data_dir["eda_results"]))
+    monkeypatch.setattr(fastapi_utils, "ensure_multipart_is_installed", lambda: None, raising=True)
 
     mock_viewing_user
 
@@ -531,8 +536,47 @@ async def app_client(async_engine, tmp_data_dir, monkeypatch, mock_viewing_user)
 
     from app.main import create_app
     from app.dependencies import get_db
+    from app.api.routes import health as health_routes
+    from app.core.context import user as user_ctx
 
     app = create_app()
+
+    username_ctx: ContextVar[str | None] = ContextVar("test_domino_username", default=None)
+
+    def fake_health_user():
+        username = username_ctx.get() or "Anonymous"
+        return user_ctx.User(
+            id="test-id",
+            user_name=username,
+            roles=["SysAdmin", "Practitioner"],
+        )
+
+    async def fake_resolve_project(project_id):
+        resolved_project_id = project_id or "test-project-id"
+        return SimpleNamespace(
+            id=resolved_project_id,
+            name="test-project",
+            owner_username="test-owner",
+        )
+
+    # Allow tests that intentionally exercise the real get_viewing_user() path
+    # to bypass Domino client construction while still patching get_current_user.sync.
+    monkeypatch.setattr(
+        user_ctx,
+        "get_domino_public_api_client_sync",
+        lambda: object(),
+        raising=True,
+    )
+    monkeypatch.setattr(health_routes, "get_viewing_user", fake_health_user, raising=True)
+    monkeypatch.setattr(health_routes, "resolve_project", fake_resolve_project, raising=True)
+
+    @app.middleware("http")
+    async def set_test_domino_username(request, call_next):
+        token = username_ctx.set(request.headers.get("domino-username"))
+        try:
+            return await call_next(request)
+        finally:
+            username_ctx.reset(token)
 
     # Override DB dependency to use test engine
     test_session_factory = async_sessionmaker(

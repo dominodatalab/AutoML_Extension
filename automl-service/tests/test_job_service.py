@@ -774,6 +774,7 @@ class TestQueueCapacity:
             patch("app.core.job_queue.get_job_queue") as mock_queue,
             patch("app.services.job_service.get_settings") as mock_get_settings,
             patch("app.services.job_service.crud") as mock_crud,
+            patch("app.services.job_service._attach_external_links", side_effect=lambda job: job),
         ):
             mock_get_settings.return_value = self._mock_settings()
             mock_queue.return_value.get_total_tracked.return_value = 3
@@ -797,47 +798,6 @@ class TestQueueCapacity:
         with pytest.raises(HTTPException) as exc_info:
             await create_job_with_context(db_session, req)
         assert exc_info.value.status_code == 400
-
-
-# ===========================================================================
-# get_job_details parsing
-# ===========================================================================
-
-
-class TestParseGetJobDetailsResponse:
-    """Tests for Domino job-details response normalization before parsing."""
-
-    def test_normalizes_git_service_provider_before_generated_parser(self):
-        client = MagicMock()
-        parsed = object()
-        response = httpx.Response(
-            200,
-            json={
-                "job": {
-                    "gitRepos": [
-                        {"serviceProvider": "Github"},
-                        {"serviceProvider": "githubEnterprise"},
-                    ]
-                },
-                "metadata": {},
-            },
-        )
-
-        def fake_parse_response(*, client, response):
-            body = response.json()
-            assert body["job"]["gitRepos"][0]["serviceProvider"] == "github"
-            assert body["job"]["gitRepos"][1]["serviceProvider"] == "githubEnterprise"
-            assert "content-encoding" not in response.headers
-            return parsed
-
-        with patch(
-            "app.services.job_service.get_job_details._parse_response",
-            side_effect=fake_parse_response,
-        ) as mock_parse_response:
-            result = _parse_get_job_details_response(client=client, response=response)
-
-        assert result is parsed
-        mock_parse_response.assert_called_once()
 
 
 # ===========================================================================

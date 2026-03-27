@@ -19,6 +19,7 @@ def parse_args() -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(description="Run AutoML EDA profile from Domino")
     parser.add_argument("--request-id", required=True)
+    parser.add_argument("--database-url", required=False, help="Database url to use", default=None)
     parser.add_argument("--mode", choices=["tabular", "timeseries"], default="tabular")
     parser.add_argument("--file-path", required=True)
     parser.add_argument("--sample-size", type=int, default=50000)

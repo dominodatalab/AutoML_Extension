@@ -1,0 +1,83 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, TypeVar
+
+from attrs import define as _attrs_define
+from attrs import field as _attrs_field
+
+if TYPE_CHECKING:
+    from ..models.domino_common_modelproduct_app_instance_autoscaling_details_replicated_process_details import (
+        DominoCommonModelproductAppInstanceAutoscalingDetailsReplicatedProcessDetails,
+    )
+
+
+T = TypeVar("T", bound="DominoCommonModelproductAppInstanceAutoscalingDetails")
+
+
+@_attrs_define
+class DominoCommonModelproductAppInstanceAutoscalingDetails:
+    """
+    Attributes:
+        ready_replicas (int):
+        replicated_process_details (DominoCommonModelproductAppInstanceAutoscalingDetailsReplicatedProcessDetails):
+    """
+
+    ready_replicas: int
+    replicated_process_details: DominoCommonModelproductAppInstanceAutoscalingDetailsReplicatedProcessDetails
+    additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        ready_replicas = self.ready_replicas
+
+        replicated_process_details = self.replicated_process_details.to_dict()
+
+        field_dict: dict[str, Any] = {}
+        field_dict.update(self.additional_properties)
+        field_dict.update(
+            {
+                "readyReplicas": ready_replicas,
+                "replicatedProcessDetails": replicated_process_details,
+            }
+        )
+
+        return field_dict
+
+    @classmethod
+    def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.domino_common_modelproduct_app_instance_autoscaling_details_replicated_process_details import (
+            DominoCommonModelproductAppInstanceAutoscalingDetailsReplicatedProcessDetails,
+        )
+
+        d = dict(src_dict)
+        ready_replicas = d.pop("readyReplicas")
+
+        replicated_process_details = (
+            DominoCommonModelproductAppInstanceAutoscalingDetailsReplicatedProcessDetails.from_dict(
+                d.pop("replicatedProcessDetails")
+            )
+        )
+
+        domino_common_modelproduct_app_instance_autoscaling_details = cls(
+            ready_replicas=ready_replicas,
+            replicated_process_details=replicated_process_details,
+        )
+
+        domino_common_modelproduct_app_instance_autoscaling_details.additional_properties = d
+        return domino_common_modelproduct_app_instance_autoscaling_details
+
+    @property
+    def additional_keys(self) -> list[str]:
+        return list(self.additional_properties.keys())
+
+    def __getitem__(self, key: str) -> Any:
+        return self.additional_properties[key]
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self.additional_properties[key] = value
+
+    def __delitem__(self, key: str) -> None:
+        del self.additional_properties[key]
+
+    def __contains__(self, key: str) -> bool:
+        return key in self.additional_properties

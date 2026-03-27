@@ -66,3 +66,6 @@ Thumbs.db
 
 # Agent context
 AGENTS.md
+
+# Api client generation
+automl-service/app/api/downloaded_openapi_specs

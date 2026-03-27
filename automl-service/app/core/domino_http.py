@@ -27,6 +27,7 @@ from typing import Any, Optional
 import httpx
 
 from app.api.generated.domino_public_api_client.client import Client as DominoApiClient
+from app.api.generated_private.domino_data_lab_api_v_4_client.client import Client as DominoPrivateApiClient
 from app.core.context.auth import get_request_auth_header
 from app.config import get_settings
 
@@ -73,12 +74,22 @@ get_sync_auth_headers = get_user_auth_headers
 get_domino_auth_headers = get_user_auth_headers_async
 
 
+def get_domino_private_api_client_sync() -> DominoPrivateApiClient:
+    """Create a Domino Private API client authenticated as the visiting user."""
+    headers = {**get_user_auth_headers(), 'Content-Type': 'application/json', 'Accept': 'application/json'}
+
+    return DominoPrivateApiClient(
+        base_url=resolve_domino_v4_api_base_url(),
+        raise_on_unexpected_status=True,
+    ).with_headers(headers)
+
+
 def get_domino_public_api_client_sync() -> DominoApiClient:
     """Create a Domino Public API client authenticated as the visiting user.
 
     Raises ``MissingUserTokenError`` if no forwarded token is available.
     """
-    headers = get_user_auth_headers()
+    headers = {**get_user_auth_headers(), 'Content-Type': 'application/json', 'Accept': 'application/json'}
     base_url = resolve_domino_api_host()
     return DominoApiClient(base_url=base_url).with_headers(headers)
 
@@ -98,8 +109,13 @@ def resolve_domino_api_host() -> str:
         raise ValueError(
             "Domino API host is not configured. "
             "Set DOMINO_API_PROXY or DOMINO_API_HOST."
-        )
+    )
     return host.rstrip("/")
+
+
+def resolve_domino_v4_api_base_url() -> str:
+    """Resolve the Domino private v4 API base URL."""
+    return f"{resolve_domino_api_host()}/v4"
 
 
 def resolve_domino_project_id() -> str:
@@ -197,6 +213,51 @@ async def domino_request(
 
     # Should not reach here, but satisfy type checker.
     raise last_exc or RuntimeError("Domino request failed after retries")
+
+
+async def domino_get_dataset_rw_snapshots(dataset_id: str) -> list[dict[str, Any]]:
+    """Fetch Dataset RW snapshots for a dataset from the Domino v4 API."""
+    response = await domino_request(
+        "GET",
+        f"/datasetrw/snapshots/{dataset_id}",
+        base_url=resolve_domino_v4_api_base_url(),
+    )
+    payload = response.json()
+    if not isinstance(payload, list):
+        raise ValueError(f"Unexpected snapshot payload for dataset {dataset_id}")
+    return payload
+
+
+async def domino_get_dataset_snapshot_file_metadata(
+    snapshot_id: str,
+    path: str,
+) -> dict[str, Any]:
+    """Fetch Dataset RW snapshot file metadata from the Domino v4 API."""
+    response = await domino_request(
+        "GET",
+        f"/datasetrw/snapshot/{snapshot_id}/file/meta",
+        params={"path": path},
+        base_url=resolve_domino_v4_api_base_url(),
+    )
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError(f"Unexpected metadata payload for snapshot {snapshot_id} path {path}")
+    return payload
+
+
+async def domino_get_dataset_snapshot_file_raw(
+    snapshot_id: str,
+    path: str,
+) -> bytes:
+    """Fetch raw Dataset RW snapshot file bytes from the Domino v4 API."""
+    response = await domino_request(
+        "GET",
+        f"/datasetrw/snapshot/{snapshot_id}/file/raw",
+        params={"path": path},
+        headers={"Accept": "application/octet-stream"},
+        base_url=resolve_domino_v4_api_base_url(),
+    )
+    return response.content
 
 
 def resolve_domino_nucleus_host() -> Optional[str]:

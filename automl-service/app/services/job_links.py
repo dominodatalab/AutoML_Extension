@@ -1,8 +1,14 @@
 """Helpers for building Domino and Experiment Manager links for jobs."""
 
 import os
+import asyncio
+from fastapi import HTTPException
 from typing import Optional
 from urllib.parse import quote, urlparse, urlunparse
+
+from app.core.domino_http import get_domino_public_api_client_sync
+from app.api.generated.domino_public_api_client.api.projects import get_project_by_id
+from app.api.generated.domino_public_api_client.models.project_v1 import ProjectV1
 
 from app.config import get_settings
 from app.db.models import Job
@@ -52,6 +58,13 @@ def _resolve_domino_ui_host() -> Optional[str]:
             return normalized.rstrip("/")
     return None
 
+def _resolve_project_details(project_id: str) -> ProjectV1:
+    client = get_domino_public_api_client_sync()
+    response = get_project_by_id.sync(project_id, client=client)
+    if not response:
+        raise HTTPException(500, "No response from Domino when fetching project details")
+
+    return response.project
 
 def _resolve_project_owner(job: Optional[Job] = None) -> Optional[str]:
     """Resolve Domino project owner for project-scoped UI links.
@@ -89,10 +102,10 @@ def _build_domino_job_url(job: Job) -> Optional[str]:
     if not job.domino_job_id:
         return None
 
-    owner = _resolve_project_owner(job)
-    project_name = _resolve_project_name(job)
-    if not owner or not project_name:
-        return None
+    project_info = _resolve_project_details(job.project_id)
+
+    owner = project_info.owner_username
+    project_name = project_info.name
 
     encoded_owner = quote(owner, safe="")
     encoded_project = quote(project_name, safe="")
@@ -151,10 +164,13 @@ def _build_experiment_run_url(job: Job, experiment_id: Optional[str]) -> Optiona
     if not experiment_id:
         return None
 
-    owner = _resolve_project_owner(job)
-    project_name = _resolve_project_name(job)
-    if not owner or not project_name:
+    if not job.project_id:
         return None
+
+    project = _resolve_project_details(job.project_id)
+
+    owner = project.owner_username
+    project_name = project.name
 
     encoded_owner = quote(owner, safe="")
     encoded_project = quote(project_name, safe="")
@@ -169,10 +185,13 @@ def _build_model_registry_url(job: Job) -> Optional[str]:
     if not job.registered_model_name:
         return None
 
-    owner = _resolve_project_owner(job)
-    project_name = _resolve_project_name(job)
-    if not owner or not project_name:
+    if not job.project_id:
         return None
+
+    project = _resolve_project_details(job.project_id)
+
+    owner = project.owner_username
+    project_name = project.name
 
     encoded_owner = quote(owner, safe="")
     encoded_project = quote(project_name, safe="")

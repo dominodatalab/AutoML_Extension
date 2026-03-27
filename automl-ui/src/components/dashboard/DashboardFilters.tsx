@@ -6,6 +6,7 @@ import {
   TableCellsIcon,
 } from '@heroicons/react/24/outline'
 import Dropdown from '../common/Dropdown'
+import { buildAppPath } from '../../utils/appPath'
 
 type ViewMode = 'table' | 'card'
 
@@ -42,15 +43,15 @@ export function DashboardFilters({
           <h1 className="text-2xl font-normal text-domino-text-primary leading-tight">AutoML</h1>
         </div>
         <div className="flex items-center gap-3">
-          <Link to="/eda">
+          {/*<Link to="/eda">
             <button className="h-[32px] px-[15px] bg-white text-domino-accent-purple text-sm font-normal rounded-[2px] border border-domino-accent-purple hover:bg-domino-accent-purple/5 transition-all duration-200 inline-flex items-center gap-2">
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
               </svg>
               Explore Data
             </button>
-          </Link>
-          <Link to="/jobs/new">
+          </Link>*/}
+          <Link to={buildAppPath('/jobs/new')}>
             <button className="h-[32px] px-[15px] bg-domino-accent-purple text-white text-sm font-normal rounded-[2px] hover:bg-domino-accent-purple-hover transition-all duration-200 inline-flex items-center">
               New training job
             </button>

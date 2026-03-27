@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { format } from 'date-fns'
 import { Job } from '../../types/job'
 import { formatDuration, getStatusColor, getStatusIcon } from '../../utils/formatters'
+import { buildAppPath } from '../../utils/appPath'
 
 function getDisplayStatus(job: Job): string {
   if (job.status === 'completed' && job.is_registered) return 'Deployed'
@@ -120,7 +121,7 @@ export function JobTableView({ jobs, onDeleteRequest, selectedIds, isAllSelected
               </td>
               <td className="px-4 py-3">
                 <Link
-                  to={`/jobs/${job.id}`}
+                  to={buildAppPath(`/jobs/${job.id}`)}
                   className="text-sm font-normal text-domino-accent-purple hover:underline"
                 >
                   {job.name}

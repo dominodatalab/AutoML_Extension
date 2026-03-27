@@ -73,3 +73,13 @@ class FilePreviewRequest(BaseModel):
     limit: int = 100
     offset: int = 0
     rows: Optional[int] = None  # Legacy support
+
+
+class CompatDatasetPreviewRequest(BaseModel):
+    """Compat request schema for /svcdatasetpreview."""
+
+    dataset_id: str
+    file_path: str
+    limit: Optional[int | str] = None
+    offset: Optional[int | str] = 0
+    rows: Optional[int | str] = None

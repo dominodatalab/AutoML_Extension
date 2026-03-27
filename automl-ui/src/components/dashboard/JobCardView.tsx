@@ -7,6 +7,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { Job } from '../../types/job'
 import { getStatusColor, getStatusIcon } from '../../utils/formatters'
+import { buildAppPath } from '../../utils/appPath'
 
 function getDisplayStatus(job: Job): string {
   if (job.status === 'completed' && job.is_registered) return 'Deployed'
@@ -58,7 +59,7 @@ export function JobCardView({ jobs, onDeleteRequest, selectedIds, onToggleJob }:
                     Execution: {getExecutionTarget(job)}
                   </p>
                   <Link
-                    to={`/jobs/${job.id}`}
+                    to={buildAppPath(`/jobs/${job.id}`)}
                     className="text-base font-medium text-domino-accent-purple hover:underline block truncate"
                   >
                     {job.name}
@@ -79,7 +80,7 @@ export function JobCardView({ jobs, onDeleteRequest, selectedIds, onToggleJob }:
               {/* Footer actions */}
               <div className="flex items-center gap-4 mt-auto pt-3 border-t border-domino-border/50">
                 <Link
-                  to={`/jobs/${job.id}`}
+                  to={buildAppPath(`/jobs/${job.id}`)}
                   className="inline-flex items-center gap-1 text-xs text-domino-accent-purple hover:underline"
                 >
                   <DocumentTextIcon className="h-3.5 w-3.5" />

@@ -18,6 +18,7 @@ import { JobOverviewTab } from '../components/job/JobOverviewTab'
 import { DominoIntegrationsTab } from '../components/job/DominoIntegrationsTab'
 import { useCapabilities } from '../hooks/useCapabilities'
 import type { DetailTab } from '../components/job/JobTabNavigation'
+import { buildAppPath } from '../utils/appPath'
 
 function JobDetail() {
   const { jobId } = useParams<{ jobId: string }>()
@@ -54,7 +55,7 @@ function JobDetail() {
     try {
       await deleteJobMutation.mutateAsync(job!.id)
       setShowDeleteConfirm(false)
-      navigate('/dashboard')
+      navigate(buildAppPath('/dashboard'))
     } catch (err) {
       console.error('Failed to delete job:', err)
     }
@@ -64,7 +65,7 @@ function JobDetail() {
     return (
       <div className="text-center py-12">
         <p className="text-domino-accent-red">Job not found</p>
-        <Link to="/dashboard" className="text-domino-accent-purple hover:underline text-sm">
+        <Link to={buildAppPath('/dashboard')} className="text-domino-accent-purple hover:underline text-sm">
           Back to AutoML
         </Link>
       </div>
@@ -99,7 +100,7 @@ function JobDetail() {
     <div>
       {/* Breadcrumb */}
       <nav className="flex items-center gap-2 text-sm mb-2">
-        <Link to="/dashboard" className="text-domino-accent-purple hover:underline">
+        <Link to={buildAppPath('/dashboard')} className="text-domino-accent-purple hover:underline">
           AutoML
         </Link>
         <span className="text-domino-text-muted">/</span>

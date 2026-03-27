@@ -20,6 +20,7 @@ def parse_args() -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(description="Run AutoML training job from Domino")
     parser.add_argument("--job-id", required=True, help="AutoML job id")
+    parser.add_argument("--database-url", required=False, help="Database url to use", default=None)
     return parser.parse_args()
 
 

@@ -4,8 +4,8 @@
  *   use that host for all links.
  * - Otherwise, derive the tenant host from window.location by stripping an apps. prefix.
  */
-export function toDominoTenantUrl(rawUrl?: string): string | null {
-  if (!rawUrl) return null
+export function toDominoTenantUrl(rawUrl?: string): string {
+  if (!rawUrl) return ""
   try {
     // Prefer explicitly provided host from dev env if set
     const envHost = (import.meta.env as any).VITE_DEV_DOMINO_API_HOST as string | undefined

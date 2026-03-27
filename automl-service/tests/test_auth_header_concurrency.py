@@ -24,6 +24,9 @@ async def test_parallel_requests_use_distinct_auth_values(monkeypatch, tmp_path)
     import app.config as config_module
     config_module._settings_instance = None
 
+    import fastapi.dependencies.utils as fastapi_utils
+    monkeypatch.setattr(fastapi_utils, "ensure_multipart_is_installed", lambda: None, raising=True)
+
     from app.main import create_app
     from app.core.context.auth import get_request_auth_header
 
@@ -61,4 +64,3 @@ async def test_parallel_requests_use_distinct_auth_values(monkeypatch, tmp_path)
     assert r2 == auth2
     assert len(hits) == 2
     assert set(hits) == {auth1, auth2}
-

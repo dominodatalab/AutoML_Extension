@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { CloudArrowUpIcon, CircleStackIcon, CheckCircleIcon, DocumentIcon } from '@heroicons/react/24/outline'
 import clsx from 'clsx'
@@ -7,25 +7,53 @@ import { useDatasets, useUploadFile, useDatasetPreview } from '../../hooks/useDa
 import { useStore } from '../../store'
 import Spinner from '../common/Spinner'
 import { Dataset, DatasetFile } from '../../types/dataset'
+import { getDatasetFiles } from '../../api/datasets'
+import { toDominoTenantUrl } from '../../utils/dominoLinks'
+import { useProjectUserSummary } from '@/hooks/useProjectUserSummary'
 
 function Step1DataSource() {
+  const userSummary = useProjectUserSummary()
   const { dataSource, setDataSource } = useWizard()
   const { data: datasetsData, isLoading: loadingDatasets, error: datasetsError } = useDatasets()
   const uploadMutation = useUploadFile()
   const addNotification = useStore((state) => state.addNotification)
   const [sourceType, setSourceType] = useState<'upload' | 'domino_dataset'>(
-    dataSource?.type || 'upload'
+    dataSource?.type || 'domino_dataset'
   )
-  const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null)
+  const [openDatasetId, setOpenDatasetId] = useState<string | null>(
+    dataSource?.type === 'domino_dataset' ? dataSource.datasetId ?? null : null
+  )
+  const [datasetDetailsById, setDatasetDetailsById] = useState<Record<string, Dataset>>({})
+  const [loadingDatasetIds, setLoadingDatasetIds] = useState<Record<string, boolean>>({})
+  const [datasetErrorsById, setDatasetErrorsById] = useState<Record<string, string>>({})
 
-  const datasets = datasetsData?.datasets || []
+  const baseDatasets = datasetsData?.datasets || []
+  const datasets = useMemo(
+    () =>
+      baseDatasets.map((dataset) => {
+        const mergedDataset = datasetDetailsById[dataset.id]
+        return mergedDataset
+          ? {
+              ...dataset,
+              ...mergedDataset,
+              files: mergedDataset.files,
+              file_count: mergedDataset.file_count,
+              size_bytes: mergedDataset.size_bytes,
+            }
+          : dataset
+      }),
+    [baseDatasets, datasetDetailsById]
+  )
+  const selectedDatasetId = dataSource?.type === 'domino_dataset' ? dataSource.datasetId ?? null : null
   const datasetLoadError = datasetsError instanceof Error ? datasetsError.message : null
 
   // Fetch preview/schema only for Domino datasets (uploaded files already have columns from upload response)
   const previewFilePath = dataSource?.type === 'domino_dataset' && dataSource?.filePath ? dataSource.filePath : ''
   const { data: previewData, isLoading: loadingPreview } = useDatasetPreview(
     previewFilePath,
-    10 // Only fetch 10 rows to get columns
+    10, // Only fetch 10 rows to get columns
+    undefined, // no offset
+    selectedDatasetId || undefined
   )
 
   const onDrop = useCallback(
@@ -62,13 +90,45 @@ function Step1DataSource() {
     maxFiles: 1,
   })
 
-  const handleSelectDataset = (dataset: Dataset) => {
-    setSelectedDataset(dataset)
-    setDataSource({
-      type: 'domino_dataset',
-      datasetId: dataset.id,
-      fileName: dataset.name,
+  const handleSelectDataset = async (dataset: Dataset) => {
+    const shouldOpen = openDatasetId !== dataset.id
+    setOpenDatasetId(shouldOpen ? dataset.id : null)
+
+    if (selectedDatasetId !== dataset.id) {
+      setDataSource({
+        type: 'domino_dataset',
+        datasetId: dataset.id,
+        fileName: dataset.name,
+      })
+    }
+
+    if (!shouldOpen || datasetDetailsById[dataset.id] || loadingDatasetIds[dataset.id]) {
+      return
+    }
+
+    setLoadingDatasetIds((current) => ({ ...current, [dataset.id]: true }))
+    setDatasetErrorsById((current) => {
+      const next = { ...current }
+      delete next[dataset.id]
+      return next
     })
+
+    try {
+      const detailedDataset = await getDatasetFiles(dataset.id)
+      if (detailedDataset) {
+        setDatasetDetailsById((current) => ({ ...current, [dataset.id]: detailedDataset }))
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to load dataset files'
+      setDatasetErrorsById((current) => ({ ...current, [dataset.id]: message }))
+      addNotification(message, 'error')
+    } finally {
+      setLoadingDatasetIds((current) => {
+        const next = { ...current }
+        delete next[dataset.id]
+        return next
+      })
+    }
   }
 
   const handleSelectFile = async (dataset: Dataset, file: DatasetFile) => {
@@ -105,17 +165,17 @@ function Step1DataSource() {
 
   return (
     <div className="space-y-6">
-      <div>
+      {/*<div>
         <h2 className="text-lg font-normal text-domino-text-primary mb-2">
           Select Data Source
         </h2>
         <p className="text-domino-text-secondary">
           Upload a file or select from mounted Domino datasets
         </p>
-      </div>
+      </div>*/}
 
       <div className="flex gap-4">
-        <button
+        {/*<button
           onClick={() => setSourceType('upload')}
           className={clsx(
             'flex-1 p-4 border transition-colors text-left',
@@ -129,7 +189,7 @@ function Step1DataSource() {
           <p className="text-sm text-domino-text-secondary">
             Upload a CSV or Parquet file
           </p>
-        </button>
+        </button>*/}
 
         <button
           onClick={() => setSourceType('domino_dataset')}
@@ -143,7 +203,10 @@ function Step1DataSource() {
           <CircleStackIcon className="h-6 w-6 text-domino-accent-purple mb-2" />
           <p className="font-medium text-domino-text-primary">Domino Dataset</p>
           <p className="text-sm text-domino-text-secondary">
-            Select from mounted datasets
+            Select from your Domino datasets.
+            <button className="text-domino-accent-purple hover:underline" onClick={() => window.open(toDominoTenantUrl(`/u/${userSummary.project_owner}/${userSummary.project_name}/data?tab=datasets`), '_blank')}>
+              Click here to upload new files to your datasets
+            </button>
           </p>
         </button>
       </div>
@@ -217,36 +280,62 @@ function Step1DataSource() {
               </p>
             </div>
           ) : (
-            datasets.map((dataset: Dataset) => (
-              <div key={dataset.id} className="space-y-2">
-                <button
-                  onClick={() => handleSelectDataset(dataset)}
-                  className={clsx(
-                    'w-full p-4 rounded-lg border-2 transition-colors text-left flex items-center gap-4',
-                    selectedDataset?.id === dataset.id
-                      ? 'border-domino-accent-purple bg-domino-accent-purple/10'
-                      : 'border-domino-border hover:border-domino-text-muted'
-                  )}
-                >
-                  <CircleStackIcon className="h-8 w-8 text-domino-accent-purple flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-domino-text-primary truncate">
-                      {dataset.name}
-                    </p>
-                    <p className="text-sm text-domino-text-secondary">
-                      {dataset.file_count} files, {formatSize(dataset.size_bytes)}
-                    </p>
-                  </div>
-                  {selectedDataset?.id === dataset.id && (
-                    <CheckCircleIcon className="h-6 w-6 text-domino-accent-green flex-shrink-0" />
-                  )}
-                </button>
+            datasets.map((dataset: Dataset) => {
+              const isOpen = openDatasetId === dataset.id
+              const isSelected = selectedDatasetId === dataset.id
+              const isLoadingFiles = Boolean(loadingDatasetIds[dataset.id])
+              const datasetFiles = dataset.files.filter(
+                (file) =>
+                  file.name.endsWith('.csv') ||
+                  file.name.endsWith('.parquet') ||
+                  file.name.endsWith('.pq')
+              )
 
-                {selectedDataset?.id === dataset.id && dataset.files.length > 0 && (
-                  <div className="ml-8 space-y-1">
-                    {dataset.files
-                      .filter(f => f.name.endsWith('.csv') || f.name.endsWith('.parquet') || f.name.endsWith('.pq'))
-                      .map((file) => (
+              return (
+                <div key={dataset.id} className="space-y-2">
+                  <button
+                    onClick={() => {
+                      void handleSelectDataset(dataset)
+                    }}
+                    className={clsx(
+                      'w-full p-4 rounded-lg border-2 transition-colors text-left flex items-center gap-4',
+                      isOpen || isSelected
+                        ? 'border-domino-accent-purple bg-domino-accent-purple/10'
+                        : 'border-domino-border hover:border-domino-text-muted'
+                    )}
+                  >
+                    <CircleStackIcon className="h-8 w-8 text-domino-accent-purple flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-domino-text-primary truncate">
+                        {dataset.name}
+                      </p>
+                      <p className="text-sm text-domino-text-secondary">
+                        {dataset.file_count ? `${dataset.file_count} files, ` : ''}{dataset.size_bytes ? formatSize(dataset.size_bytes) : ''}
+                      </p>
+                    </div>
+                    {isLoadingFiles ? (
+                      <Spinner size="sm" />
+                    ) : (isOpen || isSelected) && (
+                      <CheckCircleIcon className="h-6 w-6 text-domino-accent-green flex-shrink-0" />
+                    )}
+                  </button>
+
+                  {isOpen && datasetErrorsById[dataset.id] && (
+                    <div className="ml-8 rounded-lg border border-domino-accent-red/30 bg-domino-accent-red/5 px-3 py-2">
+                      <p className="text-sm text-domino-accent-red">{datasetErrorsById[dataset.id]}</p>
+                    </div>
+                  )}
+
+                  {isOpen && isLoadingFiles && (
+                    <div className="ml-8 flex items-center gap-2 py-2 text-sm text-domino-text-secondary">
+                      <Spinner size="sm" />
+                      <span>Loading dataset files...</span>
+                    </div>
+                  )}
+
+                  {isOpen && !isLoadingFiles && datasetFiles.length > 0 && (
+                    <div className="ml-8 space-y-1">
+                      {datasetFiles.map((file) => (
                         <button
                           key={file.path}
                           onClick={() => handleSelectFile(dataset, file)}
@@ -278,10 +367,17 @@ function Step1DataSource() {
                           )}
                         </button>
                       ))}
-                  </div>
-                )}
-              </div>
-            ))
+                    </div>
+                  )}
+
+                  {isOpen && !isLoadingFiles && !datasetErrorsById[dataset.id] && datasetFiles.length === 0 && (
+                    <div className="ml-8 rounded-lg border border-domino-border px-3 py-2">
+                      <p className="text-sm text-domino-text-muted">No supported CSV or Parquet files found.</p>
+                    </div>
+                  )}
+                </div>
+              )
+            })
           )}
         </div>
       )}

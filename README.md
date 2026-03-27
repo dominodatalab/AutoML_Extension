@@ -327,8 +327,17 @@ You can develop this application locally by setting some environment variables, 
 
 ```sh
 source .env-dev # see .env-dev-example
-# generate api client
-cd automl-service && ./scripts/download_public_api_client.sh &&  ./scripts/generate_public_api_client
+
+# download swagger specs
+(cd automl-service && export OUT_PATH=./app/api/downloaded_openapi_specs/ && mkdir -p $OUT_PATH && ./scripts/download_api_specs.sh)
+
+echo "then pick what you want and put into automl-service/app/api/domino_public_spec.json and automl-service/app/api/domino_private_spec.json"
+
+# generate public api client
+(cd automl-service && OUT_PATH=./app/api/generated IN_PATH=./app/api/domino_public_spec.json ./scripts/generate_api_client.sh)
+
+# generate private api client
+(cd automl-service && OUT_PATH=./app/api/generated_private IN_PATH=./app/api/domino_private_spec.json ./scripts/generate_api_client.sh)
 
 # run dev servers, option A
 FRONTEND_PORT=3000 BACKEND_PORT=8000 ./app.sh --frontend

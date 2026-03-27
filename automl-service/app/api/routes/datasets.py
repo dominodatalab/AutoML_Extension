@@ -82,7 +82,9 @@ async def get_dataset_schema(
 @handle_errors("[PREVIEW] Error reading file", detail_prefix="Failed to read file")
 async def preview_file_by_path(request: FilePreviewRequest):
     """Preview a file by its path with pagination support."""
+    # TODO should delete this. it's not used by the UI and it's missing dataset_id
     return preview_file_response(
+        dataset_id="",
         file_path=request.file_path,
         limit=request.limit,
         rows=request.rows,

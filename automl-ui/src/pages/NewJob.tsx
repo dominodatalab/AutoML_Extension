@@ -7,6 +7,7 @@ import Step1DataSource from '../components/wizard/Step1DataSource'
 import Step2ModelType from '../components/wizard/Step2ModelType'
 import Step3Configuration from '../components/wizard/Step3Configuration'
 import Step4Review from '../components/wizard/Step4Review'
+import { buildAppPath } from '../utils/appPath'
 
 const steps = [
   { name: 'Data Source', description: 'Select your training data' },
@@ -26,7 +27,7 @@ function NewJob() {
       setSubmitError(null)
       setIsQueueFull(false)
       const jobId = await wizard.submit()
-      navigate(`/jobs/${jobId}`)
+      navigate(buildAppPath(`/jobs/${jobId}`))
     } catch (error) {
       if ((error as any)?.status === 429) {
         setIsQueueFull(true)
@@ -54,7 +55,7 @@ function NewJob() {
     <div className="space-y-8">
       <div>
         <nav className="flex items-center gap-2 text-sm mb-2">
-          <Link to="/dashboard" className="text-domino-accent-purple hover:underline">
+          <Link to={buildAppPath('/dashboard')} className="text-domino-accent-purple hover:underline">
             AutoML
           </Link>
           <span className="text-domino-text-muted">/</span>
