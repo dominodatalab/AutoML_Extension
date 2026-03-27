@@ -41,6 +41,8 @@ export function useJobLiveUpdates(
   const [liveUpdate, setLiveUpdate] = useState<JobLiveUpdate | null>(null)
   const [isConnected, setIsConnected] = useState(false)
   const terminalHandledRef = useRef(false)
+  const onTerminalRef = useRef(onTerminal)
+  onTerminalRef.current = onTerminal
 
   const wsUrl = useMemo(() => {
     if (!jobId) return null
@@ -102,7 +104,7 @@ export function useJobLiveUpdates(
             !terminalHandledRef.current
           ) {
             terminalHandledRef.current = true
-            onTerminal?.()
+            onTerminalRef.current?.()
           }
         } catch (error) {
           console.error('Failed to parse job websocket message:', error)
@@ -125,7 +127,7 @@ export function useJobLiveUpdates(
       closedByHook = true
       cleanupSocket()
     }
-  }, [enabled, onTerminal, wsUrl])
+  }, [enabled, wsUrl])
 
   return { liveUpdate, isConnected }
 }
