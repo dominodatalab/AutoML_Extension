@@ -43,7 +43,7 @@ function App() {
       <BrowserRouter basename={basename}>
         <Routes>
           <Route path="/" element={<Layout />}>
-            <Route index element={<Navigate to={buildAppPath('/dashboard')} replace />} />
+            <Route index element={<Navigate to={buildAppPath(`/dashboard${window.location.search}`)} replace />} />
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="eda" element={<EDAAnalysis />} />
             <Route path="jobs/new" element={<NewJob />} />
