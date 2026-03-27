@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Contains shared errors types that can be raised from API functions"""
 
 

@@ -1,0 +1,80 @@
+- main [ref=e4]:
+  - generic [ref=e364]:
+    - generic [ref=e365]:
+      - heading "AutoML" [level=1] [ref=e367]
+      - generic [ref=e368]:
+        - link "Explore Data" [ref=e369] [cursor=pointer]:
+          - /url: /eda
+          - button "Explore Data" [ref=e370]:
+            - img [ref=e371]
+            - text: Explore Data
+        - link "New training job" [ref=e373] [cursor=pointer]:
+          - /url: /jobs/new
+          - button "New training job" [ref=e374]
+        - button "Storage cleanup" [ref=e375] [cursor=pointer]:
+          - img [ref=e376]
+          - text: Storage cleanup
+    - generic [ref=e378]:
+      - generic [ref=e379]:
+        - img [ref=e380]
+        - textbox "Search job name" [ref=e382]
+      - button "All statuses" [ref=e384] [cursor=pointer]:
+        - generic [ref=e385]: All statuses
+        - img [ref=e386]
+      - button "All types" [ref=e389] [cursor=pointer]:
+        - generic [ref=e390]: All types
+        - img [ref=e391]
+      - generic [ref=e393]:
+        - button "Table view" [ref=e394] [cursor=pointer]:
+          - img [ref=e395]
+        - button "Card view" [ref=e397] [cursor=pointer]:
+          - img [ref=e398]
+    - table [ref=e401]:
+      - rowgroup [ref=e402]:
+        - row "Select all jobs Name Type Execution Status Best model Score Created Duration" [ref=e403]:
+          - columnheader "Select all jobs" [ref=e404]:
+            - checkbox "Select all jobs" [ref=e405] [cursor=pointer]
+          - columnheader "Name" [ref=e406]:
+            - generic [ref=e407] [cursor=pointer]:
+              - text: Name
+              - img [ref=e408]
+          - columnheader "Type" [ref=e410]
+          - columnheader "Execution" [ref=e411]
+          - columnheader "Status" [ref=e412]:
+            - generic [ref=e413] [cursor=pointer]:
+              - text: Status
+              - img [ref=e414]
+          - columnheader "Best model" [ref=e416]
+          - columnheader "Score" [ref=e417]
+          - columnheader "Created" [ref=e418]:
+            - generic [ref=e419] [cursor=pointer]:
+              - text: Created
+              - img [ref=e420]
+          - columnheader "Duration" [ref=e422]
+          - columnheader [ref=e423]
+      - rowgroup [ref=e424]:
+        - row "Select automl-ui-test automl-ui-test tabular Local completed CatBoost 1.0000 03/17/2026 8:50 PM 7s" [ref=e425]:
+          - cell "Select automl-ui-test" [ref=e426]:
+            - checkbox "Select automl-ui-test" [ref=e427] [cursor=pointer]
+          - cell "automl-ui-test" [ref=e428]:
+            - link "automl-ui-test" [ref=e429] [cursor=pointer]:
+              - /url: /jobs/a7808733-cd26-4bbb-aa10-627dca9da36a
+          - cell "tabular" [ref=e430]
+          - cell "Local" [ref=e431]:
+            - generic [ref=e432]: Local
+          - cell "completed" [ref=e433]:
+            - generic [ref=e434]:
+              - img [ref=e435]
+              - generic [ref=e437]: completed
+          - cell "CatBoost" [ref=e438]
+          - cell "1.0000" [ref=e439]
+          - cell "03/17/2026 8:50 PM" [ref=e440]
+          - cell "7s" [ref=e441]
+          - cell [ref=e442]:
+            - button [ref=e444] [cursor=pointer]:
+              - img [ref=e445]
+    - generic [ref=e449]:
+      - generic [ref=e450]: Showing 1–1 out of 1
+      - button "<" [disabled] [ref=e451]
+      - button "1" [ref=e452] [cursor=pointer]
+      - button ">" [disabled] [ref=e453]

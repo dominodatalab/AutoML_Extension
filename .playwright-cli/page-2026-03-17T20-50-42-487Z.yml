@@ -1,0 +1,87 @@
+- main [ref=e4]:
+  - generic [ref=e55]:
+    - generic [ref=e56]:
+      - navigation [ref=e57]:
+        - link "AutoML" [ref=e58] [cursor=pointer]:
+          - /url: /dashboard
+        - generic [ref=e59]: /
+        - generic [ref=e60]: New training job
+      - generic [ref=e62]:
+        - heading "New training job" [level=1] [ref=e63]
+        - paragraph [ref=e64]: Configure and run an AutoGluon training job
+    - navigation "Progress" [ref=e66]:
+      - list [ref=e67]:
+        - listitem [ref=e68]:
+          - button [ref=e71] [cursor=pointer]:
+            - img [ref=e128]
+          - generic [ref=e73]: Data Source
+        - listitem [ref=e74]:
+          - button [ref=e79] [cursor=pointer]:
+            - img [ref=e174]
+          - generic [ref=e81]: Model Type
+        - listitem [ref=e82]:
+          - button [ref=e87] [cursor=pointer]:
+            - img [ref=e234]
+          - generic [ref=e89]: Configuration
+        - listitem [ref=e90]:
+          - button [ref=e93] [cursor=pointer]
+          - generic [ref=e95]: Review
+    - generic [ref=e236]:
+      - generic [ref=e237]:
+        - heading "Review Configuration" [level=2] [ref=e238]
+        - paragraph [ref=e239]: Review your settings before starting the training job
+      - generic [ref=e240]:
+        - generic [ref=e241]:
+          - heading "Job Details" [level=3] [ref=e242]:
+            - img [ref=e244]
+            - text: Job Details
+          - generic [ref=e247]:
+            - generic [ref=e248]: Name
+            - generic [ref=e249]: automl-ui-test
+        - generic [ref=e250]:
+          - heading "Data Source" [level=3] [ref=e251]:
+            - img [ref=e253]
+            - text: Data Source
+          - generic [ref=e255]:
+            - generic [ref=e256]:
+              - generic [ref=e257]: Type
+              - generic [ref=e258]: Uploaded File
+            - generic [ref=e259]:
+              - generic [ref=e260]: File
+              - generic [ref=e261]: automl_sample.csv
+            - generic [ref=e262]:
+              - generic [ref=e263]: Columns
+              - generic [ref=e264]: "3"
+            - generic [ref=e265]:
+              - generic [ref=e266]: Rows
+              - generic [ref=e267]: "5"
+        - generic [ref=e268]:
+          - heading "Model Configuration" [level=3] [ref=e269]:
+            - img [ref=e271]
+            - text: Model Configuration
+          - generic [ref=e274]:
+            - generic [ref=e275]: Model Type
+            - generic [ref=e276]: Tabular
+        - generic [ref=e277]:
+          - heading "Training Settings" [level=3] [ref=e278]:
+            - img [ref=e280]
+            - text: Training Settings
+          - generic [ref=e282]:
+            - generic [ref=e283]:
+              - generic [ref=e284]: Execution Target
+              - generic [ref=e285]: Local
+            - generic [ref=e286]:
+              - generic [ref=e287]: Target Column
+              - generic [ref=e288]: target
+            - generic [ref=e289]:
+              - generic [ref=e290]: Prediction Length
+              - generic [ref=e291]: "10"
+            - generic [ref=e292]:
+              - generic [ref=e293]: Preset
+              - generic [ref=e294]: medium quality faster train
+            - generic [ref=e295]:
+              - generic [ref=e296]: Time Limit
+              - generic [ref=e297]: 3600s
+    - generic [ref=e121]:
+      - button "Back" [ref=e122] [cursor=pointer]
+      - button "Start Training" [active] [ref=e298] [cursor=pointer]

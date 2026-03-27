@@ -1,8 +1,10 @@
 """Service helpers for job route orchestration."""
+from __future__ import annotations
 
 import asyncio
 import logging
 import os
+from time import monotonic
 from typing import Optional
 
 from app.core.utils import utc_now
@@ -23,6 +25,7 @@ from app.api.generated.domino_public_api_client.models.job_envelope_v1 import Jo
 
 from app.api.schemas.job import (
     JobCreateRequest,
+    JobListItemResponse,
     JobListRequest,
     JobMetricsResponse,
     JobProgressResponse,
@@ -36,6 +39,7 @@ from app.core.context.user import get_viewing_user
 from app.core.domino_http import get_domino_public_api_client_sync
 from app.core.authorization import require_job_list
 from app.core.dataset_mounts import resolve_dataset_mount_paths
+from app.core.leaderboard_utils import normalize_leaderboard_payload, normalize_leaderboard_rows
 from app.db.models import Job, JobStatus, ModelType, ProblemType
 from app.db import crud
 from app.services.job_links import attach_external_links
@@ -63,9 +67,44 @@ _DOMINO_MISSING_ERROR_MARKERS = (
     "no run",
     "archiv",
 )
+_OVERVIEW_SYNC_MIN_INTERVAL_SECONDS = 5.0
+_JOB_SYNC_MIN_INTERVAL_SECONDS = 2.0
+
+_overview_sync_task: Optional[asyncio.Task] = None
+_overview_sync_started_at = 0.0
+_job_sync_tasks: dict[str, asyncio.Task] = {}
+_job_sync_started_at: dict[str, float] = {}
+_background_sync_lock = asyncio.Lock()
+
 _CANONICAL_GIT_SERVICE_PROVIDER_VALUES = {
     provider.value.lower(): provider.value for provider in GitServiceProviderV1
 }
+
+
+def serialize_job_config(job: Job) -> dict:
+    """Extract read-only fields the training worker needs into a JSON-safe dict."""
+    return {
+        "name": job.name,
+        "data_source": job.data_source,
+        "file_path": job.file_path,
+        "dataset_id": job.dataset_id,
+        "model_type": job.model_type.value,
+        "problem_type": job.problem_type.value if job.problem_type else None,
+        "target_column": job.target_column,
+        "time_column": job.time_column,
+        "id_column": job.id_column,
+        "prediction_length": job.prediction_length,
+        "preset": job.preset,
+        "time_limit": job.time_limit,
+        "eval_metric": job.eval_metric,
+        "autogluon_config": job.autogluon_config,
+        "enable_mlflow": job.enable_mlflow,
+        "experiment_name": job.experiment_name,
+        "project_id": job.project_id,
+        "project_name": job.project_name,
+        "auto_register": job.auto_register,
+        "register_name": job.register_name,
+    }
 
 
 def _normalize_job_name(name: str) -> str:
@@ -117,6 +156,11 @@ async def get_project_context(
 
     # Check for sidebar-injected project id header
     header_project_id = request.headers.get("X-Project-Id") if request else None
+    logger.info(
+        "[PROJECT CONTEXT] X-Project-Id header=%s, request present=%s",
+        header_project_id,
+        request is not None,
+    )
 
     if header_project_id:
         from app.services.project_resolver import resolve_project
@@ -148,6 +192,207 @@ async def get_project_context(
 def _attach_external_links(job: Job) -> Job:
     """Attach computed external URLs used by the Job Overview UI."""
     return attach_external_links(job, logger)
+
+
+def build_job_list_item_response(job: Job) -> JobListItemResponse:
+    """Build the lightweight list payload used by dashboard-style views."""
+    metrics = job.metrics if isinstance(job.metrics, dict) else {}
+    best_model_name = metrics.get("best_model") if isinstance(metrics, dict) else None
+    best_model_score_raw = metrics.get("best_score") if isinstance(metrics, dict) else None
+    try:
+        best_model_score = float(best_model_score_raw) if best_model_score_raw is not None else None
+    except (TypeError, ValueError):
+        best_model_score = None
+
+    return JobListItemResponse(
+        id=job.id,
+        name=job.name,
+        description=job.description,
+        owner=job.owner,
+        project_id=job.project_id,
+        project_name=job.project_name,
+        model_type=job.model_type.value if hasattr(job.model_type, "value") else str(job.model_type),
+        problem_type=job.problem_type.value if getattr(job, "problem_type", None) else None,
+        status=job.status.value if hasattr(job.status, "value") else str(job.status),
+        execution_target=getattr(job, "execution_target", "local") or "local",
+        domino_job_id=getattr(job, "domino_job_id", None),
+        domino_job_status=getattr(job, "domino_job_status", None),
+        progress=getattr(job, "progress", None),
+        current_step=getattr(job, "current_step", None),
+        data_source=job.data_source,
+        dataset_id=job.dataset_id,
+        file_path=job.file_path,
+        experiment_name=getattr(job, "experiment_name", None),
+        error_message=getattr(job, "error_message", None),
+        is_registered=bool(getattr(job, "is_registered", False)),
+        registered_model_name=getattr(job, "registered_model_name", None),
+        registered_model_version=getattr(job, "registered_model_version", None),
+        best_model_name=best_model_name,
+        best_model_score=best_model_score,
+        created_at=job.created_at,
+        started_at=getattr(job, "started_at", None),
+        completed_at=getattr(job, "completed_at", None),
+    )
+
+
+def _coerce_nonnegative_int(value) -> Optional[int]:
+    """Best-effort integer coercion for queue counters from mixed implementations."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return max(value, 0)
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return None
+
+
+def _get_local_queue_depth(queue_manager) -> int:
+    """Return tracked local jobs across current and legacy queue-manager shapes."""
+    get_total_tracked = getattr(queue_manager, "get_total_tracked", None)
+    if callable(get_total_tracked):
+        tracked = _coerce_nonnegative_int(get_total_tracked())
+        if tracked is not None:
+            return tracked
+
+    get_queue_status = getattr(queue_manager, "get_queue_status", None)
+    if callable(get_queue_status):
+        status = get_queue_status() or {}
+        if isinstance(status, dict):
+            total_tracked = _coerce_nonnegative_int(status.get("total_tracked"))
+            if total_tracked is not None:
+                return total_tracked
+
+            active = _coerce_nonnegative_int(status.get("active"))
+            queued = _coerce_nonnegative_int(status.get("queued"))
+            if active is not None or queued is not None:
+                return (active or 0) + (queued or 0)
+
+            running_jobs = _coerce_nonnegative_int(status.get("running_jobs"))
+            queued_jobs = _coerce_nonnegative_int(status.get("queued_jobs"))
+            if running_jobs is not None or queued_jobs is not None:
+                return (running_jobs or 0) + (queued_jobs or 0)
+
+    return 0
+
+
+def _log_background_sync_result(task: asyncio.Task, label: str) -> None:
+    """Log background sync failures without surfacing them to callers."""
+    try:
+        task.result()
+    except Exception:
+        logger.exception("Background sync task failed: %s", label)
+
+
+async def _run_overview_sync_background(auth_token: Optional[str] = None) -> None:
+    """Execute overview sync in a detached DB session.
+
+    Restores the caller's auth token so Domino API calls run as the
+    requesting user, not the App owner.
+    """
+    from app.core.context.auth import set_request_auth_header
+    from app.dependencies import get_db_session
+
+    set_request_auth_header(auth_token)
+    try:
+        async with get_db_session() as db:
+            await _sync_active_domino_jobs_for_overview(db)
+    finally:
+        set_request_auth_header(None)
+
+
+async def _schedule_overview_domino_sync() -> None:
+    """Start a throttled background overview sync if one is not already running."""
+    global _overview_sync_task, _overview_sync_started_at
+
+    from app.core.context.auth import get_request_auth_header
+
+    async with _background_sync_lock:
+        now = monotonic()
+        if _overview_sync_task and not _overview_sync_task.done():
+            return
+        if now - _overview_sync_started_at < _OVERVIEW_SYNC_MIN_INTERVAL_SECONDS:
+            return
+
+        # Capture the requesting user's token before detaching the task.
+        auth_token = get_request_auth_header()
+
+        _overview_sync_started_at = now
+        _overview_sync_task = asyncio.create_task(
+            _run_overview_sync_background(auth_token=auth_token)
+        )
+        _overview_sync_task.add_done_callback(
+            lambda task: _log_background_sync_result(task, "overview")
+        )
+
+
+async def _run_job_sync_background(
+    job_id: str,
+    sync_terminal_metadata: bool,
+    auth_token: Optional[str] = None,
+) -> None:
+    """Execute a detached Domino sync for a single job.
+
+    Restores the caller's auth token so Domino API calls run as the
+    requesting user, not the App owner.
+    """
+    from app.core.context.auth import set_request_auth_header
+    from app.dependencies import get_db_session
+
+    set_request_auth_header(auth_token)
+    try:
+        async with get_db_session() as db:
+            job = await crud.get_job(db, job_id)
+            if not job:
+                return
+            await _sync_domino_job_state(
+                db,
+                job,
+                sync_terminal_metadata=sync_terminal_metadata,
+            )
+    finally:
+        set_request_auth_header(None)
+
+
+async def _schedule_job_domino_sync(
+    job: Job,
+    *,
+    sync_terminal_metadata: bool = True,
+) -> None:
+    """Throttle and detach per-job Domino syncs from read paths."""
+    if getattr(job, "execution_target", "local") != "domino_job":
+        return
+    if not job.domino_job_id:
+        return
+
+    from app.core.context.auth import get_request_auth_header
+
+    async with _background_sync_lock:
+        now = monotonic()
+        active_task = _job_sync_tasks.get(job.id)
+        if active_task and not active_task.done():
+            return
+        if now - _job_sync_started_at.get(job.id, 0.0) < _JOB_SYNC_MIN_INTERVAL_SECONDS:
+            return
+
+        # Capture the requesting user's token before detaching the task.
+        auth_token = get_request_auth_header()
+
+        _job_sync_started_at[job.id] = now
+        task = asyncio.create_task(
+            _run_job_sync_background(
+                job.id,
+                sync_terminal_metadata=sync_terminal_metadata,
+                auth_token=auth_token,
+            )
+        )
+        _job_sync_tasks[job.id] = task
+
+        def _cleanup(task_obj: asyncio.Task, *, tracked_job_id: str = job.id) -> None:
+            _job_sync_tasks.pop(tracked_job_id, None)
+            _log_background_sync_result(task_obj, f"job:{tracked_job_id}")
+
+        task.add_done_callback(_cleanup)
 
 
 def validate_job_create_request(job_request: JobCreateRequest) -> None:
@@ -315,7 +560,7 @@ async def create_job_with_context(
     else:
         from app.core.job_queue import get_job_queue
 
-        active_local = get_job_queue().get_total_tracked()
+        active_local = _get_local_queue_depth(get_job_queue())
         if active_local >= settings.max_local_queue_size:
             raise HTTPException(
                 status_code=429,
@@ -348,12 +593,29 @@ async def create_job_with_context(
         from app.core.domino_job_launcher import get_domino_job_launcher
 
         settings = get_settings()
+
+        # Pre-create the automl-extension dataset so the Domino Job
+        # boots with the mount already available.
+        if project_id and not settings.standalone_mode:
+            try:
+                from app.services.storage_resolver import get_storage_resolver
+
+                await asyncio.wait_for(
+                    get_storage_resolver().ensure_dataset_exists(project_id),
+                    timeout=30.0,
+                )
+            except (asyncio.TimeoutError, Exception):
+                logger.warning(
+                    "Pre-launch dataset creation failed for %s; job proceeds anyway",
+                    project_id,
+                )
+
         launcher = get_domino_job_launcher()
         launch_result = await launcher.start_training_job(
             job_id=job.id,
+            job_config=serialize_job_config(job),
             title=job.name,
             hardware_tier_name=job_request.domino_hardware_tier_name or settings.domino_training_hardware_tier_name,
-            environment_id=job_request.domino_environment_id or settings.domino_training_environment_id,
             project_id=project_id,
         )
         if not launch_result.get("success"):
@@ -382,12 +644,43 @@ async def create_job_with_context(
     return _attach_external_links(job)
 
 
+async def _fail_zombie_local_jobs(db: AsyncSession) -> None:
+    """Detect local jobs marked RUNNING whose asyncio task no longer exists.
+
+    This handles the case where the training coroutine was killed (e.g. OOM)
+    but the API server process survived — the job stays RUNNING in the DB
+    with nothing actually executing it.
+    """
+    try:
+        from app.core.job_queue import get_job_queue
+        queue = get_job_queue()
+
+        running_local = await crud.get_jobs_by_statuses(
+            db,
+            [JobStatus.RUNNING],
+            execution_target="local",
+        )
+        for job in running_local:
+            # If the queue has no task for this job, it's a zombie
+            if job.id not in queue._tasks or queue._tasks[job.id].done():
+                await crud.update_job_status(
+                    db, job.id, JobStatus.FAILED,
+                    error_message="Training process died unexpectedly (likely out of memory)",
+                    completed_at=utc_now(),
+                )
+                logger.warning("Marked zombie local job as FAILED: %s (%s)", job.id, job.name)
+    except Exception:
+        logger.exception("Error checking for zombie local jobs")
+
+
+
 async def list_jobs_filtered(
     db: AsyncSession,
     list_request: JobListRequest,
     request: Optional[Request] = None,
 ) -> list[Job]:
     """List jobs using advanced POST filters."""
+    await _fail_zombie_local_jobs(db)
     (
         status_filter,
         model_type_filter,
@@ -423,26 +716,41 @@ async def list_jobs_filtered(
         owner=owner_filter,
         project_id=project_id_filter,
         project_name=project_name_filter,
-        execution_target=execution_target_filter
+        summary_only=True,
+        execution_target=execution_target_filter,
     )
 
     return list(jobs)
 
 
 async def _sync_active_domino_jobs_for_overview(db: AsyncSession) -> None:
-    """Refresh active Domino-backed jobs so list views show current status."""
-    active_jobs = await crud.get_jobs_by_statuses(
-        db,
-        [JobStatus.PENDING, JobStatus.RUNNING],
-        execution_target="domino_job",
-    )
-    if active_jobs:
-        for job in active_jobs:
-            if not job.domino_job_id:
-                continue
-            await _sync_domino_job_state(db, job)
+    """Refresh active Domino-backed jobs so list views show current status.
 
-    await _sync_recent_terminal_domino_metadata_for_overview(db)
+    Errors from individual job syncs are logged but never propagated —
+    a flaky Domino API call must not break the job-list endpoint.
+    """
+    try:
+        active_jobs = await crud.get_jobs_by_statuses(
+            db,
+            [JobStatus.PENDING, JobStatus.RUNNING],
+            execution_target="domino_job",
+        )
+        if active_jobs:
+            for job in active_jobs:
+                if not job.domino_job_id:
+                    continue
+                try:
+                    await _sync_domino_job_state(db, job)
+                except Exception:
+                    logger.exception(
+                        "Failed to sync Domino job %s; skipping", job.id
+                    )
+
+        await _sync_recent_terminal_domino_metadata_for_overview(db)
+    except Exception:
+        logger.exception(
+            "Error during Domino job sync for overview; job list will show stale status"
+        )
 
 
 async def _sync_recent_terminal_domino_metadata_for_overview(db: AsyncSession) -> None:
@@ -545,6 +853,7 @@ async def preview_cleanup(
     statuses: str = "failed,cancelled",
     older_than_days: Optional[int] = None,
     project_id: Optional[str] = None,
+    owner: Optional[str] = None,
 ) -> dict:
     """Preview what would be removed by bulk cleanup."""
     require_storage_modify(project_id=project_id)
@@ -553,7 +862,7 @@ async def preview_cleanup(
 
     cleanup = get_cleanup_service()
     status_list = _parse_statuses_csv(statuses)
-    preview = await cleanup.preview_cleanup(db, status_list, older_than_days, project_id=project_id)
+    preview = await cleanup.preview_cleanup(db, status_list, older_than_days, project_id=project_id, owner=owner)
     orphans = await cleanup.find_orphans_checked(db)
     return {**preview, "orphans": orphans}
 
@@ -564,6 +873,7 @@ async def bulk_cleanup(
     older_than_days: Optional[int] = None,
     include_orphans: bool = False,
     project_id: Optional[str] = None,
+    owner: Optional[str] = None,
 ) -> dict:
     """Delete artifacts and DB rows for jobs matching given criteria."""
     require_storage_modify(project_id=project_id)
@@ -572,7 +882,7 @@ async def bulk_cleanup(
 
     cleanup = get_cleanup_service()
     status_list = [JobStatus(s) for s in statuses]
-    result = await cleanup.bulk_cleanup(db, status_list, older_than_days, project_id=project_id)
+    result = await cleanup.bulk_cleanup(db, status_list, older_than_days, project_id=project_id, owner=owner)
 
     if include_orphans:
         orphan_result = await cleanup.delete_orphans(db)
@@ -644,7 +954,6 @@ def _parse_get_job_details_response(
     )
 
 
-
 def _fetch_domino_job_or_throw(domino_job_id: str) -> JobEnvelopeV1 | None:
     """Fetch a Domino job via the Public API and raise on request failure."""
     client = get_domino_public_api_client_sync()
@@ -656,12 +965,13 @@ def _fetch_domino_job_or_throw(domino_job_id: str) -> JobEnvelopeV1 | None:
     job = _parse_get_job_details_response(client=client, response=response)
 
     if response.status_code > 399:
-        raise HTTPException(status_code=response.status_code, message=f"Failed to get job. {response.content}")
+        raise HTTPException(status_code=response.status_code, detail=f"Failed to get job. {response.content}")
 
     return job
 
+
 async def get_job_or_404(db: AsyncSession, job_id: str, owner_user_name: str) -> Job:
-    """Get job by id if user may retrieve the job"""
+    """Get job by id if user may retrieve the job."""
     job = await crud.get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -675,7 +985,10 @@ async def get_job_or_404(db: AsyncSession, job_id: str, owner_user_name: str) ->
         if job.domino_job_id:
             await asyncio.to_thread(_fetch_domino_job_or_throw, job.domino_job_id)
         else:
-            raise HTTPException(status_code=500, detail="No domino job ID exists for domino_job, so cannot authorize")
+            # No domino_job_id yet (pending submission or failed before launch) —
+            # fall back to owner check
+            if job.owner != owner_user_name:
+                raise HTTPException(status_code=403, detail="Forbidden")
     return job
 
 
@@ -1010,8 +1323,11 @@ async def reconcile_jobs_for_storage_cleanup(db: AsyncSession) -> dict:
 
 def normalize_job_leaderboard(job: Job) -> Job:
     """Normalize legacy leaderboard payloads for API compatibility."""
-    if job.leaderboard and isinstance(job.leaderboard, dict) and "models" in job.leaderboard:
-        job.leaderboard = job.leaderboard["models"]
+    normalized = normalize_leaderboard_payload(job.leaderboard)
+    if isinstance(normalized, dict) and "models" in normalized:
+        job.leaderboard = normalized["models"]
+    else:
+        job.leaderboard = normalized
     return job
 
 
@@ -1029,9 +1345,9 @@ def extract_metrics_leaderboard(job: Job) -> Optional[list[dict]]:
     if not job.leaderboard:
         return None
     if isinstance(job.leaderboard, dict):
-        return job.leaderboard.get("models", [])
+        return normalize_leaderboard_rows(job.leaderboard.get("models", []))
     if isinstance(job.leaderboard, list):
-        return job.leaderboard
+        return normalize_leaderboard_rows(job.leaderboard)
     return None
 
 
@@ -1061,7 +1377,7 @@ async def get_job_metrics_response(db: AsyncSession, job_id: str) -> JobMetricsR
     )
 
 
-async def get_job_progress_response(db: AsyncSession, job_id: str)  -> JobProgressResponse:
+async def get_job_progress_response(db: AsyncSession, job_id: str) -> JobProgressResponse:
     """Build progress response payload for a job."""
     owner_user_name = get_viewing_user_name()
     job = await get_job_or_404(db, job_id, owner_user_name)
@@ -1179,7 +1495,8 @@ async def register_model_for_job(
     request: RegisterModelRequest,
 ) -> RegisterModelResponse:
     """Register a completed job's trained model in Domino registry."""
-    job = await get_job_or_404(db, job_id)
+    owner_user_name = get_viewing_user_name()
+    job = await get_job_or_404(db, job_id, owner_user_name)
     if job.status != JobStatus.COMPLETED:
         raise HTTPException(
             status_code=400,

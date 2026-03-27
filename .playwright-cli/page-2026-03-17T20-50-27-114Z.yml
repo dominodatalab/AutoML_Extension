@@ -1,0 +1,79 @@
+- main [ref=e4]:
+  - generic [ref=e55]:
+    - generic [ref=e56]:
+      - navigation [ref=e57]:
+        - link "AutoML" [ref=e58] [cursor=pointer]:
+          - /url: /dashboard
+        - generic [ref=e59]: /
+        - generic [ref=e60]: New training job
+      - generic [ref=e62]:
+        - heading "New training job" [level=1] [ref=e63]
+        - paragraph [ref=e64]: Configure and run an AutoGluon training job
+    - navigation "Progress" [ref=e66]:
+      - list [ref=e67]:
+        - listitem [ref=e68]:
+          - button [ref=e71] [cursor=pointer]:
+            - img [ref=e128]
+          - generic [ref=e73]: Data Source
+        - listitem [ref=e74]:
+          - button [ref=e79] [cursor=pointer]:
+            - img [ref=e174]
+          - generic [ref=e81]: Model Type
+        - listitem [ref=e82]:
+          - button [ref=e87] [cursor=pointer]
+          - generic [ref=e89]: Configuration
+        - listitem [ref=e90]:
+          - button [disabled] [ref=e93]
+          - generic [ref=e95]: Review
+    - generic [ref=e176]:
+      - generic [ref=e177]:
+        - heading "Configure Training" [level=2] [ref=e178]
+        - paragraph [ref=e179]: Set up the training parameters for your AutoGluon model
+      - generic [ref=e180]:
+        - generic [ref=e181]:
+          - generic [ref=e182]:
+            - generic [ref=e183]: Job Name
+            - textbox "Job Name" [ref=e184]:
+              - /placeholder: My training job
+              - text: automl-ui-test
+          - generic [ref=e185]:
+            - generic [ref=e186]: Description (optional)
+            - textbox "Description (optional)" [ref=e187]:
+              - /placeholder: Describe your training job
+          - generic [ref=e188]:
+            - generic [ref=e189]: Execution Target
+            - button "Local (In-App Queue)" [ref=e191] [cursor=pointer]:
+              - generic [ref=e192]: Local (In-App Queue)
+              - img [ref=e193]
+        - generic [ref=e195]:
+          - heading "Data Configuration" [level=3] [ref=e196]
+          - generic [ref=e198]:
+            - generic [ref=e199]: Target Column
+            - button "target" [ref=e233] [cursor=pointer]:
+              - generic [ref=e202]: target
+              - img [ref=e203]
+        - generic [ref=e205]:
+          - heading "AutoGluon Settings" [level=3] [ref=e206]
+          - generic [ref=e207]:
+            - generic [ref=e208]:
+              - generic [ref=e209]: Preset
+              - button "Medium Quality (faster)" [ref=e211] [cursor=pointer]:
+                - generic [ref=e212]: Medium Quality (faster)
+                - img [ref=e213]
+            - generic [ref=e215]:
+              - generic [ref=e216]: Time Limit (seconds)
+              - spinbutton "Time Limit (seconds)" [ref=e217]: "3600"
+            - generic [ref=e218]:
+              - generic [ref=e219]: Evaluation Metric (optional)
+              - textbox "Evaluation Metric (optional)" [ref=e220]:
+                - /placeholder: Auto-detect
+            - generic [ref=e221]:
+              - generic [ref=e222]: Experiment Name (optional)
+              - textbox "Experiment Name (optional)" [ref=e223]:
+                - /placeholder: Auto-generated
+        - button "Advanced Configuration" [ref=e225] [cursor=pointer]:
+          - img [ref=e226]
+          - text: Advanced Configuration
+    - generic [ref=e121]:
+      - button "Back" [ref=e122] [cursor=pointer]
+      - button "Continue" [ref=e123] [cursor=pointer]

@@ -1,5 +1,6 @@
 """FastAPI application factory and configuration."""
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -7,6 +8,7 @@ import re
 from typing import Optional
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -16,6 +18,7 @@ from app.core.websocket_manager import get_websocket_manager
 from app.db.database import create_tables
 from app.api.routes import health, jobs, datasets, predictions, profiling, registry, export, deployments
 from app.core.context.auth import set_request_auth_header
+from app.core.context.user import clear_viewing_user
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL") or logging.INFO,
@@ -81,6 +84,18 @@ async def lifespan(app: FastAPI):
     os.makedirs(os.path.join(settings.datasets_path, "uploads"), exist_ok=True)
     logger.info(f"Required directories created (uploads: {settings.uploads_path})")
 
+    from app.core.utils import cleanup_dataset_cache
+    deleted = cleanup_dataset_cache(os.path.join(settings.temp_path, "dataset_cache"))
+    if deleted:
+        logger.info("Cleaned up %d stale cached dataset files", deleted)
+
+    from app.dependencies import get_db_session as _get_db_session
+    async with _get_db_session() as db:
+        from app.db.crud import delete_stale_eda_results
+        eda_deleted = await delete_stale_eda_results(db, max_age_hours=72)
+        if eda_deleted:
+            logger.info("Cleaned up %d stale EDA results", eda_deleted)
+
     from app.core.job_queue import get_job_queue
     queue = get_job_queue()
     await queue.startup()
@@ -102,6 +117,13 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Debug request/response logging (AUTOML_DEBUG_LOGGING=true)
+    if settings.debug_logging:
+        from app.api.middleware import DebugLoggingMiddleware
+        app.add_middleware(DebugLoggingMiddleware)
+        logging.getLogger("automl.debug").setLevel(logging.DEBUG)
+        logger.info("Debug request/response logging ENABLED (AUTOML_DEBUG_LOGGING=true)")
+
     # CORS
     app.add_middleware(
         CORSMiddleware,
@@ -121,11 +143,16 @@ def create_app() -> FastAPI:
         logger.debug(f"Capture request metadata: {request.method} {request.url.path} {redacted_headers + safe_headers}")
 
         auth_header = request.headers.get("authorization")
+        # Store the forwarded token so outbound Domino API calls
+        # (datasetrw, jobs, registry) run as the visiting user.
+        # No sidecar fallback — if no user token is present, outbound
+        # calls will fail with MissingUserTokenError.
         set_request_auth_header(auth_header)
         try:
             response = await call_next(request)
         finally:
             set_request_auth_header(None)
+            clear_viewing_user()
         return response
 
     # Exception handlers
@@ -188,29 +215,104 @@ def create_app() -> FastAPI:
         manager = get_websocket_manager()
         await manager.connect(websocket, job_id)
         try:
+            from app.db import crud
+            from app.services.job_service import _sync_domino_job_state
+
+            terminal_statuses = {"completed", "failed", "cancelled"}
+            last_status = None
+
+            # Send initial job state (read directly from DB, no auth check)
             async with get_db_session() as db:
-                from app.api.routes.jobs import get_job_progress
                 try:
-                    progress = await get_job_progress(job_id, db)
-                    await websocket.send_json({
-                        "type": "initial",
-                        "job_id": job_id,
-                        **(progress.dict() if hasattr(progress, 'dict') else progress)
-                    })
+                    job = await crud.get_job(db, job_id)
+                    if job:
+                        if getattr(job, "execution_target", "local") == "domino_job" and job.domino_job_id:
+                            try:
+                                job = await _sync_domino_job_state(db, job, sync_terminal_metadata=True)
+                            except Exception:
+                                pass  # Use stale status if sync fails
+                        last_status = job.status.value if hasattr(job.status, "value") else str(job.status)
+                        await websocket.send_json({
+                            "type": "initial",
+                            "job_id": job_id,
+                            "status": last_status,
+                            "progress": job.progress if hasattr(job, "progress") and job.progress else 0,
+                            "current_step": job.current_step if hasattr(job, "current_step") else None,
+                            "models_trained": job.models_trained if hasattr(job, "models_trained") else 0,
+                            "current_model": job.current_model if hasattr(job, "current_model") else None,
+                            "eta_seconds": job.eta_seconds if hasattr(job, "eta_seconds") else None,
+                            "domino_job_status": getattr(job, "domino_job_status", None),
+                            "started_at": job.started_at.isoformat() if getattr(job, "started_at", None) else None,
+                            "completed_at": job.completed_at.isoformat() if getattr(job, "completed_at", None) else None,
+                        })
+                    else:
+                        await websocket.send_json({
+                            "type": "error", "job_id": job_id, "message": "Job not found"
+                        })
                 except Exception as e:
                     await websocket.send_json({
                         "type": "error", "job_id": job_id, "message": str(e)
                     })
 
-            while True:
+            # Poll for status changes (Domino jobs complete externally)
+            async def poll_job_status():
+                nonlocal last_status
+                while True:
+                    await asyncio.sleep(5)
+                    try:
+                        async with get_db_session() as db:
+                            job = await crud.get_job(db, job_id)
+                            if not job:
+                                break
+                            if getattr(job, "execution_target", "local") == "domino_job" and job.domino_job_id:
+                                try:
+                                    job = await _sync_domino_job_state(db, job, sync_terminal_metadata=True)
+                                except Exception:
+                                    pass
+                            current_status = job.status.value if hasattr(job.status, "value") else str(job.status)
+                            if current_status != last_status:
+                                last_status = current_status
+                                await websocket.send_json({
+                                    "type": "job_update",
+                                    "job_id": job_id,
+                                    "status": current_status,
+                                    "progress": job.progress if hasattr(job, "progress") and job.progress else 0,
+                                    "current_step": job.current_step if hasattr(job, "current_step") else None,
+                                    "models_trained": job.models_trained if hasattr(job, "models_trained") else 0,
+                                    "current_model": job.current_model if hasattr(job, "current_model") else None,
+                                    "eta_seconds": job.eta_seconds if hasattr(job, "eta_seconds") else None,
+                                    "domino_job_status": getattr(job, "domino_job_status", None),
+                                    "started_at": job.started_at.isoformat() if getattr(job, "started_at", None) else None,
+                                    "completed_at": job.completed_at.isoformat() if getattr(job, "completed_at", None) else None,
+                                })
+                            if current_status in terminal_statuses:
+                                break
+                    except Exception:
+                        break
+
+            # If job is already terminal, no need to poll
+            if last_status and last_status in terminal_statuses:
+                # Just wait for client disconnect
                 try:
-                    data = await websocket.receive_text()
-                    if data == "ping":
-                        await websocket.send_text("pong")
-                except WebSocketDisconnect:
-                    break
-                except Exception:
-                    break
+                    while True:
+                        await websocket.receive_text()
+                except (WebSocketDisconnect, Exception):
+                    pass
+            else:
+                poll_task = asyncio.create_task(poll_job_status())
+                try:
+                    while True:
+                        data = await websocket.receive_text()
+                        if data == "ping":
+                            await websocket.send_text("pong")
+                except (WebSocketDisconnect, Exception):
+                    pass
+                finally:
+                    poll_task.cancel()
+                    try:
+                        await poll_task
+                    except asyncio.CancelledError:
+                        pass
         finally:
             await manager.disconnect(websocket, job_id)
 

@@ -36,7 +36,7 @@ Dockerfile               Container build for Domino deployment
 | `src/pages/` | 4 pages | Dashboard, NewJob wizard, JobDetail, EDA Analysis |
 | `src/components/` | 58 components | Common UI, wizard steps, diagnostics, charts, EDA |
 | `src/hooks/` | 13 hooks | Data fetching (jobs, datasets, models, diagnostics, profiling, progress) |
-| `src/utils/` | 6 files | Formatters, notebook generator, error handling, path utils |
+| `src/utils/` | 7 files | Formatters, notebook generator, error handling, path utils, debug logger |
 | `src/api/` | 3 files | Fetch-based API client with Domino endpoint mapping |
 | `src/types/` | 8 files | TypeScript type definitions |
 
@@ -286,6 +286,9 @@ For Domino proxy constraints, the backend also exposes 66 single-segment `/svc*`
 | `DOMINO_EDA_ENVIRONMENT_ID` | Optional | Default environment for async EDA jobs |
 | `MLFLOW_TRACKING_URI` | Domino only | MLflow tracking server |
 | `MLFLOW_TRACKING_TOKEN` | Optional | MLflow auth token |
+| `AUTOML_DEBUG_LOGGING` | No | Enable verbose backend request/response logging (`true`/`false`) |
+| `AUTOML_STANDALONE_MODE` | No | Force standalone mode without Domino services (`true`/`false`) |
+| `VITE_DEBUG_LOGGING` | No | Enable verbose frontend console logging (`true`/`false`) |
 | `ENABLE_LOCAL_COMPUTE` | No | Enable local in-app queue execution (`true`/`false`) |
 | `WORKERS` | No | Uvicorn worker count (use `1` for local queue mode) |
 

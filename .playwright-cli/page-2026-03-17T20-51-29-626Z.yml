@@ -1,0 +1,85 @@
+- main [ref=e4]:
+  - generic [ref=e454]:
+    - navigation [ref=e455]:
+      - link "AutoML" [ref=e456] [cursor=pointer]:
+        - /url: /dashboard
+      - generic [ref=e457]: /
+      - generic [ref=e458]: automl-ui-test
+    - generic [ref=e459]:
+      - 'heading "Run: automl-ui-test" [level=1] [ref=e461]'
+      - button [ref=e464] [cursor=pointer]:
+        - img [ref=e465]
+    - navigation [ref=e470]:
+      - button "Overview" [ref=e471] [cursor=pointer]
+      - button "Leaderboard" [ref=e472] [cursor=pointer]
+      - button "Diagnostics" [ref=e473] [cursor=pointer]
+      - button "Metrics" [ref=e474] [cursor=pointer]
+      - button "Outputs" [ref=e475] [cursor=pointer]
+      - button "Logs" [ref=e476] [cursor=pointer]
+    - generic [ref=e477]:
+      - generic [ref=e478]:
+        - heading "Description" [level=3] [ref=e479]
+        - paragraph [ref=e480]: No description available
+      - table [ref=e482]:
+        - rowgroup [ref=e483]:
+          - row "Metadata Value" [ref=e484]:
+            - columnheader "Metadata" [ref=e485]
+            - columnheader "Value" [ref=e486]
+        - rowgroup [ref=e487]:
+          - row "Model type tabular" [ref=e488]:
+            - cell "Model type" [ref=e489]
+            - cell "tabular" [ref=e490]
+          - row "Target column target" [ref=e491]:
+            - cell "Target column" [ref=e492]
+            - cell "target" [ref=e493]
+          - row "Dataset used 2af78f95_automl_sample.csv" [ref=e494]:
+            - cell "Dataset used" [ref=e495]
+            - cell "2af78f95_automl_sample.csv" [ref=e496]:
+              - link "2af78f95_automl_sample.csv" [ref=e497] [cursor=pointer]:
+                - /url: /eda?data_source=upload&file_path=%2FUsers%2Fsubirmansukhani%2FDesktop%2Fauto_ml%2FAutoML_Extension%2Flocal_data%2Fuploads%2F2af78f95_automl_sample.csv
+          - row "Preset medium quality faster train" [ref=e498]:
+            - cell "Preset" [ref=e499]
+            - cell "medium quality faster train" [ref=e500]
+          - row "Time limit 3600s" [ref=e501]:
+            - cell "Time limit" [ref=e502]
+            - cell "3600s" [ref=e503]
+          - row "Created Mar 17, 2026 8:50 PM" [ref=e504]:
+            - cell "Created" [ref=e505]
+            - cell "Mar 17, 2026 8:50 PM" [ref=e506]
+          - row "Duration 7s" [ref=e507]:
+            - cell "Duration" [ref=e508]
+            - cell "7s" [ref=e509]
+          - row "Status Completed" [ref=e510]:
+            - cell "Status" [ref=e511]
+            - cell "Completed" [ref=e512]:
+              - generic [ref=e513]: Completed
+          - row "Execution target Local" [ref=e514]:
+            - cell "Execution target" [ref=e515]
+            - cell "Local" [ref=e516]
+          - row "Experiment automl-ui-test__20260317_205055" [ref=e517]:
+            - cell "Experiment" [ref=e518]
+            - cell "automl-ui-test__20260317_205055" [ref=e519]
+      - table [ref=e521]:
+        - rowgroup [ref=e522]:
+          - row "Metric Value" [ref=e523]:
+            - columnheader "Metric" [ref=e524]
+            - columnheader "Value" [ref=e525]
+        - rowgroup [ref=e526]:
+          - row "best model CatBoost" [ref=e527]:
+            - cell "best model" [ref=e528]
+            - cell "CatBoost" [ref=e529]
+          - row "best score 1.0000" [ref=e530]:
+            - cell "best score" [ref=e531]
+            - cell "1.0000" [ref=e532]
+          - row "problem type binary" [ref=e533]:
+            - cell "problem type" [ref=e534]
+            - cell "binary" [ref=e535]
+          - row "eval metric accuracy" [ref=e536]:
+            - cell "eval metric" [ref=e537]
+            - cell "accuracy" [ref=e538]
+          - row "num models 11.0000" [ref=e539]:
+            - cell "num models" [ref=e540]
+            - cell "11.0000" [ref=e541]
+          - row "num features 2.0000" [ref=e542]:
+            - cell "num features" [ref=e543]
+            - cell "2.0000" [ref=e544]

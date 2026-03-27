@@ -1,5 +1,6 @@
 import { useRef, useEffect } from 'react'
-import { StopIcon, RocketLaunchIcon, CubeIcon } from '@heroicons/react/24/outline'
+import { useNavigate } from 'react-router-dom'
+import { StopIcon, RocketLaunchIcon, CubeIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
 import type { Job } from '../../types/job'
 
 interface JobHeaderProps {
@@ -35,6 +36,7 @@ export function JobHeader({
   onCloseActionsDropdown,
   onOpenDeleteConfirm,
 }: JobHeaderProps) {
+  const navigate = useNavigate()
   const deployDropdownRef = useRef<HTMLDivElement>(null)
   const actionsDropdownRef = useRef<HTMLDivElement>(null)
 
@@ -68,6 +70,15 @@ export function JobHeader({
           >
             <StopIcon className="h-4 w-4 inline mr-1" />
             Cancel
+          </button>
+        )}
+        {['failed', 'cancelled'].includes(currentStatus) && (
+          <button
+            onClick={() => navigate('/train')}
+            className="h-[32px] px-[15px] text-sm font-normal border border-transparent rounded-[2px] text-white bg-domino-accent-purple hover:bg-domino-accent-purple-hover transition-all duration-200 inline-flex items-center"
+          >
+            <ArrowPathIcon className="h-4 w-4 inline mr-1" />
+            New Job
           </button>
         )}
         {currentStatus === 'completed' && job?.model_path && !standaloneMode && (

@@ -5,9 +5,6 @@ from dataclasses import dataclass
 from typing import Optional
 
 from app.api.generated.domino_public_api_client.api.projects import get_project_by_id
-from app.api.generated.domino_public_api_client.models.project_envelope_v1 import (
-    ProjectEnvelopeV1,
-)
 from app.core.domino_http import get_domino_public_api_client_sync
 
 logger = logging.getLogger(__name__)
@@ -33,19 +30,23 @@ async def resolve_project(project_id: str) -> Optional[ProjectInfo]:
 
     try:
         client = get_domino_public_api_client_sync()
-        result = get_project_by_id.sync(project_id, client=client)
+        # Use raw HTTP instead of the generated parser to avoid enum
+        # deserialization failures (e.g. GitServiceProviderV1 case mismatch).
+        kwargs = get_project_by_id._get_kwargs(project_id=project_id)
+        response = client.get_httpx_client().request(**kwargs)
 
-        if not isinstance(result, ProjectEnvelopeV1):
+        if response.status_code != 200:
             logger.warning(
-                "Project %s lookup returned unexpected type: %s",
+                "Project %s lookup returned status %s",
                 project_id,
-                type(result).__name__,
+                response.status_code,
             )
             return None
 
-        project = result.project
-        name = project.name
-        owner = project.owner_username
+        data = response.json()
+        project = data.get("project", data)
+        name = project.get("name")
+        owner = project.get("ownerUsername")
 
         if not name or not owner:
             logger.warning(

@@ -18,9 +18,17 @@ export function SimpleProgressBar({ progress, status }: SimpleProgressBarProps) 
     }
   }
 
+  const statusLabel = status === 'failed' ? 'Failed' : status === 'cancelled' ? 'Cancelled' : null
+  const labelColor = status === 'failed' ? 'text-domino-accent-red' : status === 'cancelled' ? 'text-domino-text-muted' : ''
+
   return (
     <div>
-      <div className="flex items-center justify-end text-sm mb-1">
+      <div className="flex items-center justify-between text-sm mb-1">
+        {statusLabel ? (
+          <span className={`font-medium ${labelColor}`}>{statusLabel}</span>
+        ) : (
+          <span />
+        )}
         <span className="font-medium">{progress}%</span>
       </div>
       <div className="h-2 bg-domino-border overflow-hidden">

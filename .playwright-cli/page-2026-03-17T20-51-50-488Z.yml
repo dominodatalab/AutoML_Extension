@@ -1,0 +1,76 @@
+- main [ref=e4]:
+  - generic [ref=e545]:
+    - navigation [ref=e546]:
+      - link "AutoML" [ref=e547] [cursor=pointer]:
+        - /url: /dashboard
+      - generic [ref=e548]: /
+      - generic [ref=e549]: Data Exploration
+    - generic [ref=e551]:
+      - button "Tabular" [ref=e552] [cursor=pointer]
+      - button "Time Series" [ref=e553] [cursor=pointer]
+    - generic [ref=e554]:
+      - generic [ref=e555]: "Execution:"
+      - combobox [ref=e556]:
+        - option "Local (In App)" [selected]
+      - button "Analyze" [ref=e557] [cursor=pointer]
+    - generic [ref=e558]:
+      - generic [ref=e559]:
+        - heading "Data Exploration" [level=1] [ref=e560]
+        - paragraph [ref=e561]: Analyze data quality, distributions, and prepare transformations
+      - button "Export Notebook" [ref=e562] [cursor=pointer]:
+        - img [ref=e563]
+        - text: Export Notebook
+    - generic [ref=e565]:
+      - generic [ref=e566]:
+        - img [ref=e567]
+        - generic [ref=e569]:
+          - paragraph [ref=e570]: 2af78f95_automl_sample.csv
+          - paragraph [ref=e571]: 3 columns, 5 rows
+      - button "Change File" [ref=e572] [cursor=pointer]
+    - navigation [ref=e574]:
+      - button "Data Preview" [ref=e575] [cursor=pointer]
+      - button "Column Analysis" [ref=e576] [cursor=pointer]
+      - button "Correlations" [ref=e577] [cursor=pointer]
+      - button "Data Quality" [ref=e578] [cursor=pointer]
+      - button "Transformations" [ref=e579] [cursor=pointer]
+    - generic [ref=e581]:
+      - generic [ref=e582]:
+        - generic [ref=e583]:
+          - generic [ref=e584]: "Rows per page:"
+          - button "50" [ref=e586] [cursor=pointer]:
+            - generic [ref=e587]: "50"
+            - img [ref=e588]
+        - generic [ref=e590]: 1–5 of 5 rows
+      - table [ref=e592]:
+        - rowgroup [ref=e593]:
+          - row "# age income target" [ref=e594]:
+            - columnheader "#" [ref=e595]
+            - columnheader "age" [ref=e596]
+            - columnheader "income" [ref=e597]
+            - columnheader "target" [ref=e598]
+        - rowgroup [ref=e599]:
+          - row "1 25 50,000 0" [ref=e600]:
+            - cell "1" [ref=e601]
+            - cell "25" [ref=e602]
+            - cell "50,000" [ref=e603]
+            - cell "0" [ref=e604]
+          - row "2 32 62,000 1" [ref=e605]:
+            - cell "2" [ref=e606]
+            - cell "32" [ref=e607]
+            - cell "62,000" [ref=e608]
+            - cell "1" [ref=e609]
+          - row "3 45 81,000 1" [ref=e610]:
+            - cell "3" [ref=e611]
+            - cell "45" [ref=e612]
+            - cell "81,000" [ref=e613]
+            - cell "1" [ref=e614]
+          - row "4 29 54,000 0" [ref=e615]:
+            - cell "4" [ref=e616]
+            - cell "29" [ref=e617]
+            - cell "54,000" [ref=e618]
+            - cell "0" [ref=e619]
+          - row "5 38 70,000 1" [ref=e620]:
+            - cell "5" [ref=e621]
+            - cell "38" [ref=e622]
+            - cell "70,000" [ref=e623]
+            - cell "1" [ref=e624]

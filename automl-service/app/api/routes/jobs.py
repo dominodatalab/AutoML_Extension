@@ -11,6 +11,7 @@ from app.api.schemas.job import (
     BulkDeleteJobsRequest,
     BulkDeleteJobsResponse,
     JobCreateRequest,
+    JobListItemResponse,
     JobResponse,
     JobStatusResponse,
     JobMetricsResponse,
@@ -35,6 +36,7 @@ from app.services.job_service import (
     get_job_response,
     get_job_status_response,
     get_queue_status as get_queue_status_service,
+    build_job_list_item_response,
     list_jobs_filtered,
     preview_cleanup as preview_cleanup_service,
     register_model_for_job,
@@ -71,27 +73,31 @@ async def preview_cleanup(
     request: Request = None,
 ):
     """Preview what would be deleted by a bulk cleanup."""
+    from app.services.job_service import get_viewing_user_name
     return await preview_cleanup_service(
         db=db,
         statuses=statuses,
         older_than_days=older_than_days,
+        owner=get_viewing_user_name(),
         project_id=request.headers.get("X-Project-Id") if request else None,
     )
 
 
 @router.post("/cleanup")
 async def bulk_cleanup(
-    request: CleanupRequest,
+    cleanup_request: CleanupRequest,
     db: AsyncSession = Depends(get_db),
-    http_request: Request = None,
+    request: Request = None,
 ):
     """Delete artifacts and DB rows for jobs matching the given criteria."""
+    from app.services.job_service import get_viewing_user_name
     return await bulk_cleanup_service(
         db=db,
-        statuses=request.statuses,
-        older_than_days=request.older_than_days,
-        include_orphans=request.include_orphans,
-        project_id=http_request.headers.get("X-Project-Id") if http_request else None,
+        statuses=cleanup_request.statuses,
+        older_than_days=cleanup_request.older_than_days,
+        include_orphans=cleanup_request.include_orphans,
+        owner=get_viewing_user_name(),
+        project_id=request.headers.get("X-Project-Id") if request else None,
     )
 
 
@@ -115,19 +121,19 @@ async def bulk_delete_jobs(
 
 
 @router.get("/{job_id}", response_model=JobResponse)
-async def get_job(job_id: str, db: AsyncSession = Depends(get_db)):
+async def get_job(job_id: str, db: AsyncSession = Depends(get_db), request: Request = None):
     """Get a specific job by ID."""
     return await get_job_response(db, job_id)
 
 
 @router.get("/{job_id}/status", response_model=JobStatusResponse)
-async def get_job_status(job_id: str, db: AsyncSession = Depends(get_db)):
+async def get_job_status(job_id: str, db: AsyncSession = Depends(get_db), request: Request = None):
     """Get job status."""
     return await get_job_status_response(db, job_id)
 
 
 @router.get("/{job_id}/metrics", response_model=JobMetricsResponse)
-async def get_job_metrics(job_id: str, db: AsyncSession = Depends(get_db)):
+async def get_job_metrics(job_id: str, db: AsyncSession = Depends(get_db), request: Request = None):
     """Get job metrics."""
     return await get_job_metrics_response(db, job_id)
 
@@ -137,6 +143,7 @@ async def get_job_logs(
     job_id: str,
     limit: int = 1000,
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
     """Get job logs."""
     logs = await get_job_logs_service(db=db, job_id=job_id, limit=limit)
@@ -144,13 +151,13 @@ async def get_job_logs(
 
 
 @router.post("/{job_id}/cancel")
-async def cancel_job(job_id: str, db: AsyncSession = Depends(get_db)):
+async def cancel_job(job_id: str, db: AsyncSession = Depends(get_db), request: Request = None):
     """Cancel a running or queued job."""
     return await cancel_job_service(db, job_id)
 
 
 @router.delete("/{job_id}")
-async def delete_job(job_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_job(job_id: str, db: AsyncSession = Depends(get_db), request: Request = None):
     """Delete a job and all its artifacts."""
     return await delete_job_service(db, job_id)
 
@@ -166,15 +173,15 @@ async def list_jobs_post(
     Supports filtering by:
     - status: Filter by job status (pending, running, completed, failed, cancelled)
     - model_type: Filter by model type (tabular, timeseries)
-    - owner: Filter by owner username. If not provided, uses current user from domino-username header.
-             Pass owner="" (empty string) to see all users' jobs.
-    - project_name: Filter by project name. Pass project_name="" to see jobs from all projects.
+    - project_name: Filter by project name.
     - project_id: Filter by project ID (legacy, prefer project_name).
+
+    Owner is always resolved from the domino-username header (cannot be overridden).
     """
     jobs = await list_jobs_filtered(db=db, list_request=list_request, request=request)
 
     return JobListResponse(
-        jobs=[JobResponse.model_validate(j) for j in jobs],
+        jobs=[JobListItemResponse.model_validate(build_job_list_item_response(j)) for j in jobs],
         total=len(jobs),
         skip=list_request.skip,
         limit=list_request.limit,
@@ -182,7 +189,7 @@ async def list_jobs_post(
 
 
 @router.get("/{job_id}/progress", response_model=JobProgressResponse)
-async def get_job_progress(job_id: str, db: AsyncSession = Depends(get_db)):
+async def get_job_progress(job_id: str, db: AsyncSession = Depends(get_db), request: Request = None):
     """Get detailed job progress."""
     return await get_job_progress_response(db, job_id)
 

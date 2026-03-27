@@ -24,6 +24,10 @@ function safeNumber(value: unknown): number {
   return 0
 }
 
+function resolveFitTime(model: Record<string, unknown>): number {
+  return safeNumber(model.fit_time ?? model.fit_time_marginal)
+}
+
 interface LearningCurvesPanelProps {
   jobId: string
   modelType: string
@@ -40,7 +44,7 @@ export function LearningCurvesPanel({ jobId, modelType }: LearningCurvesPanelPro
       return data.models.map((m: Record<string, unknown>) => ({
         model: String(m.model || 'Unknown'),
         score_val: safeNumber(m.score_val),
-        fit_time: safeNumber(m.fit_time),
+        fit_time: resolveFitTime(m),
         pred_time_val: safeNumber(m.pred_time_val)
       }))
     }
@@ -53,7 +57,7 @@ export function LearningCurvesPanel({ jobId, modelType }: LearningCurvesPanelPro
         return history.models.map((m: Record<string, unknown>) => ({
           model: String(m.model || 'Unknown'),
           score_val: safeNumber(m.score_val),
-          fit_time: safeNumber(m.fit_time),
+          fit_time: resolveFitTime(m),
           pred_time_val: safeNumber(m.pred_time_val)
         }))
       }
@@ -61,7 +65,7 @@ export function LearningCurvesPanel({ jobId, modelType }: LearningCurvesPanelPro
         return Object.entries(history.models).map(([name, info]) => ({
           model: name,
           score_val: safeNumber(info.score_val),
-          fit_time: safeNumber(info.fit_time),
+          fit_time: safeNumber(info.fit_time ?? (info as { fit_time_marginal?: number }).fit_time_marginal),
           pred_time_val: 0
         }))
       }
