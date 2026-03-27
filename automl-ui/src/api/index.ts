@@ -1,5 +1,6 @@
 import { getBasePath } from '../utils/basePath'
 
+
 /**
  * Read projectId from URL query parameter (?projectId=...).
  * Returns the value when present, undefined otherwise.

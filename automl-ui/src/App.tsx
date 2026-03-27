@@ -37,13 +37,15 @@ function NoRouteMatch() {
 
 function App() {
   const basename = getBasePath()
+  const redirectPath = buildAppPath('/dashboard', new URLSearchParams(window.location.search))
+  console.log('App', redirectPath);
 
   return (
     <ErrorBoundary>
       <BrowserRouter basename={basename}>
         <Routes>
           <Route path="/" element={<Layout />}>
-            <Route index element={<Navigate to={buildAppPath(`/dashboard${window.location.search}`)} replace />} />
+            <Route index element={<Navigate to={redirectPath} replace />} />
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="eda" element={<EDAAnalysis />} />
             <Route path="jobs/new" element={<NewJob />} />
