@@ -12,6 +12,7 @@ import { useCapabilities } from '../hooks/useCapabilities'
 import { DataSourceSelector } from '../components/eda/DataSourceSelector'
 import { ProfiledDataView } from '../components/eda/ProfiledDataView'
 import { TimeSeriesConfigPanel } from '../components/eda/TimeSeriesConfigPanel'
+import { buildAppPath } from '../utils/appPath'
 
 function EDAAnalysis() {
   const { dominoJobs } = useCapabilities()
@@ -95,7 +96,8 @@ function EDAAnalysis() {
   const { data: preview, isLoading: previewLoading, error: previewError } = useDatasetPreview(
     selectedFilePath || '',
     pageSize,
-    offset
+    offset,
+    searchParams.get('dataset_id') || undefined
   )
 
   const {
@@ -248,7 +250,7 @@ function EDAAnalysis() {
   // Breadcrumb shared by both views
   const breadcrumb = (
     <nav className="flex items-center gap-2 text-sm">
-      <Link to="/dashboard" className="text-domino-accent-purple hover:underline">
+      <Link to={buildAppPath('/dashboard')} className="text-domino-accent-purple hover:underline">
         AutoML
       </Link>
       <span className="text-domino-text-muted">/</span>

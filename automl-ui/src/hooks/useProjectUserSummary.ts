@@ -10,6 +10,15 @@ interface ProjectUserSummary {
     is_domino_environment: boolean,
 }
 
+const EMPTY_PROJECT_USER_SUMMARY: ProjectUserSummary = {
+  username: '',
+  initials: '',
+  project_id: '',
+  project_name: '',
+  project_owner: '',
+  is_domino_environment: false,
+}
+
 export function useProjectUserSummary(): ProjectUserSummary {
   const { data } = useQuery<ProjectUserSummary>({
     queryKey: ['user_summary'],
@@ -22,13 +31,5 @@ export function useProjectUserSummary(): ProjectUserSummary {
     refetchOnWindowFocus: false,
   })
 
-  return data ?? {
-    username: '',
-    initials: '',
-    project_id: '',
-    project_name: '',
-    project_owner: '',
-    is_domino_environment: false,
-  };
+  return data ?? EMPTY_PROJECT_USER_SUMMARY
 }
-

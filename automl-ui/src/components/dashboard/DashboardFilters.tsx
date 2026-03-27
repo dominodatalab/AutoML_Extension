@@ -6,6 +6,7 @@ import {
   TableCellsIcon,
 } from '@heroicons/react/24/outline'
 import Dropdown from '../common/Dropdown'
+import { buildAppPath } from '../../utils/appPath'
 
 type ViewMode = 'table' | 'card'
 
@@ -50,7 +51,7 @@ export function DashboardFilters({
               Explore Data
             </button>
           </Link>*/}
-          <Link to={`/jobs/new${window.location.search}`}>
+          <Link to={buildAppPath('/jobs/new')}>
             <button className="h-[32px] px-[15px] bg-domino-accent-purple text-white text-sm font-normal rounded-[2px] hover:bg-domino-accent-purple-hover transition-all duration-200 inline-flex items-center">
               New training job
             </button>

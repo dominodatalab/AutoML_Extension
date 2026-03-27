@@ -5,6 +5,7 @@ import type { Job, JobStatus } from '../../types/job'
 import { formatDuration } from '../../utils/formatters'
 import { getFileName } from '../../utils/path'
 import { toDominoTenantUrl } from '../../utils/dominoLinks'
+import { buildAppPath } from '../../utils/appPath'
 
 interface JobOverviewTabProps {
   job: Job | undefined
@@ -216,6 +217,5 @@ function getDatasetLink(job: Job | undefined): string | null {
   if (job.data_source) params.set('data_source', job.data_source)
   if (job.dataset_id) params.set('dataset_id', job.dataset_id)
   if (job.file_path) params.set('file_path', job.file_path)
-  const query = params.toString()
-  return query ? `/eda?${query}` : null
+  return buildAppPath('/eda', params)
 }
