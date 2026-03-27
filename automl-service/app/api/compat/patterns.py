@@ -183,15 +183,13 @@ def register_pattern_routes(app: FastAPI) -> None:
         app.post(path)(_make_endpoint(mod, fn, cls=cls, use_db=True, project_scoped=scoped))
 
     # Pattern 5: POST body.get(keys) + DB -> func(db, *args) [service direct]
-    # Owner-enforced routes pass needs_request=True so the Request is forwarded
-    # to the service layer for domino-username ownership checks.
     post_keys_db_first = [
-        ("/svcjobget", "app.services.job_service", "get_job_response", [("job_id",)], True),
-        ("/svcjobcancel", "app.services.job_service", "cancel_job", [("job_id",)], True),
-        ("/svcjobdelete", "app.services.job_service", "delete_job", [("job_id",)], True),
-        ("/svcjobstatus", "app.services.job_service", "get_job_status_response", [("job_id",)], True),
-        ("/svcjobmetrics", "app.services.job_service", "get_job_metrics_response", [("job_id",)], True),
-        ("/svcjobprogress", "app.services.job_service", "get_job_progress_response", [("job_id",)], True),
+        ("/svcjobget", "app.services.job_service", "get_job_response", [("job_id",)], False),
+        ("/svcjobcancel", "app.services.job_service", "cancel_job", [("job_id",)], False),
+        ("/svcjobdelete", "app.services.job_service", "delete_job", [("job_id",)], False),
+        ("/svcjobstatus", "app.services.job_service", "get_job_status_response", [("job_id",)], False),
+        ("/svcjobmetrics", "app.services.job_service", "get_job_metrics_response", [("job_id",)], False),
+        ("/svcjobprogress", "app.services.job_service", "get_job_progress_response", [("job_id",)], False),
         ("/svcjobbulkdelete", "app.services.job_service", "bulk_delete_jobs", [("job_ids",)], False),
     ]
 
