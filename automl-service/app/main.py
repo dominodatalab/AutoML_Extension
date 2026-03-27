@@ -1,5 +1,6 @@
 """FastAPI application factory and configuration."""
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -214,10 +215,17 @@ def create_app() -> FastAPI:
         manager = get_websocket_manager()
         await manager.connect(websocket, job_id)
         try:
+            from app.api.routes.jobs import get_job_progress
+            from app.services.job_service import _sync_domino_job_state
+            from app.db.models import JobStatus
+
+            terminal_statuses = {"completed", "failed", "cancelled"}
+            last_status = None
+
             async with get_db_session() as db:
-                from app.api.routes.jobs import get_job_progress
                 try:
                     progress = await get_job_progress(job_id, db)
+                    last_status = progress.status if hasattr(progress, "status") else None
                     await websocket.send_json({
                         "type": "initial",
                         "job_id": job_id,
@@ -228,15 +236,56 @@ def create_app() -> FastAPI:
                         "type": "error", "job_id": job_id, "message": str(e)
                     })
 
-            while True:
+            # Poll for status changes (Domino jobs complete externally)
+            async def poll_job_status():
+                nonlocal last_status
+                while True:
+                    await asyncio.sleep(5)
+                    try:
+                        async with get_db_session() as db:
+                            from app.db import crud
+                            job = await crud.get_job(db, job_id)
+                            if not job:
+                                break
+                            if getattr(job, "execution_target", "local") == "domino_job" and job.domino_job_id:
+                                job = await _sync_domino_job_state(db, job, sync_terminal_metadata=True)
+                            current_status = job.status.value if hasattr(job.status, "value") else str(job.status)
+                            if current_status != last_status:
+                                last_status = current_status
+                                progress = await get_job_progress(job_id, db)
+                                await websocket.send_json({
+                                    "type": "job_update",
+                                    "job_id": job_id,
+                                    **jsonable_encoder(progress)
+                                })
+                            if current_status in terminal_statuses:
+                                break
+                    except Exception:
+                        break
+
+            # If job is already terminal, no need to poll
+            if last_status and last_status in terminal_statuses:
+                # Just wait for client disconnect
                 try:
-                    data = await websocket.receive_text()
-                    if data == "ping":
-                        await websocket.send_text("pong")
-                except WebSocketDisconnect:
-                    break
-                except Exception:
-                    break
+                    while True:
+                        await websocket.receive_text()
+                except (WebSocketDisconnect, Exception):
+                    pass
+            else:
+                poll_task = asyncio.create_task(poll_job_status())
+                try:
+                    while True:
+                        data = await websocket.receive_text()
+                        if data == "ping":
+                            await websocket.send_text("pong")
+                except (WebSocketDisconnect, Exception):
+                    pass
+                finally:
+                    poll_task.cancel()
+                    try:
+                        await poll_task
+                    except asyncio.CancelledError:
+                        pass
         finally:
             await manager.disconnect(websocket, job_id)
 
