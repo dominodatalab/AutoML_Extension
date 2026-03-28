@@ -10,12 +10,14 @@ import { generateEDANotebook } from '../utils/notebookGenerator'
 import { getFileName } from '../utils/path'
 import { useCapabilities } from '../hooks/useCapabilities'
 import { DataSourceSelector } from '../components/eda/DataSourceSelector'
+import { useProjectUserSummary } from '../hooks/useProjectUserSummary'
 import { ProfiledDataView } from '../components/eda/ProfiledDataView'
 import { TimeSeriesConfigPanel } from '../components/eda/TimeSeriesConfigPanel'
 import { buildAppPath } from '../utils/appPath'
 
 function EDAAnalysis() {
   const { dominoJobs } = useCapabilities()
+  const { project_name: projectName } = useProjectUserSummary()
   const [searchParams] = useSearchParams()
   const { data: datasetsData, isLoading: loadingDatasets, error: datasetsError } = useDatasets()
   const uploadMutation = useUploadFile()
@@ -298,6 +300,7 @@ function EDAAnalysis() {
           onSelectDataset={handleSelectDataset}
           onSelectFile={handleSelectFile}
           formatSize={formatSize}
+          projectName={projectName}
         />
       </div>
     )
