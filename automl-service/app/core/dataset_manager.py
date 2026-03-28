@@ -145,59 +145,6 @@ class DominoDatasetManager:
 
         return response.json() if response.text else {}
 
-    async def list_project_datasets(self, project_id: str) -> list[DatasetResponse]:
-        """List datasets for a Domino project.
-
-        Uses the v2 listing endpoint which returns snapshotIds inline, so no
-        per-dataset detail call is needed here. File paths are relative filenames
-        only; callers that need the full mount path must resolve it separately via
-        GET /v4/datasetrw/datasets/{id} (datasetPath field).
-        """
-        try:
-            result = await self._api_request(
-                "GET",
-                f"/v4/datasetrw/datasets-v2?projectIdsToInclude={project_id}",
-            )
-        except Exception:
-            logger.exception(
-                "Failed to list project datasets for project %s", project_id
-            )
-            return []
-
-        # v2 response is a top-level array; each item has a "datasetRwDto" wrapper
-        raw_items: list = result if isinstance(result, list) else []
-
-        datasets: list[DatasetResponse] = []
-        for item in raw_items:
-            if not isinstance(item, dict):
-                continue
-            ds = item.get("datasetRwDto") or item
-            dataset_id = str(ds.get("id") or "").strip()
-            name = str(ds.get("name") or "").strip()
-            if not dataset_id:
-                continue
-
-            snapshot_ids: list[str] = ds.get("snapshotIds") or []
-            files = (
-                await self._list_snapshot_files(dataset_id, snapshot_ids)
-                if snapshot_ids
-                else []
-            )
-
-            datasets.append(
-                DatasetResponse(
-                    id=dataset_id,
-                    name=name or dataset_id,
-                    path=None,
-                    description=str(ds.get("description") or ""),
-                    size_bytes=self._coerce_int(ds.get("sizeInBytes", 0)),
-                    created_at=ds.get("createdTime"),
-                    updated_at=None,
-                    file_count=len(files),
-                    files=files,
-                )
-            )
-        return datasets
 
     async def get_dataset_path(self, dataset_id: str) -> Optional[str]:
         """Return the datasetPath (mount location in Domino Jobs) for a dataset."""
@@ -210,44 +157,6 @@ class DominoDatasetManager:
             return None
         return str(result.get("datasetPath") or "").strip() or None
 
-    async def _list_snapshot_files(
-        self,
-        dataset_id: str,
-        snapshot_ids: list[str],
-    ) -> list[DatasetFileResponse]:
-        """Return supported files from the read/write head snapshot.
-
-        The last entry in snapshotIds is the most recently created snapshot.
-        Paths are relative filenames only — no dataset path prefix.
-        """
-        snapshot_id = snapshot_ids[-1]
-        try:
-            result = await self._api_request(
-                "GET", f"/v4/datasetrw/files/{snapshot_id}?path="
-            )
-        except Exception:
-            logger.warning(
-                "Failed to list files for dataset %s snapshot %s",
-                dataset_id,
-                snapshot_id,
-            )
-            return []
-
-        files: list[DatasetFileResponse] = []
-        for row in result.get("rows", []):
-            name_info = row.get("name", {})
-            if name_info.get("isDirectory"):
-                continue
-            filename = str(
-                name_info.get("label") or name_info.get("fileName") or ""
-            ).strip()
-            if not filename or not self._is_supported_file(filename):
-                continue
-            size_bytes = self._coerce_int(
-                (row.get("size") or {}).get("sizeInBytes", 0)
-            )
-            files.append(DatasetFileResponse(name=filename, path=filename, size=size_bytes))
-        return files
 
     async def list_datasets(self) -> list[DatasetResponse]:
         """List mounted datasets discovered from all active mount roots."""
