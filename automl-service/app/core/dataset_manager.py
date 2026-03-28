@@ -8,6 +8,7 @@ import httpx
 import pandas as pd
 
 from app.config import get_settings
+from app.core.context.auth import get_request_auth_header
 from app.api.schemas.dataset import (
     DatasetFileResponse,
     DatasetResponse,
@@ -29,13 +30,19 @@ class DominoDatasetManager:
 
     @property
     def api_headers(self) -> dict:
-        """Get headers for Domino API requests."""
-        headers = {
+        """Get headers for Domino API requests.
+
+        Auth uses the bearer token propagated from the user's request via
+        extended identity propagation — the only correct auth mechanism for
+        Domino API calls from this App.
+        """
+        headers: dict[str, str] = {
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
-        if self.settings.effective_api_key:
-            headers["X-Domino-Api-Key"] = self.settings.effective_api_key
+        auth = get_request_auth_header()
+        if auth:
+            headers["Authorization"] = auth
         return headers
 
     @property
@@ -137,6 +144,19 @@ class DominoDatasetManager:
             response.raise_for_status()
 
         return response.json() if response.text else {}
+
+
+    async def get_dataset_path(self, dataset_id: str) -> Optional[str]:
+        """Return the datasetPath (mount location in Domino Jobs) for a dataset."""
+        try:
+            result = await self._api_request(
+                "GET", f"/v4/datasetrw/datasets/{dataset_id}"
+            )
+        except Exception:
+            logger.exception("Failed to fetch dataset detail for %s", dataset_id)
+            return None
+        return str(result.get("datasetPath") or "").strip() or None
+
 
     async def list_datasets(self) -> list[DatasetResponse]:
         """List mounted datasets discovered from all active mount roots."""

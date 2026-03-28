@@ -274,9 +274,9 @@ function Step1DataSource() {
           ) : datasets.length === 0 ? (
             <div className="text-center py-8">
               <CircleStackIcon className="h-12 w-12 text-domino-text-muted mx-auto mb-4" />
-              <p className="text-domino-text-muted">No datasets mounted</p>
+              <p className="text-domino-text-muted">No datasets found in {userSummary.project_name || 'this project'}</p>
               <p className="text-sm text-domino-text-muted mt-2">
-                Mount a dataset to this app to get started
+                Create a dataset in this project and add the data you want to use to get started
               </p>
             </div>
           ) : (

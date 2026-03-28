@@ -13,11 +13,10 @@ from app.db.models import JobStatus
 from app.core.autogluon_runner import AutoGluonRunner
 from app.api.schemas.job import AdvancedAutoGluonConfig as AdvancedConfig
 from app.core.experiment_tracker import ExperimentTracker
-from app.core.dataset_manager import DominoDatasetManager
 from app.core.domino_registry import get_domino_registry
 from app.core.model_diagnostics import get_model_diagnostics
 from app.core.model_loader import load_predictor, load_dataframe
-from app.core.utils import remap_shared_path, utc_now
+from app.core.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +120,7 @@ class TrainingProgressReporter:
         )
 
 
-async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]] = None):
+async def run_training_job(job_id: str, data_path: str, advanced_config: Optional[Dict[str, Any]] = None):
     """
     Run a training job in the background with Domino experiment tracking.
 
@@ -153,23 +152,8 @@ async def run_training_job(job_id: str, advanced_config: Optional[Dict[str, Any]
             else:
                 reason = "not requested" if not job.enable_mlflow else "standalone mode"
                 await crud.add_job_log(db, job_id, f"Experiment tracking disabled ({reason})", "INFO")
-            dataset_manager = DominoDatasetManager()
-
-            # Get data file path
-            logger.info(f"[TRAINING DEBUG] Job data_source: {job.data_source}")
-            logger.info(f"[TRAINING DEBUG] Job file_path: {job.file_path}")
-            logger.info(f"[TRAINING DEBUG] Job dataset_id: {job.dataset_id}")
-
-            if job.data_source == "domino_dataset":
-                data_path = await dataset_manager.get_dataset_file_path(job.dataset_id)
-                await crud.add_job_log(db, job_id, f"Using Domino dataset: {job.dataset_id}")
-            else:
-                data_path = remap_shared_path(job.file_path)
-                await crud.add_job_log(db, job_id, f"Using uploaded file: {data_path}")
-
-            # TODO this log message is INFO but it claims it's DEBUG?
-            logger.info(f"[TRAINING DEBUG] Resolved data_path: {data_path}")
-            await crud.add_job_log(db, job_id, f"[DEBUG] Data path resolved to: {data_path}", "INFO")
+            logger.info(f"[TRAINING] data_path: {data_path}")
+            await crud.add_job_log(db, job_id, f"Using data file: {data_path}")
 
             await _check_cancelled(job_id, db)
 

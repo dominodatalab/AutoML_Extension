@@ -204,6 +204,7 @@ async def _fetch_domino_dataset_file_bytes(
         raise HTTPException(status_code=404, detail=f"No snapshots found for dataset {dataset_id}")
 
     latest_snapshot = max(snapshots_payload, key=_snapshot_sort_key)
+    # TODO: why default to latest snapshot? why not provide snapshot / rwSnapshot picker?
     snapshot_id = latest_snapshot.get("id")
     if not snapshot_id:
         raise HTTPException(status_code=500, detail=f"Failed to resolve a snapshot for dataset {dataset_id}")
@@ -261,7 +262,6 @@ async def _fetch_domino_dataset_file_bytes(
     )
     return file_bytes
 
-
 async def list_dataset_files_response(dataset_id: str):
     public_client = domino_http.get_domino_public_api_client_sync()
     private_client = domino_http.get_domino_private_api_client_sync()
@@ -307,8 +307,8 @@ async def list_dataset_files_response(dataset_id: str):
     )
     return DatasetListResponse(datasets=[dataset_response], total=1)
 
+
 async def list_datasets_response(
-    dataset_manager: DominoDatasetManager,
     project_id: str,
 ) -> DatasetListResponse:
     """List Domino datasets in API response shape."""

@@ -1,6 +1,6 @@
 """Custom compatibility dataset routes."""
 
-from fastapi import Body, FastAPI, File, UploadFile, Request, HTTPException
+from fastapi import Body, FastAPI, File, Query, UploadFile, HTTPException
 from typing import Optional
 from app.api.schemas.dataset import CompatDatasetPreviewRequest
 from app.services.dataset_service import (
@@ -8,7 +8,6 @@ from app.services.dataset_service import (
     get_dataset_manager,
     list_dataset_files_response,
     list_datasets_response,
-    save_uploaded_file,
 )
 
 
@@ -20,12 +19,12 @@ def register_custom_dataset_routes(app: FastAPI) -> None:
         return await list_dataset_files_response(dataset_id)
 
     @app.get("/svcdatasets")
-    async def svc_list_datasets(projectId: Optional[str] = None):
+    async def svc_list_datasets(projectId: Optional[str] = Query(None)):
         project_id = projectId
         if not project_id:
             raise HTTPException(status_code=400, detail="Project ID must be provided")
 
-        return await list_datasets_response(get_dataset_manager(), project_id)
+        return await list_datasets_response(get_dataset_manager(), project_id=projectId)
 
     @app.post("/svcdatasetpreview")
     async def svc_dataset_preview(

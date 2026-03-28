@@ -39,15 +39,18 @@ function toDominoPath(endpoint: string): string {
 // Fetch-based API client
 class ApiClient {
   private defaultHeaders: Record<string, string>
+  private defaultParams: Record<string, string>
 
   constructor() {
     this.defaultHeaders = {
       'Content-Type': 'application/json',
     }
 
+    this.defaultParams = {}
     const projectId = getProjectIdFromUrl()
     if (projectId) {
       this.defaultHeaders['X-Project-Id'] = projectId
+      this.defaultParams['projectId'] = projectId
     }
   }
 
@@ -69,10 +72,11 @@ class ApiClient {
       fullUrl = `/api/v1/${cleanEndpoint}`
     }
 
-    // Add query params
-    if (config?.params) {
+    // Merge default params (e.g. projectId) with per-call params
+    const mergedParams = { ...this.defaultParams, ...(config?.params ?? {}) }
+    if (Object.keys(mergedParams).length > 0) {
       const searchParams = new URLSearchParams()
-      Object.entries(config.params).forEach(([key, value]) => {
+      Object.entries(mergedParams).forEach(([key, value]) => {
         if (value !== undefined) {
           searchParams.append(key, String(value))
         }

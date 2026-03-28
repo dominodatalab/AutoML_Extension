@@ -97,51 +97,35 @@ def get_viewing_user_name() -> str:
     return "anonymous"
 
 
-def get_request_project_id(request: Optional[Request]) -> Optional[str]:
-    """Extract project_id from X-Project-Id header with env var fallback."""
+def get_request_project_id(request: Optional[Request]) -> str:
+    """Extract project_id from projectId query param."""
     if request:
-        header_val = request.headers.get("X-Project-Id")
-        if header_val:
-            return header_val
-    return os.environ.get("DOMINO_PROJECT_ID") or LOCAL_PROJECT_ID
+        query_val = request.query_params.get("projectId")
+        if query_val:
+            return query_val
+    raise HTTPException(status_code=400, detail="projectId query parameter is required")
 
 
 async def get_project_context(
     request: Optional[Request] = None,
 ) -> tuple[Optional[str], Optional[str], Optional[str]]:
-    """Resolve Domino project id/name/owner from header, API, or environment.
+    """Resolve Domino project id/name/owner from projectId query param via API.
 
     Returns (project_id, project_name, project_owner).
     """
-    settings = get_settings()
+    project_id = request.query_params.get("projectId") if request else None
+    if not project_id:
+        raise HTTPException(status_code=400, detail="projectId query parameter is required")
 
-    # Check for sidebar-injected project id header
-    header_project_id = request.headers.get("X-Project-Id") if request else None
+    from app.services.project_resolver import resolve_project
 
-    if header_project_id:
-        from app.services.project_resolver import resolve_project
+    info = await resolve_project(project_id)
+    if info:
+        return info.id, info.name, info.owner_username
 
-        info = await resolve_project(header_project_id)
-        if info:
-            return info.id, info.name, info.owner_username
-
-        # Resolution failed — use header id with env fallbacks
-        logger.warning(
-            "Could not resolve project %s via API; falling back to env vars",
-            header_project_id,
-        )
-        return (
-            header_project_id,
-            settings.domino_project_name or os.environ.get("DOMINO_PROJECT_NAME"),
-            settings.domino_project_owner or os.environ.get("DOMINO_PROJECT_OWNER"),
-        )
-
-    # No header — existing env var behavior
-    project_id = settings.domino_project_id or os.environ.get("DOMINO_PROJECT_ID") or LOCAL_PROJECT_ID
-    return (
-        project_id,
-        settings.domino_project_name or os.environ.get("DOMINO_PROJECT_NAME"),
-        settings.domino_project_owner or os.environ.get("DOMINO_PROJECT_OWNER"),
+    raise HTTPException(
+        status_code=400,
+        detail=f"Could not resolve project {project_id}",
     )
 
 
@@ -158,10 +142,10 @@ def validate_job_create_request(job_request: JobCreateRequest) -> None:
             detail="dataset_id is required when data_source is 'domino_dataset'",
         )
 
-    if job_request.data_source == "upload" and not job_request.file_path:
+    if job_request.data_source in ("upload", "domino_dataset") and not job_request.file_path:
         raise HTTPException(
             status_code=400,
-            detail="file_path is required when data_source is 'upload'",
+            detail="file_path is required when data_source is 'upload' or 'domino_dataset'",
         )
 
     if job_request.model_type == "timeseries":
@@ -267,7 +251,10 @@ def resolve_execution_target(job_request: JobCreateRequest) -> str:
     """Resolve training execution target, supporting legacy and explicit flags."""
     if job_request.execution_target == "domino_job" or job_request.run_as_domino_job:
         return "domino_job"
-    return "local"
+    raise HTTPException(
+        status_code=400,
+        detail="In-process (local) training is not supported; set execution_target to 'domino_job'.",
+    )
 
 
 async def create_job_with_context(
@@ -347,13 +334,28 @@ async def create_job_with_context(
     if job.execution_target == "domino_job":
         from app.core.domino_job_launcher import get_domino_job_launcher
 
+        if not job.file_path:
+            raise ValueError(f"Job {job.id} has no file_path")
+
+        file_path = job.file_path
+        if job.data_source == "domino_dataset" and job.dataset_id:
+            from app.services.dataset_service import get_dataset_manager
+            dataset_manager = get_dataset_manager()
+            dataset_path = await dataset_manager.get_dataset_path(job.dataset_id)
+            if not dataset_path:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not resolve dataset path for dataset {job.dataset_id}",
+                )
+            file_path = f"{dataset_path}/{job.file_path}"
+
         settings = get_settings()
         launcher = get_domino_job_launcher()
         launch_result = await launcher.start_training_job(
             job_id=job.id,
+            file_path=file_path,
             title=job.name,
             hardware_tier_name=job_request.domino_hardware_tier_name or settings.domino_training_hardware_tier_name,
-            environment_id=job_request.domino_environment_id or settings.domino_training_environment_id,
             project_id=project_id,
         )
         if not launch_result.get("success"):
