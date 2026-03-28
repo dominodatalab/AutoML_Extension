@@ -49,6 +49,7 @@ class ApiClient {
     this.defaultParams = {}
     const projectId = getProjectIdFromUrl()
     if (projectId) {
+      this.defaultHeaders['X-Project-Id'] = projectId
       this.defaultParams['projectId'] = projectId
     }
   }
