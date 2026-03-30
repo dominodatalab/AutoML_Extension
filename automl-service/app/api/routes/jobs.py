@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Request
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db
+from app.dependencies import get_db, get_request_project_id
 from app.api.schemas.job import (
     BulkDeleteJobsRequest,
     BulkDeleteJobsResponse,
@@ -68,14 +68,14 @@ async def preview_cleanup(
     statuses: str = "failed,cancelled",
     older_than_days: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
-    request: Request = None,
+    project_id: str = Depends(get_request_project_id),
 ):
     """Preview what would be deleted by a bulk cleanup."""
     return await preview_cleanup_service(
         db=db,
         statuses=statuses,
         older_than_days=older_than_days,
-        project_id=None,
+        project_id=project_id,
     )
 
 
@@ -83,6 +83,7 @@ async def preview_cleanup(
 async def bulk_cleanup(
     request: CleanupRequest,
     db: AsyncSession = Depends(get_db),
+    project_id: str = Depends(get_request_project_id),
 ):
     """Delete artifacts and DB rows for jobs matching the given criteria."""
     return await bulk_cleanup_service(
@@ -90,16 +91,19 @@ async def bulk_cleanup(
         statuses=request.statuses,
         older_than_days=request.older_than_days,
         include_orphans=request.include_orphans,
-        project_id=None,
+        project_id=project_id,
     )
 
 
 @router.post("/cleanup/orphans")
-async def delete_orphans(db: AsyncSession = Depends(get_db)):
+async def delete_orphans(
+    db: AsyncSession = Depends(get_db),
+    project_id: str = Depends(get_request_project_id),
+):
     """Delete orphaned model dirs and upload files with no matching job."""
     return await delete_orphans_service(
         db,
-        project_id=None,
+        project_id=project_id,
     )
 
 

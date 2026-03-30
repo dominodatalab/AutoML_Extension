@@ -97,14 +97,6 @@ def get_viewing_user_name() -> str:
     return "anonymous"
 
 
-def get_request_project_id(request: Optional[Request]) -> str:
-    """Extract project_id from projectId query param."""
-    if request:
-        query_val = request.query_params.get("projectId")
-        if query_val:
-            return query_val
-    raise HTTPException(status_code=400, detail="projectId query parameter is required")
-
 
 async def get_project_context(
     request: Optional[Request] = None,

@@ -1,6 +1,6 @@
 """Custom compatibility job routes."""
 
-from fastapi import Body, FastAPI, Request
+from fastapi import Body, Depends, FastAPI, Request
 
 from app.api.schemas.job import (
     JobCreateRequest,
@@ -9,9 +9,8 @@ from app.api.schemas.job import (
     JobResponse,
     RegisterModelRequest,
 )
-from app.dependencies import get_db_session
+from app.dependencies import get_db_session, get_request_project_id
 from app.services.job_service import (
-    get_request_project_id,
     create_job_with_context,
     find_orphans_checked,
     delete_orphans as delete_orphans_service,
@@ -73,8 +72,10 @@ def register_custom_job_routes(app: FastAPI) -> None:
             )
 
     @app.post("/svcjobcleanuppreview")
-    async def svc_job_cleanup_preview(request: Request, body: dict = Body(default={})):
-        project_id = get_request_project_id(request)
+    async def svc_job_cleanup_preview(
+        body: dict = Body(default={}),
+        project_id: str = Depends(get_request_project_id),
+    ):
         async with get_db_session() as db:
             return await preview_cleanup_service(
                 db=db,
@@ -84,14 +85,12 @@ def register_custom_job_routes(app: FastAPI) -> None:
             )
 
     @app.post("/svcjoborphans")
-    async def svc_job_orphans(request: Request):
+    async def svc_job_orphans(project_id: str = Depends(get_request_project_id)):
         """Preview orphaned artifacts (no deletion)."""
-        project_id = get_request_project_id(request)
         async with get_db_session() as db:
             return await find_orphans_checked(db, project_id=project_id)
 
     @app.post("/svcjobcleanuporphans")
-    async def svc_job_cleanup_orphans(request: Request):
-        project_id = get_request_project_id(request)
+    async def svc_job_cleanup_orphans(project_id: str = Depends(get_request_project_id)):
         async with get_db_session() as db:
             return await delete_orphans_service(db=db, project_id=project_id)
