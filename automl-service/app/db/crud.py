@@ -18,9 +18,6 @@ from app.db.models import (
 
 
 # Job CRUD operations
-# TODO update all crud ops to use domino APIs and/or be no-ops
-# OR add python apis on the extension, which do these updates
-# Also add python api to get job state
 
 async def create_job(db: AsyncSession, job: Job) -> Job:
     """Create a new job."""
