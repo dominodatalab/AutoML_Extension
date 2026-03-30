@@ -1,8 +1,8 @@
 """Pattern-based compatibility route registration."""
 
-from fastapi import Body, FastAPI, Request
+from fastapi import Body, Depends, FastAPI
 
-from app.dependencies import get_db_session
+from app.dependencies import get_db_session, get_request_project_id
 
 from app.api.compat.common import lazy_import
 
@@ -13,9 +13,8 @@ def _make_endpoint(mod, fn, cls=None, keys=None, use_db=False, db_first=False, m
         if c:
             # Pattern 2/4: RequestClass-based
             if project_scoped:
-                async def endpoint(request: Request, body: dict = Body(default={})):
+                async def endpoint(body: dict = Body(default={}), project_id: str = Depends(get_request_project_id)):
                     func, req_cls = lazy_import(m, f, c)
-                    project_id = request.query_params.get("projectId")
                     if use_db:
                         async with get_db_session() as db:
                             return await func(req_cls(**body), db, project_id=project_id)
@@ -41,9 +40,8 @@ def _make_endpoint(mod, fn, cls=None, keys=None, use_db=False, db_first=False, m
         elif use_db:
             # Pattern 1b: Simple GET + DB
             if project_scoped:
-                async def endpoint(request: Request):
+                async def endpoint(project_id: str = Depends(get_request_project_id)):
                     func = lazy_import(m, f)
-                    project_id = request.query_params.get("projectId")
                     async with get_db_session() as db:
                         return await func(db, project_id=project_id)
             else:
@@ -76,13 +74,13 @@ def register_pattern_routes(app: FastAPI) -> None:
     for path, (mod, fn) in simple_gets.items():
         app.get(path)(_make_endpoint(mod, fn, method="get"))
 
-    # Pattern 1b: Simple GET + DB -> async function(db)
-    simple_gets_db = [
-        ("/svcregisteredmodels", "app.api.routes.registry", "list_registered_models", True),
+    # Pattern 1b: Simple GET + DB + project-scoped
+    simple_gets_db_scoped = [
+        ("/svcregisteredmodels", "app.api.routes.registry", "list_registered_models"),
     ]
 
-    for path, mod, fn, scoped in simple_gets_db:
-        app.get(path)(_make_endpoint(mod, fn, use_db=True, method="get", project_scoped=scoped))
+    for path, mod, fn in simple_gets_db_scoped:
+        app.get(path)(_make_endpoint(mod, fn, use_db=True, project_scoped=True))
 
     # Pattern 2: POST body -> RequestClass -> func(request)
     post_request = [
@@ -128,22 +126,29 @@ def register_pattern_routes(app: FastAPI) -> None:
 
     # Pattern 4: POST body -> RequestClass + DB -> func(req, db)
     post_request_db = [
-        ("/svcfeatureimportance", "app.api.routes.predictions", "get_feature_importance", "FeatureImportanceRequest", False),
-        ("/svcleaderboard", "app.api.routes.predictions", "get_leaderboard", "LeaderboardRequest", False),
-        ("/svcconfusionmatrix", "app.api.routes.predictions", "get_confusion_matrix", "DiagnosticsRequest", False),
-        ("/svcroccurve", "app.api.routes.predictions", "get_roc_curve", "DiagnosticsRequest", False),
-        ("/svcprecisionrecall", "app.api.routes.predictions", "get_precision_recall_curve", "DiagnosticsRequest", False),
-        ("/svcregressiondiagnostics", "app.api.routes.predictions", "get_regression_diagnostics", "DiagnosticsRequest", False),
-        ("/svcexportdeployment", "app.api.routes.export", "export_deployment_package", "DeploymentPackageRequest", False),
-        ("/svcexportdeploymentdownload", "app.api.routes.export", "download_deployment_package", "DeploymentDownloadRequest", False),
-        ("/svclearningcurves", "app.api.routes.export", "get_learning_curves", "LearningCurvesRequest", False),
-        ("/svcexportnotebook", "app.api.routes.export", "export_notebook", "ExportNotebookRequest", False),
-        ("/svcjobcleanup", "app.api.compat.adapters.jobs", "bulk_cleanup", "CleanupRequest", True),
-        ("/svcregistermodel", "app.api.routes.registry", "register_model", "RegisterModelRequest", False),
+        ("/svcfeatureimportance", "app.api.routes.predictions", "get_feature_importance", "FeatureImportanceRequest"),
+        ("/svcleaderboard", "app.api.routes.predictions", "get_leaderboard", "LeaderboardRequest"),
+        ("/svcconfusionmatrix", "app.api.routes.predictions", "get_confusion_matrix", "DiagnosticsRequest"),
+        ("/svcroccurve", "app.api.routes.predictions", "get_roc_curve", "DiagnosticsRequest"),
+        ("/svcprecisionrecall", "app.api.routes.predictions", "get_precision_recall_curve", "DiagnosticsRequest"),
+        ("/svcregressiondiagnostics", "app.api.routes.predictions", "get_regression_diagnostics", "DiagnosticsRequest"),
+        ("/svcexportdeployment", "app.api.routes.export", "export_deployment_package", "DeploymentPackageRequest"),
+        ("/svcexportdeploymentdownload", "app.api.routes.export", "download_deployment_package", "DeploymentDownloadRequest"),
+        ("/svclearningcurves", "app.api.routes.export", "get_learning_curves", "LearningCurvesRequest"),
+        ("/svcexportnotebook", "app.api.routes.export", "export_notebook", "ExportNotebookRequest"),
+        ("/svcregistermodel", "app.api.routes.registry", "register_model", "RegisterModelRequest"),
     ]
 
-    for path, mod, fn, cls, scoped in post_request_db:
-        app.post(path)(_make_endpoint(mod, fn, cls=cls, use_db=True, project_scoped=scoped))
+    for path, mod, fn, cls in post_request_db:
+        app.post(path)(_make_endpoint(mod, fn, cls=cls, use_db=True))
+
+    # Pattern 4b: POST body -> RequestClass + DB + project-scoped
+    post_request_db_scoped = [
+        ("/svcjobcleanup", "app.api.compat.adapters.jobs", "bulk_cleanup", "CleanupRequest"),
+    ]
+
+    for path, mod, fn, cls in post_request_db_scoped:
+        app.post(path)(_make_endpoint(mod, fn, cls=cls, use_db=True, project_scoped=True))
 
     # Pattern 5: POST body.get(keys) + DB -> func(db, *args) [service direct]
     post_keys_db_first = [
