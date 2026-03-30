@@ -360,6 +360,7 @@ async def create_job_with_context(
                     detail=f"Could not resolve dataset path for dataset {job.dataset_id}",
                 )
             file_path = f"{dataset_path}/{job.file_path}"
+        job_config = build_job_config(job, file_path=file_path)
 
         job_config = build_job_config(job, file_path=file_path)
 
