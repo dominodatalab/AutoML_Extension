@@ -26,6 +26,7 @@ class JobConfig(BaseModel):
     project_name: Optional[str] = None
     project_owner: Optional[str] = None
     execution_target: str = "local"
+    # keep
     domino_job_id: Optional[str] = None
     model_type: ModelType
     # keep
@@ -57,6 +58,7 @@ class JobConfig(BaseModel):
     experiment_run_id: Optional[str] = None
     enable_mlflow: bool = False
     auto_register: bool = False
+    # keep
     register_name: Optional[str] = None
     registered_model_name: Optional[str] = None
     registered_model_version: Optional[str] = None
