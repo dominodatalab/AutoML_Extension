@@ -534,6 +534,7 @@ async def run_training_job_with_db(
                             db,
                             "WARNING",
                             db,
+                            "WARNING",
                         )
                 except Exception as e:
                     logger.warning(f"Auto-registration failed: {e}")
@@ -543,6 +544,7 @@ async def run_training_job_with_db(
                         db,
                         "ERROR",
                         db,
+                        "ERROR",
                     )
 
             await add_job_log(
