@@ -9,7 +9,7 @@ from app.api.schemas.job import (
     JobResponse,
     RegisterModelRequest,
 )
-from app.dependencies import get_db_session, get_request_project_id
+from app.dependencies import get_db_session, get_project_context, get_request_project_id
 from app.services.job_service import (
     create_job_with_context,
     find_orphans_checked,
@@ -50,14 +50,17 @@ def register_custom_job_routes(app: FastAPI) -> None:
 
     @app.post("/svcjobcreate")
     async def svc_job_create(
-        request: Request,
         body: dict = Body(default={}),
+        project_context: tuple = Depends(get_project_context),
     ):
+        project_id, project_name, project_owner = project_context
         async with get_db_session() as db:
             job = await create_job_with_context(
                 db=db,
                 job_request=JobCreateRequest(**body),
-                request=request,
+                project_id=project_id,
+                project_name=project_name,
+                project_owner=project_owner,
             )
         return JobResponse.model_validate(job)
 

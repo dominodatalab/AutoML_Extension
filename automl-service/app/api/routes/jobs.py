@@ -2,11 +2,11 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db, get_request_project_id
+from app.dependencies import get_db, get_project_context, get_request_project_id
 from app.api.schemas.job import (
     BulkDeleteJobsRequest,
     BulkDeleteJobsResponse,
@@ -47,14 +47,17 @@ router = APIRouter()
 async def create_job(
     job_request: JobCreateRequest,
     db: AsyncSession = Depends(get_db),
-    request: Request = None,
+    project_context: tuple = Depends(get_project_context),
 ):
-    """Create a new training job.
-
-    The job is automatically associated with the current user (from domino-username header)
-    and project (from DOMINO_PROJECT_ID environment variable).
-    """
-    return await create_job_with_context(db=db, job_request=job_request, request=request)
+    """Create a new training job."""
+    project_id, project_name, project_owner = project_context
+    return await create_job_with_context(
+        db=db,
+        job_request=job_request,
+        project_id=project_id,
+        project_name=project_name,
+        project_owner=project_owner,
+    )
 
 
 @router.get("/queue/status")
@@ -162,7 +165,6 @@ async def delete_job(job_id: str, db: AsyncSession = Depends(get_db)):
 async def list_jobs_post(
     list_request: JobListRequest,
     db: AsyncSession = Depends(get_db),
-    request: Request = None,
 ):
     """List jobs (POST for Domino compatibility).
 

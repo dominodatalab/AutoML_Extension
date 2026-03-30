@@ -1,7 +1,7 @@
 """Health check endpoints."""
 
 import os
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -10,7 +10,7 @@ from app.core.context.user import get_viewing_user
 from app.services.project_resolver import resolve_project
 from app.config import get_settings
 from app.core.authorization import current_user_can_modify_storage
-from app.dependencies import get_db
+from app.dependencies import get_db, get_request_project_id
 
 router = APIRouter()
 
@@ -61,12 +61,11 @@ async def get_current_user(projectId: Optional[str] = None):
 
 
 @router.get("/capabilities")
-async def get_capabilities(request: Request):
+async def get_capabilities(project_id: str = Depends(get_request_project_id)):
     """Return platform capabilities for frontend feature gating."""
     # TODO may not make sense to have in health routes
     settings = get_settings()
     standalone = settings.standalone_mode
-    project_id = request.query_params.get("projectId")
     return {
         "standalone_mode": standalone,
         "domino_jobs": not standalone,

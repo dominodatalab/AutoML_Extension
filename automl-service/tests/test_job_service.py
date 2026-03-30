@@ -744,12 +744,14 @@ class TestQueueCapacity:
                 return_value=20,
             ),
             patch("app.services.job_service.get_settings") as mock_get_settings,
-            patch("app.services.job_service.get_project_context", new_callable=AsyncMock, return_value=("proj-1", "my-proj", "owner")),
         ):
             mock_get_settings.return_value = self._mock_settings(max_domino_queue_size=20)
 
             with pytest.raises(HTTPException) as exc_info:
-                await create_job_with_context(db_session, req)
+                await create_job_with_context(
+                    db_session, req,
+                    project_id="proj-1", project_name="my-proj", project_owner="owner",
+                )
             assert exc_info.value.status_code == 429
             assert "domino" in exc_info.value.detail.lower()
 
@@ -758,9 +760,11 @@ class TestQueueCapacity:
         """Validation errors (400) should fire before capacity checks (429)."""
         mock_viewing_user
         req = _make_create_request(data_source="domino_dataset", dataset_id=None)
-        # Even if queue is "full", bad input gets 400
         with pytest.raises(HTTPException) as exc_info:
-            await create_job_with_context(db_session, req)
+            await create_job_with_context(
+                db_session, req,
+                project_id="proj-1", project_name="my-proj", project_owner="owner",
+            )
         assert exc_info.value.status_code == 400
 
 

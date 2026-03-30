@@ -9,10 +9,11 @@ Provides API endpoints to:
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.domino_model_api import get_domino_model_api
+from app.dependencies import get_request_project_id
 from app.services.deployment_service import (
     list_deployments_safe,
     list_model_apis_safe,
@@ -404,12 +405,12 @@ async def quick_deploy(request: QuickDeployRequest):
 
 @router.post("/deploy-from-job/{job_id}")
 async def deploy_from_job(
-    request: Request,
     job_id: str,
     model_name: Optional[str] = None,
     function_name: str = "predict",
     min_replicas: int = 1,
     max_replicas: int = 1,
+    project_id: str = Depends(get_request_project_id),
 ):
     """Deploy a trained model from an AutoML job.
 
@@ -417,7 +418,6 @@ async def deploy_from_job(
     """
     from app.services.deployment_service import deploy_from_job as deploy_from_job_service
 
-    project_id = request.query_params.get("projectId")
     return await deploy_from_job_service(
         job_id=job_id,
         model_name=model_name,
