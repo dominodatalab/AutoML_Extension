@@ -39,8 +39,9 @@ def register_custom_job_routes(app: FastAPI) -> None:
     """Register custom /svc* job routes."""
 
     @app.get("/svcjobs")
-    async def svc_jobs_get():
-        return await _list_jobs_response(list_request=JobListRequest())
+    async def svc_jobs_get(request: Request):
+        project_id = request.query_params.get("projectId")
+        return await _list_jobs_response(list_request=JobListRequest(project_id=project_id))
 
     @app.post("/svcjobs")
     async def svc_jobs_post(body: dict = Body(default={})):
