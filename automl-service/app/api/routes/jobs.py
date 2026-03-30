@@ -75,7 +75,7 @@ async def preview_cleanup(
         db=db,
         statuses=statuses,
         older_than_days=older_than_days,
-        project_id=request.headers.get("X-Project-Id") if request else None,
+        project_id=None,
     )
 
 
@@ -83,7 +83,6 @@ async def preview_cleanup(
 async def bulk_cleanup(
     request: CleanupRequest,
     db: AsyncSession = Depends(get_db),
-    http_request: Request = None,
 ):
     """Delete artifacts and DB rows for jobs matching the given criteria."""
     return await bulk_cleanup_service(
@@ -91,16 +90,16 @@ async def bulk_cleanup(
         statuses=request.statuses,
         older_than_days=request.older_than_days,
         include_orphans=request.include_orphans,
-        project_id=http_request.headers.get("X-Project-Id") if http_request else None,
+        project_id=None,
     )
 
 
 @router.post("/cleanup/orphans")
-async def delete_orphans(db: AsyncSession = Depends(get_db), request: Request = None):
+async def delete_orphans(db: AsyncSession = Depends(get_db)):
     """Delete orphaned model dirs and upload files with no matching job."""
     return await delete_orphans_service(
         db,
-        project_id=request.headers.get("X-Project-Id") if request else None,
+        project_id=None,
     )
 
 
@@ -171,7 +170,7 @@ async def list_jobs_post(
     - project_name: Filter by project name. Pass project_name="" to see jobs from all projects.
     - project_id: Filter by project ID (legacy, prefer project_name).
     """
-    jobs = await list_jobs_filtered(db=db, list_request=list_request, request=request)
+    jobs = await list_jobs_filtered(db=db, list_request=list_request)
 
     return JobListResponse(
         jobs=[JobResponse.model_validate(j) for j in jobs],

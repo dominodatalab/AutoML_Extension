@@ -15,7 +15,7 @@ def _make_endpoint(mod, fn, cls=None, keys=None, use_db=False, db_first=False, m
             if project_scoped:
                 async def endpoint(request: Request, body: dict = Body(default={})):
                     func, req_cls = lazy_import(m, f, c)
-                    project_id = request.headers.get("X-Project-Id")
+                    project_id = request.query_params.get("projectId")
                     if use_db:
                         async with get_db_session() as db:
                             return await func(req_cls(**body), db, project_id=project_id)
@@ -43,7 +43,7 @@ def _make_endpoint(mod, fn, cls=None, keys=None, use_db=False, db_first=False, m
             if project_scoped:
                 async def endpoint(request: Request):
                     func = lazy_import(m, f)
-                    project_id = request.headers.get("X-Project-Id")
+                    project_id = request.query_params.get("projectId")
                     async with get_db_session() as db:
                         return await func(db, project_id=project_id)
             else:

@@ -136,7 +136,7 @@ async def test_capabilities_include_storage_cleanup_for_extension_editors(app_cl
     )
     response = await app_client.get(
         "/svc/v1/health/capabilities",
-        headers={"X-Project-Id": "project-123"},
+        params={"projectId": "project-123"},
     )
 
     assert response.status_code == 200
@@ -165,7 +165,7 @@ async def test_capabilities_disable_storage_cleanup_without_extension_edit(app_c
 
     response = await app_client.get(
         "/svc/v1/health/capabilities",
-        headers={"X-Project-Id": "project-456"},
+        params={"projectId": "project-456"},
     )
 
     assert response.status_code == 200

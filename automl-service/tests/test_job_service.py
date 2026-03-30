@@ -299,6 +299,7 @@ class TestBuildJobModel:
             owner="bob",
             project_id="pid-1",
             project_name="my-proj",
+            execution_target="domino_job",
         )
         assert isinstance(job, Job)
         assert job.name == "my-job"
@@ -323,7 +324,7 @@ class TestBuildJobModel:
             id_column="item_id",
             prediction_length=14,
         )
-        job = build_job_model(req, "ts-job", "alice", None, None)
+        job = build_job_model(req, "ts-job", "alice", None, None, execution_target="domino_job")
         assert job.model_type == ModelType.TIMESERIES
         assert job.time_column == "ts"
         assert job.id_column == "item_id"
@@ -336,13 +337,14 @@ class TestBuildJobModel:
 
     def test_execution_target_defaults_to_local(self):
         req = _make_create_request()
-        job = build_job_model(req, "job", "user", None, None)
-        assert job.execution_target == "local"
+        with pytest.raises(HTTPException) as exc_info:
+            build_job_model(req, "job", "user", None, None)
+        assert exc_info.value.status_code == 400
 
     def test_autogluon_config_stored(self):
         adv = AdvancedAutoGluonConfig(num_gpus=1)
         req = _make_create_request(advanced_config=adv)
-        job = build_job_model(req, "job", "user", None, None)
+        job = build_job_model(req, "job", "user", None, None, execution_target="domino_job")
         assert job.autogluon_config is not None
         assert "advanced" in job.autogluon_config
 
@@ -357,7 +359,9 @@ class TestResolveExecutionTarget:
 
     def test_local_default(self):
         req = _make_create_request()
-        assert resolve_execution_target(req) == "local"
+        with pytest.raises(HTTPException) as exc_info:
+            resolve_execution_target(req)
+        assert exc_info.value.status_code == 400
 
     def test_explicit_domino_job(self):
         req = _make_create_request(execution_target="domino_job")
@@ -369,7 +373,9 @@ class TestResolveExecutionTarget:
 
     def test_legacy_flag_false_stays_local(self):
         req = _make_create_request(run_as_domino_job=False)
-        assert resolve_execution_target(req) == "local"
+        with pytest.raises(HTTPException) as exc_info:
+            resolve_execution_target(req)
+        assert exc_info.value.status_code == 400
 
 
 # ===========================================================================
@@ -383,7 +389,7 @@ class TestResolveJobListFilters:
     def test_all_none_without_request(self, mock_viewing_user):
         mock_viewing_user
         lr = _make_list_request()
-        status, model_type, owner, pid, pname = resolve_job_list_filters(lr, None)
+        status, model_type, owner, pid, pname = resolve_job_list_filters(lr)
         assert status is None
         assert model_type is None
         assert owner == "test-user"
@@ -393,19 +399,19 @@ class TestResolveJobListFilters:
     def test_status_filter_parsed(self, mock_viewing_user):
         mock_viewing_user
         lr = _make_list_request(status="completed")
-        status, *_ = resolve_job_list_filters(lr, None)
+        status, *_ = resolve_job_list_filters(lr)
         assert status == JobStatus.COMPLETED
 
     def test_model_type_filter_parsed(self, mock_viewing_user):
         mock_viewing_user
         lr = _make_list_request(model_type="timeseries")
-        _, model_type, *_ = resolve_job_list_filters(lr, None)
+        _, model_type, *_ = resolve_job_list_filters(lr)
         assert model_type == ModelType.TIMESERIES
 
     def test_owner_from_list_request(self, mock_viewing_user):
         mock_viewing_user
         lr = _make_list_request(owner="alice")
-        _, _, owner, *_ = resolve_job_list_filters(lr, None)
+        _, _, owner, *_ = resolve_job_list_filters(lr)
         assert owner == "alice"
 
     def test_owner_from_http_request_header(self, monkeypatch):
@@ -418,26 +424,25 @@ class TestResolveJobListFilters:
         monkeypatch.setattr(job_service, "get_viewing_user", fake_get_viewing_user, raising=True)
 
         lr = _make_list_request()
-        request = _fake_request(headers={"domino-username": "bob"})
-        _, _, owner, *_ = resolve_job_list_filters(lr, request)
+        _, _, owner, *_ = resolve_job_list_filters(lr)
         assert owner == "bob"
 
     def test_owner_explicit_empty_string_gives_none(self, mock_viewing_user):
         mock_viewing_user
         lr = _make_list_request(owner="")
-        _, _, owner, *_ = resolve_job_list_filters(lr, None)
+        _, _, owner, *_ = resolve_job_list_filters(lr)
         assert owner is None
 
     def test_project_name_filter(self, mock_viewing_user):
         mock_viewing_user
         lr = _make_list_request(project_name="my-proj")
-        *_, pname = resolve_job_list_filters(lr, None)
+        *_, pname = resolve_job_list_filters(lr)
         assert pname == "my-proj"
 
     def test_project_id_filter(self, mock_viewing_user):
         mock_viewing_user
         lr = _make_list_request(project_id="pid-42")
-        _, _, _, pid, _ = resolve_job_list_filters(lr, None)
+        _, _, _, pid, _ = resolve_job_list_filters(lr)
         assert pid == "pid-42"
 
     @pytest.mark.asyncio
@@ -462,7 +467,6 @@ class TestResolveJobListFilters:
         jobs = await list_jobs_filtered(
             db=db_session,
             list_request=_make_list_request(project_name="test-project"),
-            request=None,
         )
 
         assert set([j.name for j in jobs]) == set(["local-job", "domino-job"])
@@ -485,7 +489,7 @@ class TestResolveJobListFilters:
         db_session.add_all([local_job, domino_job])
         await db_session.commit()
 
-        jobs = await list_jobs_filtered(db=db_session, list_request=_make_list_request(), request=None)
+        jobs = await list_jobs_filtered(db=db_session, list_request=_make_list_request())
 
         returned_ids = {job.id for job in jobs}
         assert local_job.id in returned_ids
@@ -513,7 +517,6 @@ class TestResolveJobListFilters:
         jobs = await list_jobs_filtered(
             db=db_session,
             list_request=_make_list_request(project_id="", project_name=""),
-            request=None,
         )
 
         returned_ids = {job.id for job in jobs}
@@ -731,22 +734,6 @@ class TestQueueCapacity:
         return MagicMock(**defaults)
 
     @pytest.mark.asyncio
-    async def test_local_queue_full_returns_429(self, db_session, mock_viewing_user):
-        mock_viewing_user
-        req = _make_create_request()
-        with (
-            patch("app.core.job_queue.get_job_queue") as mock_queue,
-            patch("app.services.job_service.get_settings") as mock_get_settings,
-        ):
-            mock_get_settings.return_value = self._mock_settings(max_local_queue_size=5)
-            mock_queue.return_value.get_total_tracked.return_value = 5
-
-            with pytest.raises(HTTPException) as exc_info:
-                await create_job_with_context(db_session, req)
-            assert exc_info.value.status_code == 429
-            assert "local" in exc_info.value.detail.lower()
-
-    @pytest.mark.asyncio
     async def test_domino_queue_full_returns_429(self, db_session, mock_viewing_user):
         mock_viewing_user
         req = _make_create_request(execution_target="domino_job")
@@ -757,6 +744,7 @@ class TestQueueCapacity:
                 return_value=20,
             ),
             patch("app.services.job_service.get_settings") as mock_get_settings,
+            patch("app.services.job_service.get_project_context", new_callable=AsyncMock, return_value=("proj-1", "my-proj", "owner")),
         ):
             mock_get_settings.return_value = self._mock_settings(max_domino_queue_size=20)
 
@@ -764,30 +752,6 @@ class TestQueueCapacity:
                 await create_job_with_context(db_session, req)
             assert exc_info.value.status_code == 429
             assert "domino" in exc_info.value.detail.lower()
-
-    @pytest.mark.asyncio
-    async def test_local_queue_under_limit_proceeds(self, db_session, mock_viewing_user):
-        """When the local queue is under the limit, the job should be created."""
-        mock_viewing_user
-        req = _make_create_request()
-        with (
-            patch("app.core.job_queue.get_job_queue") as mock_queue,
-            patch("app.services.job_service.get_settings") as mock_get_settings,
-            patch("app.services.job_service.crud") as mock_crud,
-            patch("app.services.job_service._attach_external_links", side_effect=lambda job: job),
-        ):
-            mock_get_settings.return_value = self._mock_settings()
-            mock_queue.return_value.get_total_tracked.return_value = 3
-            mock_queue.return_value.enqueue = AsyncMock()
-
-            fake_job = MagicMock()
-            fake_job.id = "job-123"
-            fake_job.execution_target = "local"
-            mock_crud.create_job = AsyncMock(return_value=fake_job)
-            mock_crud.get_job_by_scoped_name = AsyncMock(return_value=None)
-
-            result = await create_job_with_context(db_session, req)
-            assert result is not None
 
     @pytest.mark.asyncio
     async def test_bad_input_returns_400_not_429(self, db_session, mock_viewing_user):

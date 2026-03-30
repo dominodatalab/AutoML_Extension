@@ -417,7 +417,7 @@ async def deploy_from_job(
     """
     from app.services.deployment_service import deploy_from_job as deploy_from_job_service
 
-    project_id = request.headers.get("X-Project-Id")
+    project_id = request.query_params.get("projectId")
     return await deploy_from_job_service(
         job_id=job_id,
         model_name=model_name,

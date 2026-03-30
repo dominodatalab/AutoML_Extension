@@ -16,7 +16,7 @@ def register_custom_model_routes(app: FastAPI) -> None:
 
     @app.get("/svcmodels")
     async def svc_list_models(request: Request):
-        project_id = request.headers.get("X-Project-Id")
+        project_id = request.query_params.get("projectId")
         async with get_db_session() as db:
             return await list_registered_models_response(db, project_id=project_id)
 
@@ -30,7 +30,7 @@ def register_custom_model_routes(app: FastAPI) -> None:
 
     @app.post("/svcdeployfromjob")
     async def svc_deploy_from_job(request: Request, body: dict = Body(default={})):
-        project_id = request.headers.get("X-Project-Id") or body.get("project_id")
+        project_id = request.query_params.get("projectId") or body.get("project_id")
         return await deploy_from_job_service(
             job_id=body.get("job_id"),
             model_name=body.get("model_name"),

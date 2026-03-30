@@ -66,7 +66,7 @@ async def get_capabilities(request: Request):
     # TODO may not make sense to have in health routes
     settings = get_settings()
     standalone = settings.standalone_mode
-    project_id = request.headers.get("X-Project-Id")
+    project_id = request.query_params.get("projectId")
     return {
         "standalone_mode": standalone,
         "domino_jobs": not standalone,

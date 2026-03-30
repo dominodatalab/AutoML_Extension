@@ -22,12 +22,11 @@ from app.services.job_service import (
 
 
 async def _list_jobs_response(
-    request: Request,
     list_request: JobListRequest,
 ) -> JobListResponse:
     """Build list-jobs response for compat endpoints."""
     async with get_db_session() as db:
-        jobs = await list_jobs_filtered(db=db, list_request=list_request, request=request)
+        jobs = await list_jobs_filtered(db=db, list_request=list_request)
     return JobListResponse(
         jobs=[JobResponse.model_validate(j) for j in jobs],
         total=len(jobs),
@@ -40,13 +39,12 @@ def register_custom_job_routes(app: FastAPI) -> None:
     """Register custom /svc* job routes."""
 
     @app.get("/svcjobs")
-    async def svc_jobs_get(request: Request):
-        return await _list_jobs_response(request=request, list_request=JobListRequest())
+    async def svc_jobs_get():
+        return await _list_jobs_response(list_request=JobListRequest())
 
     @app.post("/svcjobs")
-    async def svc_jobs_post(request: Request, body: dict = Body(default={})):
+    async def svc_jobs_post(body: dict = Body(default={})):
         return await _list_jobs_response(
-            request=request,
             list_request=JobListRequest(**body),
         )
 

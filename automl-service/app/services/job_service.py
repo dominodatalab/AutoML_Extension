@@ -387,7 +387,6 @@ async def create_job_with_context(
 async def list_jobs_filtered(
     db: AsyncSession,
     list_request: JobListRequest,
-    request: Optional[Request] = None,
 ) -> list[Job]:
     """List jobs using advanced POST filters."""
     (
@@ -396,7 +395,7 @@ async def list_jobs_filtered(
         owner_filter,
         project_id_filter,
         project_name_filter,
-    ) = resolve_job_list_filters(list_request, request)
+    ) = resolve_job_list_filters(list_request)
 
     execution_target_filter = None
     has_project_filter = bool(project_id_filter or project_name_filter)
@@ -496,7 +495,6 @@ def get_queue_status() -> dict:
 
 def resolve_job_list_filters(
     list_request: JobListRequest,
-    request: Optional[Request],
 ) -> tuple[
     Optional[JobStatus],
     Optional[ModelType],
@@ -523,10 +521,7 @@ def resolve_job_list_filters(
     if list_request.project_id is not None:
         project_id_filter = list_request.project_id if list_request.project_id else None
     else:
-        # Default to sidebar project when no explicit filter is set
-        project_id_filter = (
-            request.headers.get("X-Project-Id") if request else None
-        )
+        project_id_filter = None
 
     return (
         status_filter,
