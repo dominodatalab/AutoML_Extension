@@ -12,12 +12,14 @@ from app.core.utils import utc_now
 from app.db.database import Base
 
 
+# TODO map domino jaob statuses to this
 class JobStatus(str, enum.Enum):
     """Training job status."""
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    # TODO remove
     CANCELLED = "cancelled"
 
 
