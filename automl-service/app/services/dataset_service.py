@@ -503,7 +503,6 @@ def coerce_preview_response(preview: Any, include_dtypes: bool = False) -> dict[
 
 
 async def build_compat_dataset_preview_payload(
-    dataset_manager: DominoDatasetManager,
     body: CompatDatasetPreviewRequest,
 ) -> dict[str, Any]:
     """Build compat dataset preview payload from request body."""
