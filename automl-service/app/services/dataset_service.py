@@ -503,7 +503,6 @@ def coerce_preview_response(preview: Any, include_dtypes: bool = False) -> dict[
 
 
 async def preview_file_path_response(
-    dataset_manager: DominoDatasetManager,
     body: DatasetFilePreviewRequest,
 ) -> dict[str, Any]:
     """Build dataset preview payload from file path or dataset ID."""

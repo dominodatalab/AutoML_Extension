@@ -421,7 +421,6 @@ async def test_preview_file_path_response_fetches_dataset_file_over_api(monkeypa
     )
 
     result = await preview_file_path_response(
-        dataset_manager=_ExplodingDatasetManager(),
         body=DatasetFilePreviewRequest(**{
             "dataset_id": "ds-123",
             "file_path": "folder/train.csv",
@@ -475,7 +474,6 @@ async def test_preview_file_path_response_rejects_large_remote_file(monkeypatch)
 
     with pytest.raises(HTTPException) as exc_info:
         await preview_file_path_response(
-            dataset_manager=object(),
             body=DatasetFilePreviewRequest(
                 dataset_id="ds-large",
                 file_path="folder/huge.parquet",
@@ -494,7 +492,6 @@ async def test_preview_file_path_response_rejects_large_remote_file(monkeypatch)
 async def test_preview_file_path_response_rejects_incomplete_request():
     with pytest.raises(HTTPException) as exc_info:
         await preview_file_path_response(
-            dataset_manager=object(),
             body=DatasetFilePreviewRequest(
                 dataset_id="ds-456",
                 file_path="",
@@ -509,11 +506,6 @@ async def test_preview_file_path_response_rejects_incomplete_request():
 # ---------------------------------------------------------------------------
 # list_datasets_response
 # ---------------------------------------------------------------------------
-
-
-class _ExplodingDatasetManager:
-    async def list_datasets(self):
-        raise AssertionError("list_datasets_response should not use mounted dataset data")
 
 
 @pytest.mark.asyncio
