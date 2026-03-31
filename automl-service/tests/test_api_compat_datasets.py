@@ -48,12 +48,6 @@ async def test_svcdatasetpreview_rejects_empty_body_with_typed_model(monkeypatch
         fake_build_compat_dataset_preview_payload,
         raising=True,
     )
-    monkeypatch.setattr(
-        custom_datasets_module,
-        "get_dataset_manager",
-        lambda: object(),
-        raising=True,
-    )
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post("/svcdatasetpreview")

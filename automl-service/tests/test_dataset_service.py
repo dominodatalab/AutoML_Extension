@@ -421,7 +421,6 @@ async def test_build_compat_dataset_preview_payload_fetches_dataset_file_over_ap
     )
 
     result = await build_compat_dataset_preview_payload(
-        dataset_manager=_ExplodingDatasetManager(),
         body=CompatDatasetPreviewRequest(**{
             "dataset_id": "ds-123",
             "file_path": "folder/train.csv",
@@ -475,7 +474,6 @@ async def test_build_compat_dataset_preview_payload_rejects_large_remote_file(mo
 
     with pytest.raises(HTTPException) as exc_info:
         await build_compat_dataset_preview_payload(
-            dataset_manager=object(),
             body=CompatDatasetPreviewRequest(
                 dataset_id="ds-large",
                 file_path="folder/huge.parquet",
@@ -494,7 +492,6 @@ async def test_build_compat_dataset_preview_payload_rejects_large_remote_file(mo
 async def test_build_compat_dataset_preview_payload_rejects_incomplete_request():
     with pytest.raises(HTTPException) as exc_info:
         await build_compat_dataset_preview_payload(
-            dataset_manager=object(),
             body=CompatDatasetPreviewRequest(
                 dataset_id="ds-456",
                 file_path="",
@@ -509,11 +506,6 @@ async def test_build_compat_dataset_preview_payload_rejects_incomplete_request()
 # ---------------------------------------------------------------------------
 # list_datasets_response
 # ---------------------------------------------------------------------------
-
-
-class _ExplodingDatasetManager:
-    async def list_datasets(self):
-        raise AssertionError("list_datasets_response should not use mounted dataset data")
 
 
 @pytest.mark.asyncio
@@ -577,7 +569,6 @@ async def test_list_datasets_response_builds_from_domino_payload_only(monkeypatc
     )
 
     result = await list_datasets_response(
-        dataset_manager=_ExplodingDatasetManager(),
         project_id="project-123",
     )
 
@@ -634,7 +625,6 @@ async def test_list_datasets_response_defaults_missing_api_fields(monkeypatch):
     )
 
     result = await list_datasets_response(
-        dataset_manager=_ExplodingDatasetManager(),
         project_id="resolved-project",
     )
 
