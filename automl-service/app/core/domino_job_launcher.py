@@ -11,7 +11,6 @@ from functools import lru_cache
 from typing import Any, Optional
 
 import httpx
-from pydantic import BaseModel
 
 from app.config import get_settings
 from app.core.domino_http import (
@@ -122,7 +121,6 @@ class DominoJobLauncher:
 
         return None
 
-    # TODO: why does this exist? why do we care about what commit id is used in the job?
     @staticmethod
     def _resolve_launch_commit_id() -> tuple[Optional[str], Optional[str]]:
         """Resolve commit used for child Domino jobs.
@@ -326,18 +324,10 @@ class DominoJobLauncher:
         job_id: str,
         file_path: str,
         title: Optional[str] = None,
-        job_config: Optional[dict[str, Any] | BaseModel] = None,
         hardware_tier_name: Optional[str] = None,
         project_id: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Launch a training job in Domino.
-
-        *file_path* is the resolved path to the training data file as it
-        will appear inside the Domino Job container (e.g.
-        ``/domino/datasets/local/my-dataset/train.csv``).  The path is
-        resolved at job-creation time so the worker doesn't need dataset
-        API access.
-        """
+        """Launch a training job in Domino."""
         if not self.settings.is_domino_environment:
             return {
                 "success": False,
@@ -345,20 +335,9 @@ class DominoJobLauncher:
             }
 
         try:
-            job_config_payload: dict[str, Any]
-            if isinstance(job_config, BaseModel):
-                job_config_payload = job_config.model_dump(mode="json", exclude_none=True)
-            elif job_config is None:
-                job_config_payload = {}
-            else:
-                job_config_payload = job_config
-
             command = self._build_command_from_path(
                 self.TRAINING_RUNNER_PATH,
-                {
-                    "job_id": job_id,
-                    "job_config": json.dumps(job_config_payload),
-                },
+                {"job_id": job_id, "file_path": file_path},
             )
             response = await self._job_start(
                 command=command,

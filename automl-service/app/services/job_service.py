@@ -16,12 +16,10 @@ from app.api.generated.domino_public_api_client.models.failure_envelope_v1 impor
 from app.api.generated.domino_public_api_client.models.get_job_details_response_400 import GetJobDetailsResponse400
 from app.api.generated.domino_public_api_client.models.get_job_details_response_404 import GetJobDetailsResponse404
 from app.api.generated.domino_public_api_client.models.get_job_details_response_500 import GetJobDetailsResponse500
-from app.api.generated.domino_public_api_client.api.jobs import get_job_details, get_job_logs as get_domino_job_logs
+from app.api.generated.domino_public_api_client.api.jobs import get_job_details
 from app.api.generated.domino_public_api_client.client import AuthenticatedClient, Client
 from app.api.generated.domino_public_api_client.models.git_service_provider_v1 import GitServiceProviderV1
 from app.api.generated.domino_public_api_client.models.job_envelope_v1 import JobEnvelopeV1
-from app.api.generated.domino_public_api_client.models.logs_envelope_v1 import LogsEnvelopeV1
-from app.api.generated.domino_public_api_client.models.log_type_v1 import LogTypeV1
 
 from app.api.schemas.job import (
     JobCreateRequest,
@@ -37,13 +35,10 @@ from app.core.authorization import require_storage_modify
 from app.core.context.user import get_viewing_user
 from app.core.domino_http import get_domino_public_api_client_sync
 from app.core.authorization import require_job_list
-from app.core.domino_job_launcher import get_domino_job_launcher
 from app.core.dataset_mounts import resolve_dataset_mount_paths
-from app.db.models import Job, JobLog, JobStatus, ModelType, ProblemType
+from app.db.models import Job, JobStatus, ModelType, ProblemType
 from app.db import crud
 from app.services.job_links import attach_external_links
-from app.services.models import JobConfig
-from app.services.project_resolver import resolve_project
 from app.workers.training_worker import register_trained_model
 
 logger = logging.getLogger(__name__)
@@ -244,14 +239,6 @@ def build_job_model(
     )
 
 
-def build_job_config(job: Job, *, file_path: Optional[str] = None) -> JobConfig:
-    """Build a transport-safe training config from a persisted job."""
-    overrides = {}
-    if file_path is not None:
-        overrides["file_path"] = file_path
-    return JobConfig.from_job(job, **overrides)
-
-
 async def _count_active_domino_jobs(db: AsyncSession) -> int:
     """Count in-flight Domino jobs (pending + running)."""
     jobs = await crud.get_jobs_by_statuses(
@@ -345,11 +332,12 @@ async def create_job_with_context(
         raise
 
     if job.execution_target == "domino_job":
+        from app.core.domino_job_launcher import get_domino_job_launcher
+
         if not job.file_path:
             raise ValueError(f"Job {job.id} has no file_path")
 
         file_path = job.file_path
-
         if job.data_source == "domino_dataset" and job.dataset_id:
             from app.services.dataset_service import get_dataset_manager
             dataset_manager = get_dataset_manager()
@@ -361,15 +349,12 @@ async def create_job_with_context(
                 )
             file_path = f"{dataset_path}/{job.file_path}"
 
-        job_config = build_job_config(job, file_path=file_path)
-
         settings = get_settings()
         launcher = get_domino_job_launcher()
         launch_result = await launcher.start_training_job(
             job_id=job.id,
             file_path=file_path,
             title=job.name,
-            job_config=job_config,
             hardware_tier_name=job_request.domino_hardware_tier_name or settings.domino_training_hardware_tier_name,
             project_id=project_id,
         )
@@ -493,12 +478,8 @@ async def get_job_logs(
 ) -> list:
     """Return logs for a job after validating job existence."""
     owner_user_name = get_viewing_user_name()
-    job = await get_job_or_404(db, job_id, owner_user_name)
-    logs = []
-    if job.domino_job_id is not None:
-        logs = await _fetch_domino_job_logs(job_id=job.id, domino_job_id=job.domino_job_id, limit=limit)
-    else:
-        logs = await crud.get_job_logs(db, job_id, limit=limit)
+    await get_job_or_404(db, job_id, owner_user_name)
+    logs = await crud.get_job_logs(db, job_id, limit=limit)
     return list(logs)
 
 
@@ -665,51 +646,6 @@ def _parse_get_job_details_response(
     )
 
 
-def _domino_log_level(log_type: str) -> str:
-    """Map Domino log types onto the existing API's level field."""
-    return "ERROR" if log_type == LogTypeV1.STDERR else "INFO"
-
-
-def _build_domino_job_logs(job_id: str, logs_envelope: LogsEnvelopeV1) -> list[JobLog]:
-    """Adapt Domino Public API log lines to the local JobLog response shape."""
-    return [
-        JobLog(
-            id=index,
-            job_id=job_id,
-            level=_domino_log_level(log_line.log_type.value),
-            message=log_line.log,
-            timestamp=log_line.timestamp,
-        )
-        for index, log_line in enumerate(logs_envelope.logs.log_content, start=1)
-    ]
-
-
-async def _fetch_domino_job_logs(*, job_id: str, domino_job_id: str, limit: int) -> list[JobLog]:
-    """Fetch Domino job logs via the Public API and adapt them to local JobLog rows."""
-    async with get_domino_public_api_client_sync() as client:
-        response = await get_domino_job_logs.asyncio_detailed(
-            job_id=domino_job_id,
-            client=client,
-            limit=limit,
-        )
-
-    if int(response.status_code) >= 400:
-        detail = response.content.decode("utf-8", errors="ignore") or "Failed to get Domino job logs"
-        raise HTTPException(status_code=int(response.status_code), detail=detail)
-
-    parsed = response.parsed
-    if not isinstance(parsed, LogsEnvelopeV1):
-        logger.warning(
-            "Unexpected Domino job logs response for job %s (%s): %s",
-            job_id,
-            domino_job_id,
-            type(parsed).__name__,
-        )
-        return []
-
-    return _build_domino_job_logs(job_id, parsed)
-
-
 
 def _fetch_domino_job_or_throw(domino_job_id: str) -> JobEnvelopeV1 | None:
     """Fetch a Domino job via the Public API and raise on request failure."""
@@ -843,6 +779,10 @@ async def _mark_pending_job_failed_for_missing_data(
         error_message=error_message,
         completed_at=utc_now(),
     )
+    try:
+        await crud.add_job_log(db, job.id, error_message, "ERROR")
+    except Exception:
+        logger.exception("Failed to write missing-data sync log for job %s", job.id)
     return updated or job
 
 
@@ -869,6 +809,8 @@ async def _sync_domino_job_state(
         return job
 
     try:
+        from app.core.domino_job_launcher import get_domino_job_launcher
+
         status_result = await asyncio.wait_for(
             get_domino_job_launcher().get_job_status(job.domino_job_id),
             timeout=8.0,
@@ -909,6 +851,15 @@ async def _sync_domino_job_state(
                 error_message=error_message,
                 completed_at=utc_now(),
             )
+            try:
+                await crud.add_job_log(
+                    db,
+                    job.id,
+                    f"{_DOMINO_MISSING_JOB_MESSAGE} Domino API error: {error}",
+                    "WARNING",
+                )
+            except Exception:
+                logger.exception("Failed to write missing-job sync log for job %s", job.id)
             return updated or job
         return job
 
@@ -973,6 +924,15 @@ async def _sync_domino_job_state(
             error_message=error_message,
             completed_at=utc_now(),
         )
+        try:
+            await crud.add_job_log(
+                db,
+                job.id,
+                f"External Domino job ended with status: {latest_domino_status}",
+                "ERROR",
+            )
+        except Exception:
+            logger.exception("Failed to write terminal sync log for job %s", job.id)
         return updated or job
 
     updated = await crud.update_job_status(
@@ -981,6 +941,15 @@ async def _sync_domino_job_state(
         status=JobStatus.CANCELLED,
         completed_at=utc_now(),
     )
+    try:
+        await crud.add_job_log(
+            db,
+            job.id,
+            f"External Domino job ended with status: {latest_domino_status}",
+            "WARNING",
+        )
+    except Exception:
+        logger.exception("Failed to write terminal sync log for job %s", job.id)
     return updated or job
 
 
@@ -1126,6 +1095,8 @@ async def cancel_job(db: AsyncSession, job_id: str) -> dict:
         stop_success = False
         stop_error = None
         if job.domino_job_id:
+            from app.core.domino_job_launcher import get_domino_job_launcher
+
             stop_result = await get_domino_job_launcher().stop_job(job.domino_job_id, project_id=job.project_id)
             stop_success = bool(stop_result.get("success"))
             stop_error = stop_result.get("error")

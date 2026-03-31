@@ -43,24 +43,6 @@ class TestTrainingRunnerArgs:
         args = parse_args()
         assert args.database_url is None
 
-    def test_job_config_parsed(self, monkeypatch):
-        monkeypatch.setattr(
-            sys,
-            "argv",
-            [
-                "runner",
-                "--job-id",
-                "abc123",
-                "--job-config",
-                '{"name":"job","model_type":"tabular","data_source":"upload","target_column":"target","file_path":"/mnt/data/train.csv"}',
-            ],
-        )
-        from app.workers.domino_training_runner import parse_args
-
-        args = parse_args()
-        assert args.job_config is not None
-        assert '"file_path"' in args.job_config
-
 
 class TestEdaRunnerArgs:
     """domino_eda_runner.parse_args accepts --database-url."""
@@ -157,22 +139,26 @@ class TestJobLauncherCommand:
         })
         assert "--database-url" not in args
 
-    def test_build_command_training(self):
+    def test_build_command_training(self, monkeypatch):
+        monkeypatch.setenv("AUTOML_SERVICE_DIR", "automl-service")
         from app.core.domino_job_launcher import DominoJobLauncher
 
-        cmd = DominoJobLauncher._build_command_from_path(
-            DominoJobLauncher.TRAINING_RUNNER_PATH,
+        cmd = DominoJobLauncher._build_command(
+            DominoJobLauncher,
+            "app.workers.domino_training_runner",
             {"job_id": "j1", "database_url": "sqlite:////mnt/data/app/automl.db"},
         )
         assert "--database-url" in cmd
         assert "sqlite:////mnt/data/app/automl.db" in cmd
         assert "--job-id" in cmd
 
-    def test_build_command_eda(self):
+    def test_build_command_eda(self, monkeypatch):
+        monkeypatch.setenv("AUTOML_SERVICE_DIR", "automl-service")
         from app.core.domino_job_launcher import DominoJobLauncher
 
-        cmd = DominoJobLauncher._build_command_from_path(
-            DominoJobLauncher.EDA_RUNNER_PATH,
+        cmd = DominoJobLauncher._build_command(
+            DominoJobLauncher,
+            "app.workers.domino_eda_runner",
             {
                 "request_id": "r1",
                 "mode": "tabular",
