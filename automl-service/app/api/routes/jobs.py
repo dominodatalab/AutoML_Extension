@@ -176,10 +176,10 @@ async def list_jobs(
     skip: int = 0,
     limit: int = 100,
     status: Optional[str] = None,
-    model_type: Optional[str] = None,
+    modelType: Optional[str] = None,
     owner: Optional[str] = None,
-    project_id: Optional[str] = None,
-    project_name: Optional[str] = None,
+    projectId: Optional[str] = None,
+    projectName: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
     """List jobs with optional filters."""
@@ -187,10 +187,10 @@ async def list_jobs(
         skip=skip,
         limit=limit,
         status=status,
-        model_type=model_type,
+        model_type=modelType,
         owner=owner,
-        project_id=project_id,
-        project_name=project_name,
+        project_id=projectId,
+        project_name=projectName,
     )
     jobs = await list_jobs_filtered(db=db, list_request=list_request)
     return JobListResponse(

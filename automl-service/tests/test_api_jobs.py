@@ -266,8 +266,8 @@ async def test_list_jobs_after_creation(app_client):
         create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB, params={"projectId": "test-project-id"})
         assert create_resp.status_code == 200
 
-        # List by project_name so domino_job execution target is included
-        list_resp = await app_client.get("/svc/v1/jobs", params={"project_name": "test-project"})
+        # List by projectName so domino_job execution target is included
+        list_resp = await app_client.get("/svc/v1/jobs", params={"projectName": "test-project"})
 
     assert list_resp.status_code == 200
     body = list_resp.json()
