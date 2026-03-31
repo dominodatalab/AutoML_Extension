@@ -30,7 +30,6 @@ def register_custom_dataset_routes(app: FastAPI) -> None:
         body: CompatDatasetPreviewRequest = Body(...),
     ):
         return await build_compat_dataset_preview_payload(
-            get_dataset_manager(),
             body,
         )
 

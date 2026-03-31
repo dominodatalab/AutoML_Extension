@@ -104,8 +104,12 @@ async def test_per_request_user_context_isolation_via_api(app_client, monkeypatc
     different users for successive invocations. Each HTTP request runs in an
     isolated context, so both requests trigger fetch and see different users.
     """
+    from types import SimpleNamespace
+
     from app.core.context import user as user_ctx
     from app.api.generated.domino_public_api_client.api import users as users_api
+    import app.services.job_service as job_service
+    import app.services.project_resolver as project_resolver
 
     calls = {"n": 0}
 
@@ -118,32 +122,54 @@ async def test_per_request_user_context_isolation_via_api(app_client, monkeypatc
 
     monkeypatch.setattr(users_api.get_current_user, "sync", fake_sync)
 
+    async def fake_resolve_project(project_id: str):
+        return SimpleNamespace(
+            id=project_id,
+            name="test-project",
+            owner_username="test-owner",
+        )
+
+    class FakeLauncher:
+        async def start_training_job(self, **kwargs):
+            return {
+                "success": True,
+                "domino_job_id": f"domino-{kwargs['job_id']}",
+                "domino_job_status": "Submitted",
+            }
+
+    monkeypatch.setattr(project_resolver, "resolve_project", fake_resolve_project, raising=True)
+    monkeypatch.setattr(job_service, "get_domino_job_launcher", lambda: FakeLauncher(), raising=True)
+    monkeypatch.setattr(job_service, "_attach_external_links", lambda job: job, raising=True)
+
     # First request has owner alice
     r1 = await app_client.post(
-        "/svc/v1/jobs",
+        "/svc/v1/jobs?projectId=test-project-id",
         json={
             "name": "req1",
             "model_type": "tabular",
             "data_source": "upload",
             "file_path": "/tmp/dummy.csv",
             "target_column": "target",
+            "execution_target": "domino_job",
         },
     )
     assert r1.status_code == 200, r1.text
     b1 = r1.json()
     assert b1["owner"] == "alice"
 
-    # First request has owner bob
+    # Second request has owner bob
     r2 = await app_client.post(
-        "/svc/v1/jobs",
+        "/svc/v1/jobs?projectId=test-project-id",
         json={
             "name": "req2",
             "model_type": "tabular",
             "data_source": "upload",
             "file_path": "/tmp/dummy.csv",
             "target_column": "target",
+            "execution_target": "domino_job",
         },
     )
     assert r2.status_code == 200, r2.text
     b2 = r2.json()
     assert b2["owner"] == "bob"
+    assert calls["n"] == 2

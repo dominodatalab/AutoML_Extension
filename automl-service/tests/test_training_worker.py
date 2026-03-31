@@ -66,13 +66,6 @@ def training_worker_db_harness(make_job, tmp_path):
             stack.enter_context(
                 patch("app.workers.training_worker.AutoGluonRunner", return_value=mock_runner)
             )
-            stack.enter_context(patch("app.workers.training_worker.DominoDatasetManager"))
-            stack.enter_context(
-                patch(
-                    "app.workers.training_worker.remap_shared_path",
-                    return_value=str(training_csv),
-                )
-            )
             stack.enter_context(
                 patch(
                     "app.workers.training_worker.get_model_diagnostics",
