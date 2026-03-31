@@ -1,3 +1,4 @@
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -60,14 +61,21 @@ class TestStartTrainingJob:
                 captured["payload"] = kwargs.get("json", {})
             return _domino_job_response()
 
+        job_config = {"model_type": "tabular"}
         with patch.object(launcher, "settings") as mock_settings, \
              patch("app.core.domino_job_launcher.domino_request", side_effect=fake_domino_request):
             mock_settings.is_domino_environment = True
-            result = await launcher.start_training_job(job_id="abc-123", file_path="/mnt/datasets/train.csv", project_id=PROJECT_ID)
+            result = await launcher.start_training_job(
+                job_id="abc-123",
+                file_path="/mnt/datasets/train.csv",
+                project_id=PROJECT_ID,
+                job_config=job_config,
+            )
 
         expected_command = (
             f"python {DominoJobLauncher.TRAINING_RUNNER_PATH}"
-            " --job-id abc-123 --file-path /mnt/datasets/train.csv"
+            " --job-id abc-123 --job-config"
+            ' \'{"model_type": "tabular"}\''
         )
         assert captured["payload"]["commandToRun"] == expected_command
         assert captured["payload"]["environmentId"] == "env-TEST"

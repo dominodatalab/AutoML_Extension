@@ -17075,10 +17075,10 @@
       "LogTypeV1": {
         "description": "Type of log. Complete includes all log types.",
         "enum": [
-          "stdOut",
-          "stdErr",
-          "prepareOutput",
-          "complete"
+          "StdOut",
+          "StdErr",
+          "PrepareOutput",
+          "Complete"
         ],
         "type": "string"
       },

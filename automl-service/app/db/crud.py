@@ -185,6 +185,7 @@ async def update_job_progress(
     eta_seconds: Optional[int] = None,
 ) -> Optional[Job]:
     """Update job progress during training."""
+    # TODO what is job progress used for in the app?
     update_data = {"progress": progress}
 
     if current_step is not None:

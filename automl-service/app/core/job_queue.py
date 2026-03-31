@@ -13,7 +13,9 @@ from app.db.models import JobStatus
 
 logger = logging.getLogger(__name__)
 
-
+# TODO do we need this complexity?
+# tracks cancellation, restarts interrupted jobs, tracks shutdown state, total jobs
+# some of the functionality is not necessary for remote jobs
 class JobQueueManager:
     """Manages training job execution with concurrency limits.
 
