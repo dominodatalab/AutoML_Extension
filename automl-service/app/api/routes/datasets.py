@@ -33,13 +33,12 @@ router = APIRouter()
 @handle_errors("Failed to list datasets", detail_prefix="Failed to list datasets")
 async def list_datasets(
     projectId: Optional[str] = Query(None),
-    dataset_manager=Depends(get_dataset_manager),
 ):
     """List available datasets in a project."""
     project_id = projectId
     if not project_id:
         raise HTTPException(status_code=400, detail="projectId query parameter is required")
-    return await list_datasets_response(dataset_manager, project_id=project_id)
+    return await list_datasets_response(project_id=project_id)
 
 
 @router.get("/{dataset_id}", response_model=DatasetResponse)
