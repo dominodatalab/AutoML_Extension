@@ -533,16 +533,12 @@ async def run_training_job_with_db(
                             f"Model registration returned failure: {reg_result.get('error', 'unknown')}",
                             db,
                             "WARNING",
-                            db,
-                            "WARNING",
                         )
                 except Exception as e:
                     logger.warning(f"Auto-registration failed: {e}")
                     await add_job_log(
                         job_id,
                         f"Auto-registration failed: {e}",
-                        db,
-                        "ERROR",
                         db,
                         "ERROR",
                     )
