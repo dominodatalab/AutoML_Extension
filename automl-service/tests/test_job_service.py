@@ -40,10 +40,8 @@ from app.services.job_service import (
     extract_metrics_leaderboard,
     get_job_logs,
     get_job_or_404,
-    get_queue_status,
     list_jobs_filtered,
     normalize_job_leaderboard,
-    resolve_execution_target,
     resolve_job_list_filters,
     validate_job_create_request,
     validate_job_name_availability,
@@ -311,7 +309,6 @@ class TestBuildJobModel:
             owner="bob",
             project_id="pid-1",
             project_name="my-proj",
-            execution_target="domino_job",
         )
         assert isinstance(job, Job)
         assert job.name == "my-job"
@@ -337,7 +334,7 @@ class TestBuildJobModel:
             prediction_length=14,
             execution_target="domino_job",
         )
-        job = build_job_model(req, "ts-job", "alice", None, None, execution_target="domino_job")
+        job = build_job_model(req, "ts-job", "alice", None, None)
         assert job.model_type == ModelType.TIMESERIES
         assert job.time_column == "ts"
         assert job.id_column == "item_id"
@@ -388,29 +385,6 @@ class TestBuildJobConfig:
         job_config = build_job_config(job, file_path="/mnt/data/train.csv")
 
         assert job_config.file_path == "/mnt/data/train.csv"
-
-
-# ===========================================================================
-# resolve_execution_target
-# ===========================================================================
-
-
-class TestResolveExecutionTarget:
-    """Tests for resolve_execution_target."""
-
-
-    def test_explicit_domino_job(self):
-        req = _make_create_request(execution_target="domino_job")
-        assert resolve_execution_target(req) == "domino_job"
-
-    def test_legacy_run_as_domino_job_flag(self):
-        req = _make_create_request(run_as_domino_job=True)
-        assert resolve_execution_target(req) == "domino_job"
-
-
-# ===========================================================================
-# resolve_job_list_filters
-# ===========================================================================
 
 
 class TestResolveJobListFilters:
@@ -475,84 +449,6 @@ class TestResolveJobListFilters:
         _, _, _, pid, _ = resolve_job_list_filters(lr)
         assert pid == "pid-42"
 
-    @pytest.mark.asyncio
-    async def test_with_project_filters_includes_all_job_types(
-        self,
-        db_session,
-        make_job,
-        mock_viewing_user,
-    ):
-        mock_viewing_user
-        local_job = make_job(name="local-job", execution_target="local")
-        domino_job = make_job(
-            name="domino-job",
-            execution_target="domino_job",
-            status=JobStatus.COMPLETED,
-            domino_job_id="run-123",
-            project_name = "test-project",
-        )
-        db_session.add_all([local_job, domino_job])
-        await db_session.commit()
-
-        jobs = await list_jobs_filtered(
-            db=db_session,
-            list_request=_make_list_request(project_name="test-project"),
-        )
-
-        assert set([j.name for j in jobs]) == set(["local-job", "domino-job"])
-
-    @pytest.mark.asyncio
-    async def test_no_project_filters_excludes_domino_jobs(
-        self,
-        db_session,
-        make_job,
-        mock_viewing_user,
-    ):
-        mock_viewing_user
-        local_job = make_job(name="local-job", execution_target="local")
-        domino_job = make_job(
-            name="domino-job",
-            execution_target="domino_job",
-            status=JobStatus.COMPLETED,
-            domino_job_id="run-123",
-        )
-        db_session.add_all([local_job, domino_job])
-        await db_session.commit()
-
-        jobs = await list_jobs_filtered(db=db_session, list_request=_make_list_request())
-
-        returned_ids = {job.id for job in jobs}
-        assert local_job.id in returned_ids
-        assert domino_job.id not in returned_ids
-        assert all(job.execution_target != "domino_job" for job in jobs)
-
-    @pytest.mark.asyncio
-    async def test_blank_project_filters_exclude_domino_jobs(
-        self,
-        db_session,
-        make_job,
-        mock_viewing_user,
-    ):
-        mock_viewing_user
-        local_job = make_job(name="blank-local-job", execution_target="local")
-        domino_job = make_job(
-            name="blank-domino-job",
-            execution_target="domino_job",
-            status=JobStatus.COMPLETED,
-            domino_job_id="run-blank-123",
-        )
-        db_session.add_all([local_job, domino_job])
-        await db_session.commit()
-
-        jobs = await list_jobs_filtered(
-            db=db_session,
-            list_request=_make_list_request(project_id="", project_name=""),
-        )
-
-        returned_ids = {job.id for job in jobs}
-        assert local_job.id in returned_ids
-        assert domino_job.id not in returned_ids
-        assert all(job.execution_target != "domino_job" for job in jobs)
 
 
 # ===========================================================================
@@ -755,7 +651,6 @@ class TestQueueCapacity:
     def _mock_settings(self, **overrides):
         """Build a settings mock with safe defaults for DB-interacting tests."""
         defaults = dict(
-            max_local_queue_size=10,
             max_domino_queue_size=20,
             domino_project_id=None,
             domino_project_name=None,
@@ -935,32 +830,3 @@ class TestDominoJobLogs:
         mock_get_db_logs.assert_not_awaited()
 
 
-# ===========================================================================
-# get_queue_status includes limits
-# ===========================================================================
-
-
-class TestGetQueueStatusLimits:
-    """Tests for queue status response including capacity limits."""
-
-    def test_queue_status_includes_limits(self):
-        with (
-            patch("app.core.job_queue.get_job_queue") as mock_queue,
-            patch("app.services.job_service.get_settings") as mock_get_settings,
-        ):
-            mock_queue.return_value.get_queue_status.return_value = {
-                "max_concurrent_jobs": 2,
-                "running_jobs": 1,
-                "queued_jobs": 0,
-                "total_tracked": 1,
-                "shutting_down": False,
-            }
-            mock_get_settings.return_value = MagicMock(
-                max_local_queue_size=10,
-                max_domino_queue_size=20,
-            )
-
-            status = get_queue_status()
-            assert status["max_local_queue_size"] == 10
-            assert status["max_domino_queue_size"] == 20
-            assert "running_jobs" in status

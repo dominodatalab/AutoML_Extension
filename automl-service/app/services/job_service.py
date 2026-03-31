@@ -48,8 +48,6 @@ from app.workers.training_worker import register_trained_model
 
 logger = logging.getLogger(__name__)
 
-LOCAL_PROJECT_ID = "local"
-
 _TERMINAL_JOB_STATUSES = {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}
 _DOMINO_PENDING_STATUSES = {"submitted", "queued", "pending", "initializing", "provisioning"}
 _DOMINO_RUNNING_STATUSES = {"running", "executing"}
@@ -180,11 +178,8 @@ def build_job_model(
     project_id: Optional[str],
     project_name: Optional[str],
     project_owner: Optional[str] = None,
-    execution_target: Optional[str] = None,
 ) -> Job:
     """Build a Job ORM model from request and resolved context."""
-    model_execution_target = execution_target or resolve_execution_target(job_request)
-
     return Job(
         name=job_name,
         description=job_request.description,
@@ -209,7 +204,7 @@ def build_job_model(
         auto_register=job_request.auto_register,
         register_name=job_request.register_name,
         status=JobStatus.PENDING,
-        execution_target=model_execution_target,
+        execution_target="domino_job",
         autogluon_config=build_autogluon_config(job_request),
     )
 
@@ -228,16 +223,6 @@ async def _count_active_domino_jobs(db: AsyncSession) -> int:
         db, [JobStatus.PENDING, JobStatus.RUNNING], execution_target="domino_job"
     )
     return len(jobs)
-
-
-def resolve_execution_target(job_request: JobCreateRequest) -> str:
-    """Resolve training execution target, supporting legacy and explicit flags."""
-    if job_request.execution_target == "domino_job" or job_request.run_as_domino_job:
-        return "domino_job"
-    raise HTTPException(
-        status_code=400,
-        detail="In-process (local) training is not supported; set execution_target to 'domino_job'.",
-    )
 
 
 async def create_job_with_context(
@@ -270,31 +255,16 @@ async def create_job_with_context(
     )
 
     # Capacity gate: reject early when queue is full (before DB insert)
-    execution_target = resolve_execution_target(job_request)
     settings = get_settings()
-
-    if execution_target == "domino_job":
-        active_domino = await _count_active_domino_jobs(db)
-        if active_domino >= settings.max_domino_queue_size:
-            raise HTTPException(
-                status_code=429,
-                detail=(
-                    f"The Domino job queue is full ({active_domino}/{settings.max_domino_queue_size}). "
-                    f"Wait for running jobs to complete, then try again."
-                ),
-            )
-    else:
-        from app.core.job_queue import get_job_queue
-
-        active_local = get_job_queue().get_total_tracked()
-        if active_local >= settings.max_local_queue_size:
-            raise HTTPException(
-                status_code=429,
-                detail=(
-                    f"The local job queue is full ({active_local}/{settings.max_local_queue_size}). "
-                    f"Wait for running jobs to complete, then try again."
-                ),
-            )
+    active_domino = await _count_active_domino_jobs(db)
+    if active_domino >= settings.max_domino_queue_size:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"The Domino job queue is full ({active_domino}/{settings.max_domino_queue_size}). "
+                f"Wait for running jobs to complete, then try again."
+            ),
+        )
 
     job = build_job_model(
         job_request=job_request,
@@ -303,7 +273,6 @@ async def create_job_with_context(
         project_id=project_id,
         project_name=project_name,
         project_owner=project_owner,
-        execution_target=execution_target,
     )
     try:
         job = await crud.create_job(db, job)
@@ -315,59 +284,53 @@ async def create_job_with_context(
             ) from exc
         raise
 
-    if job.execution_target == "domino_job":
-        if not job.file_path:
-            raise ValueError(f"Job {job.id} has no file_path")
+    if not job.file_path:
+        raise ValueError(f"Job {job.id} has no file_path")
 
-        file_path = job.file_path
+    file_path = job.file_path
 
-        if job.data_source == "domino_dataset" and job.dataset_id:
-            from app.services.dataset_service import get_dataset_manager
-            dataset_manager = get_dataset_manager()
-            dataset_path = await dataset_manager.get_dataset_path(job.dataset_id)
-            if not dataset_path:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Could not resolve dataset path for dataset {job.dataset_id}",
-                )
-            file_path = f"{dataset_path}/{job.file_path}"
-
-        job_config = build_job_config(job, file_path=file_path)
-
-        settings = get_settings()
-        launcher = get_domino_job_launcher()
-        launch_result = await launcher.start_training_job(
-            job_id=job.id,
-            file_path=file_path,
-            title=job.name,
-            job_config=job_config,
-            hardware_tier_name=job_request.domino_hardware_tier_name or settings.domino_training_hardware_tier_name,
-            project_id=project_id,
-        )
-        if not launch_result.get("success"):
-            error_message = launch_result.get("error", "Failed to launch Domino Job")
-            await crud.update_job_status(
-                db=db,
-                job_id=job.id,
-                status=JobStatus.FAILED,
-                error_message=error_message,
-                completed_at=utc_now(),
+    if job.data_source == "domino_dataset" and job.dataset_id:
+        from app.services.dataset_service import get_dataset_manager
+        dataset_manager = get_dataset_manager()
+        dataset_path = await dataset_manager.get_dataset_path(job.dataset_id)
+        if not dataset_path:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Could not resolve dataset path for dataset {job.dataset_id}",
             )
-            raise HTTPException(status_code=502, detail=error_message)
+        file_path = f"{dataset_path}/{job.file_path}"
 
-        await crud.update_job_domino_fields(
+    job_config = build_job_config(job, file_path=file_path)
+
+    settings = get_settings()
+    launcher = get_domino_job_launcher()
+    launch_result = await launcher.start_training_job(
+        job_id=job.id,
+        file_path=file_path,
+        title=job.name,
+        job_config=job_config,
+        hardware_tier_name=job_request.domino_hardware_tier_name or settings.domino_training_hardware_tier_name,
+        project_id=project_id,
+    )
+    if not launch_result.get("success"):
+        error_message = launch_result.get("error", "Failed to launch Domino Job")
+        await crud.update_job_status(
             db=db,
             job_id=job.id,
-            domino_job_id=launch_result.get("domino_job_id"),
-            domino_job_status=launch_result.get("domino_job_status", "Submitted"),
+            status=JobStatus.FAILED,
+            error_message=error_message,
+            completed_at=utc_now(),
         )
-        refreshed = await crud.get_job(db, job.id)
-        return _attach_external_links(refreshed or job)
+        raise HTTPException(status_code=502, detail=error_message)
 
-    from app.core.job_queue import get_job_queue
-
-    await get_job_queue().enqueue(job.id)
-    return _attach_external_links(job)
+    await crud.update_job_domino_fields(
+        db=db,
+        job_id=job.id,
+        domino_job_id=launch_result.get("domino_job_id"),
+        domino_job_status=launch_result.get("domino_job_status", "Submitted"),
+    )
+    refreshed = await crud.get_job(db, job.id)
+    return _attach_external_links(refreshed or job)
 
 
 async def list_jobs_filtered(
@@ -383,22 +346,14 @@ async def list_jobs_filtered(
         project_name_filter,
     ) = resolve_job_list_filters(list_request)
 
-    execution_target_filter = None
-    has_project_filter = bool(project_id_filter or project_name_filter)
-
     if project_id_filter:
-        # require domino job listing auth if project_id set
         require_job_list(project_id_filter)
-    if not has_project_filter:
-        # Without project scope, hide Domino-backed jobs from generic listings.
-        execution_target_filter = "local"
 
     await _sync_active_domino_jobs_for_overview(db)
 
     logger.debug(
         f"[JOB LIST] Filters - owner: {owner_filter}, "
-        f"project_name: {project_name_filter}, status: {status_filter}, "
-        f"execution_target: {execution_target_filter}"
+        f"project_id: {project_id_filter}, project_name: {project_name_filter}, status: {status_filter}"
     )
 
     jobs = await crud.get_jobs(
@@ -410,7 +365,6 @@ async def list_jobs_filtered(
         owner=owner_filter,
         project_id=project_id_filter,
         project_name=project_name_filter,
-        execution_target=execution_target_filter
     )
 
     return list(jobs)
@@ -440,8 +394,6 @@ async def _sync_recent_terminal_domino_metadata_for_overview(db: AsyncSession) -
 
     candidates: list[Job] = []
     for job in recent_jobs:
-        if getattr(job, "execution_target", "local") != "domino_job":
-            continue
         if job.status not in _TERMINAL_JOB_STATUSES:
             continue
         if not job.domino_job_id:
@@ -470,17 +422,6 @@ async def get_job_logs(
     else:
         logs = await crud.get_job_logs(db, job_id, limit=limit)
     return list(logs)
-
-
-def get_queue_status() -> dict:
-    """Return current queue status."""
-    from app.core.job_queue import get_job_queue
-
-    settings = get_settings()
-    status = get_job_queue().get_queue_status()
-    status["max_local_queue_size"] = settings.max_local_queue_size
-    status["max_domino_queue_size"] = settings.max_domino_queue_size
-    return status
 
 
 def resolve_job_list_filters(
@@ -698,16 +639,8 @@ async def get_job_or_404(db: AsyncSession, job_id: str, owner_user_name: str) ->
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    if job.execution_target == "local":
-        # for local jobs, only the owner may retrieve
-        if job.owner != owner_user_name:
-            raise HTTPException(status_code=403, detail="Forbidden")
-    else:
-        # for domino jobs, we use domino auth
-        if job.domino_job_id:
-            await asyncio.to_thread(_fetch_domino_job_or_throw, job.domino_job_id)
-        else:
-            raise HTTPException(status_code=500, detail="No domino job ID exists for domino_job, so cannot authorize")
+    if job.domino_job_id:
+        await asyncio.to_thread(_fetch_domino_job_or_throw, job.domino_job_id)
     return job
 
 

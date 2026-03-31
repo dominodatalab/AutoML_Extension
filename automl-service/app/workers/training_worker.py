@@ -98,12 +98,7 @@ async def _check_cancelled(
     job_id: str,
     db_session: Optional[Any] = None,
 ) -> None:
-    """Raise CancelledError if the job has been cancelled via queue or DB status."""
-    from app.core.job_queue import get_job_queue
-    if get_job_queue().is_job_cancelled(job_id):
-        raise asyncio.CancelledError(f"Job {job_id} cancelled via queue")
-
-    # Domino jobs run outside the in-process queue, so cancellation is reflected in DB.
+    """Raise CancelledError if the job has been cancelled in the database."""
     if db_session is not None:
         job = await crud.get_job(db_session, job_id)
         if job and job.status == JobStatus.CANCELLED:
@@ -208,23 +203,7 @@ async def run_training_job(
 
     This function is called as a background task by FastAPI.
     """
-
-    if job_config is None or job_config.execution_target == "local":
-
-        async with async_session_maker() as db:
-            await run_training_job_with_db(
-                job_id,
-                job_config,
-                advanced_config,
-                db,
-            )
-
-    else:
-        await run_training_job_with_db(
-            job_id,
-            job_config,
-            advanced_config,
-        )
+    await run_training_job_with_db(job_id, job_config, advanced_config)
 
 async def run_training_job_with_db(
     job_id: str,

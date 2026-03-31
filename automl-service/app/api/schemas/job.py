@@ -361,9 +361,9 @@ class JobCreateRequest(BaseModel):
     )
 
     # Execution target
-    execution_target: Literal["local", "domino_job"] = Field(
-        "local",
-        description="Where to run training: in-app local queue or external Domino Job",
+    execution_target: Literal["domino_job"] = Field(
+        "domino_job",
+        description="Where to run training: external Domino Job",
     )
     run_as_domino_job: bool = Field(
         False,
@@ -395,7 +395,7 @@ class JobResponse(BaseModel):
     model_type: str
     problem_type: Optional[str] = None
     status: str
-    execution_target: str = "local"
+    execution_target: str = "domino_job"
     domino_job_id: Optional[str] = None
     domino_job_url: Optional[str] = None
     domino_job_status: Optional[str] = None
