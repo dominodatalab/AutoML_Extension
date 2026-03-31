@@ -10,7 +10,6 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.compat_routes import register_compat_routes
 from app.config import get_settings
 from app.core.websocket_manager import get_websocket_manager
 from app.db.database import create_tables
@@ -152,9 +151,6 @@ def create_app() -> FastAPI:
     app.include_router(export.router, prefix="/svc/v1/export", tags=["Export"])
     app.include_router(deployments.router, prefix="/svc/v1/deployments", tags=["Deployments"])
 
-    # Single-segment Domino compat routes (replaces ~550 lines of wrappers)
-    register_compat_routes(app)
-
     # Optional static file serving for combined frontend+backend mode
     static_dir = os.environ.get("STATIC_DIR")
     if static_dir and os.path.isdir(static_dir):
@@ -220,7 +216,7 @@ def create_app() -> FastAPI:
     # Root endpoint
     @app.get("/")
     async def root(request: Request, project_name: Optional[str] = None):
-        from app.api.routes.jobs import JobListRequest, list_jobs_post
+        from app.api.routes.jobs import JobListRequest, list_jobs
 
         username = request.headers.get("domino-username", "anonymous")
         list_request = JobListRequest(
@@ -230,7 +226,7 @@ def create_app() -> FastAPI:
         )
 
         async with get_db_session() as db:
-            jobs_response = await list_jobs_post(list_request, db, request)
+            jobs_response = await list_jobs(db=db, owner=username, project_name=project_name or "")
 
         current_project_name = settings.domino_project_name or os.environ.get("DOMINO_PROJECT_NAME")
 

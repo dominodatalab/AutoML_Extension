@@ -39,7 +39,7 @@ interface UseDiagnosticsResult {
 export function useDiagnostics(): UseDiagnosticsResult {
   const featureImportanceState = useApiState(
     async (jobId: string, modelType?: string) => {
-      const { data } = await api.post<FeatureImportanceResult>('featureimportance', { job_id: jobId, model_type: modelType })
+      const { data } = await api.post<FeatureImportanceResult>('predictions/model/feature-importance', { job_id: jobId, model_type: modelType })
       return data
     },
     'Failed to get feature importance'
@@ -47,7 +47,7 @@ export function useDiagnostics(): UseDiagnosticsResult {
 
   const confusionMatrixState = useApiState(
     async (jobId: string, modelType?: string) => {
-      const { data } = await api.post<ConfusionMatrixResult>('confusionmatrix', { job_id: jobId, model_type: modelType })
+      const { data } = await api.post<ConfusionMatrixResult>('predictions/model/confusion-matrix', { job_id: jobId, model_type: modelType })
       return data
     },
     'Failed to get confusion matrix'
@@ -55,7 +55,7 @@ export function useDiagnostics(): UseDiagnosticsResult {
 
   const rocCurveState = useApiState(
     async (jobId: string, modelType?: string) => {
-      const { data } = await api.post<ROCCurveResult>('roccurve', { job_id: jobId, model_type: modelType })
+      const { data } = await api.post<ROCCurveResult>('predictions/model/roc-curve', { job_id: jobId, model_type: modelType })
       return data
     },
     'Failed to get ROC curve'
@@ -63,7 +63,7 @@ export function useDiagnostics(): UseDiagnosticsResult {
 
   const precisionRecallState = useApiState(
     async (jobId: string, modelType?: string) => {
-      const { data } = await api.post<PrecisionRecallResult>('precisionrecall', { job_id: jobId, model_type: modelType })
+      const { data } = await api.post<PrecisionRecallResult>('predictions/model/precision-recall', { job_id: jobId, model_type: modelType })
       return data
     },
     'Failed to get precision-recall curve'
@@ -71,7 +71,7 @@ export function useDiagnostics(): UseDiagnosticsResult {
 
   const regressionDiagnosticsState = useApiState(
     async (jobId: string, modelType?: string) => {
-      const { data } = await api.post<RegressionDiagnosticsResult>('regressiondiagnostics', { job_id: jobId, model_type: modelType })
+      const { data } = await api.post<RegressionDiagnosticsResult>('predictions/model/regression-diagnostics', { job_id: jobId, model_type: modelType })
       return data
     },
     'Failed to get regression diagnostics'
@@ -79,7 +79,7 @@ export function useDiagnostics(): UseDiagnosticsResult {
 
   const leaderboardState = useApiState(
     async (jobId: string, modelType?: string) => {
-      const { data } = await api.post<LeaderboardResult>('leaderboard', { job_id: jobId, model_type: modelType })
+      const { data } = await api.post<LeaderboardResult>('predictions/model/leaderboard', { job_id: jobId, model_type: modelType })
       return data
     },
     'Failed to get leaderboard'
@@ -87,7 +87,7 @@ export function useDiagnostics(): UseDiagnosticsResult {
 
   const modelInfoState = useApiState(
     async (modelId: string, modelType: string) => {
-      const { data } = await api.post<ModelInfo>('modelinfo', { model_id: modelId, model_type: modelType })
+      const { data } = await api.get<ModelInfo>(`predictions/model/${encodeURIComponent(modelId)}/info`, { params: { model_type: modelType } })
       return data
     },
     'Failed to get model info'
@@ -95,7 +95,7 @@ export function useDiagnostics(): UseDiagnosticsResult {
 
   const predictState = useApiState(
     async (modelId: string, modelType: string, inputData: Record<string, unknown>[], returnProbs = false) => {
-      const { data } = await api.post<PredictionResult>('predict', {
+      const { data } = await api.post<PredictionResult>('predictions/predict', {
         model_id: modelId,
         model_type: modelType,
         data: inputData,
@@ -108,7 +108,7 @@ export function useDiagnostics(): UseDiagnosticsResult {
 
   const batchPredictState = useApiState(
     async (modelId: string, modelType: string, inputFile: string, outputFile: string) => {
-      const { data } = await api.post<BatchPredictionResult>('predictbatch', {
+      const { data } = await api.post<BatchPredictionResult>('predictions/predict/batch', {
         model_id: modelId,
         model_type: modelType,
         input_file: inputFile,

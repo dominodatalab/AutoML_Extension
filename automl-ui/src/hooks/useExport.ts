@@ -51,7 +51,7 @@ export function useExportDeployment() {
 
   return useMutation({
     mutationFn: async (request: DeploymentPackageRequest) => {
-      const { data } = await api.post<DeploymentPackageResponse>('exportdeployment', request)
+      const { data } = await api.post<DeploymentPackageResponse>('export/deployment', request)
       return data
     },
     onSuccess: () => {
@@ -65,7 +65,7 @@ export function useLearningCurves(jobId: string, modelType?: string, enabled = t
   return useQuery({
     queryKey: ['learningcurves', jobId, modelType],
     queryFn: async () => {
-      const { data } = await api.post<LearningCurvesResponse>('learningcurves', {
+      const { data } = await api.post<LearningCurvesResponse>('export/learning-curves', {
         job_id: jobId,
         model_type: modelType,
       })
@@ -82,7 +82,7 @@ export function useSupportedFormats() {
   return useQuery({
     queryKey: ['exportformats'],
     queryFn: async () => {
-      const { data } = await api.get<SupportedFormats>('exportformats')
+      const { data } = await api.get<SupportedFormats>('export/formats')
       return data
     },
     staleTime: 30 * 60 * 1000,
@@ -100,10 +100,9 @@ interface NotebookExportResponse {
 export function useDownloadDeploymentPackage() {
   return useMutation({
     mutationFn: async (outputDir: string) => {
-      // Build URL the same way the api client does (Domino compat)
       const { getBasePath } = await import('../utils/basePath')
       const basePath = getBasePath()
-      const url = `${basePath}/svcexportdeploymentdownload`
+      const url = `${basePath}/svc/v1/export/deployment/download`
 
       const response = await fetch(url, {
         method: 'POST',
@@ -130,7 +129,7 @@ export function useDownloadDeploymentPackage() {
 export function useExportNotebook() {
   return useMutation({
     mutationFn: async (jobId: string) => {
-      const { data } = await api.post<NotebookExportResponse>('exportnotebook', {
+      const { data } = await api.post<NotebookExportResponse>('export/notebook', {
         job_id: jobId,
       })
       return data

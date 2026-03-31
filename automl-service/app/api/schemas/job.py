@@ -468,7 +468,7 @@ class JobLogResponse(BaseModel):
 
 
 class JobListRequest(BaseModel):
-    """Request schema for listing jobs (via POST for Domino compatibility)."""
+    """Request schema for listing jobs."""
 
     skip: int = Field(0, ge=0, description="Number of records to skip")
     limit: int = Field(100, ge=1, le=1000, description="Maximum records to return")

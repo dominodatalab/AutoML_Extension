@@ -51,7 +51,7 @@ export function useProfiling(): UseProfilingResult {
         sampling_strategy: samplingStrategy,
       }
       if (stratifyColumn) payload.stratify_column = stratifyColumn
-      const { data } = await api.post<DataProfile>('profile', payload)
+      const { data } = await api.post<DataProfile>('profiling/profile', payload)
       return data
     },
     'Failed to profile file'
@@ -59,7 +59,7 @@ export function useProfiling(): UseProfilingResult {
 
   const quickProfileState = useApiState(
     async (filePath: string) => {
-      const { data } = await api.post<QuickProfile>('profilequick', { file_path: filePath })
+      const { data } = await api.post<QuickProfile>('profiling/profile/quick', { file_path: filePath })
       return data
     },
     'Failed to quick profile file'
@@ -67,7 +67,7 @@ export function useProfiling(): UseProfilingResult {
 
   const suggestTargetOp = useAsyncOperation(
     async (filePath: string) => {
-      const { data } = await api.post<{ suggestions: TargetSuggestion[] }>('suggesttarget', { file_path: filePath })
+      const { data } = await api.post<{ suggestions: TargetSuggestion[] }>('profiling/profile/suggest-target', { file_path: filePath })
       setSuggestions(data.suggestions)
       return data.suggestions
     },
@@ -76,7 +76,7 @@ export function useProfiling(): UseProfilingResult {
 
   const columnProfileState = useApiState(
     async (filePath: string, columnName: string) => {
-      const { data } = await api.post<ColumnProfile>('profilecolumn', { file_path: filePath, column_name: columnName })
+      const { data } = await api.post<ColumnProfile>('profiling/profile/column', { file_path: filePath, column_name: columnName })
       return data
     },
     'Failed to profile column'
@@ -84,7 +84,7 @@ export function useProfiling(): UseProfilingResult {
 
   const metricsState = useApiState(
     async () => {
-      const { data } = await api.get<MetricsByProblemType>('metrics')
+      const { data } = await api.get<MetricsByProblemType>('profiling/profile/metrics')
       return data
     },
     'Failed to fetch metrics'
@@ -92,7 +92,7 @@ export function useProfiling(): UseProfilingResult {
 
   const presetsState = useApiState(
     async () => {
-      const { data } = await api.get<PresetsByModelType>('presets')
+      const { data } = await api.get<PresetsByModelType>('profiling/profile/presets')
       return data
     },
     'Failed to fetch presets'
@@ -100,7 +100,7 @@ export function useProfiling(): UseProfilingResult {
 
   const tsProfileState = useApiState(
     async (request: AsyncProfileStartRequest) => {
-      const { data } = await api.post<TimeSeriesProfile>('profiletimeseries', request)
+      const { data } = await api.post<TimeSeriesProfile>('profiling/profile/timeseries', request)
       return data
     },
     'Failed to profile time series'
@@ -120,12 +120,12 @@ export function useProfiling(): UseProfilingResult {
   }, [suggestTargetOp.execute])
 
   const startAsyncProfile = useCallback(async (request: AsyncProfileStartRequest) => {
-    const { data } = await api.post<AsyncProfileStartResponse>('profileasyncstart', request)
+    const { data } = await api.post<AsyncProfileStartResponse>('profiling/profile/async/start', request)
     return data
   }, [])
 
   const getAsyncProfileStatus = useCallback(async (requestId: string) => {
-    const { data } = await api.post<AsyncProfileStatusResponse>('profileasyncstatus', { request_id: requestId })
+    const { data } = await api.post<AsyncProfileStatusResponse>('profiling/profile/async/status', { request_id: requestId })
     return data
   }, [])
 

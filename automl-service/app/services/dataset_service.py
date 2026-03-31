@@ -23,7 +23,7 @@ from app.api.generated_private.domino_data_lab_api_v_4_client.client import Clie
 from app.core.domino_http import get_user_auth_headers
 
 from app.api.schemas.dataset import (
-    CompatDatasetPreviewRequest,
+    DatasetFilePreviewRequest,
     DatasetFileResponse,
     DatasetListResponse,
     DatasetPreviewResponse,
@@ -502,11 +502,11 @@ def coerce_preview_response(preview: Any, include_dtypes: bool = False) -> dict[
     return payload
 
 
-async def build_compat_dataset_preview_payload(
+async def preview_file_path_response(
     dataset_manager: DominoDatasetManager,
-    body: CompatDatasetPreviewRequest,
+    body: DatasetFilePreviewRequest,
 ) -> dict[str, Any]:
-    """Build compat dataset preview payload from request body."""
+    """Build dataset preview payload from file path or dataset ID."""
     file_path = body.file_path
     dataset_id = body.dataset_id
     limit, offset = normalize_preview_pagination(

@@ -23,7 +23,7 @@ export function useProjectUserSummary(): ProjectUserSummary {
   const { data } = useQuery<ProjectUserSummary>({
     queryKey: ['user_summary'],
     queryFn: async () => {
-      const { data } = await api.get<ProjectUserSummary>('user')
+      const { data } = await api.get<ProjectUserSummary>('health/user')
       return data
     },
     staleTime: Infinity,

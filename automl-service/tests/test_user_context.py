@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import AsyncMock
 
 
 @pytest.fixture()
@@ -118,10 +119,27 @@ async def test_per_request_user_context_isolation_via_api(app_client, monkeypatc
 
     monkeypatch.setattr(users_api.get_current_user, "sync", fake_sync)
 
+    from types import SimpleNamespace
+    import app.services.project_resolver as project_resolver_module
+    import app.services.job_service as job_service_module
+
+    async def fake_resolve_project(project_id):
+        return SimpleNamespace(id=project_id, name="test-project", owner_username="test-owner")
+
+    monkeypatch.setattr(project_resolver_module, "resolve_project", fake_resolve_project, raising=True)
+    monkeypatch.setattr(job_service_module, "attach_external_links", lambda job, logger: job, raising=True)
+    monkeypatch.setattr(job_service_module, "_fetch_domino_job_or_throw", lambda *a: None, raising=True)
+
+    mock_launcher = AsyncMock()
+    mock_launcher.start_training_job = AsyncMock(return_value={"success": True, "domino_job_id": "test-domino-123"})
+    monkeypatch.setattr(job_service_module, "get_domino_job_launcher", lambda: mock_launcher, raising=True)
+
     # First request has owner alice
     r1 = await app_client.post(
         "/svc/v1/jobs",
+        params={"projectId": "test-project-id"},
         json={
+            "execution_target": "domino_job",
             "name": "req1",
             "model_type": "tabular",
             "data_source": "upload",
@@ -133,10 +151,12 @@ async def test_per_request_user_context_isolation_via_api(app_client, monkeypatc
     b1 = r1.json()
     assert b1["owner"] == "alice"
 
-    # First request has owner bob
+    # Second request has owner bob
     r2 = await app_client.post(
         "/svc/v1/jobs",
+        params={"projectId": "test-project-id"},
         json={
+            "execution_target": "domino_job",
             "name": "req2",
             "model_type": "tabular",
             "data_source": "upload",

@@ -7,19 +7,21 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from app.api.error_handler import handle_errors
 
 from app.api.schemas.dataset import (
+    DatasetFilePreviewRequest,
     DatasetResponse,
     DatasetListResponse,
     DatasetPreviewResponse,
     DatasetSchemaResponse,
-    FilePreviewRequest,
     FileUploadResponse,
 )
 from app.services.dataset_service import (
     get_dataset_manager,
     get_dataset_or_404,
     get_dataset_schema_response,
+    list_dataset_files_response,
     list_datasets_response,
     preview_dataset_response,
+    preview_file_path_response,
     preview_file_response,
     save_uploaded_file,
 )
@@ -82,18 +84,21 @@ async def get_dataset_schema(
     )
 
 
-@router.post("/preview", response_model=DatasetPreviewResponse)
-@handle_errors("[PREVIEW] Error reading file", detail_prefix="Failed to read file")
-async def preview_file_by_path(request: FilePreviewRequest):
-    """Preview a file by its path with pagination support."""
-    # TODO should delete this. it's not used by the UI and it's missing dataset_id
-    return preview_file_response(
-        dataset_id="",
-        file_path=request.file_path,
-        limit=request.limit,
-        rows=request.rows,
-        offset=request.offset,
-    )
+@router.get("/{dataset_id}/files")
+@handle_errors("Failed to list dataset files", detail_prefix="Failed to list dataset files")
+async def get_dataset_files(dataset_id: str):
+    """List files within a dataset."""
+    return await list_dataset_files_response(dataset_id)
+
+
+@router.post("/preview")
+@handle_errors("Failed to preview dataset file", detail_prefix="Failed to preview dataset file")
+async def preview_dataset_file(
+    body: DatasetFilePreviewRequest,
+    dataset_manager=Depends(get_dataset_manager),
+):
+    """Preview a dataset file by file path or dataset ID."""
+    return await preview_file_path_response(dataset_manager=dataset_manager, body=body)
 
 
 @router.post("/upload", response_model=FileUploadResponse)

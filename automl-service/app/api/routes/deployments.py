@@ -403,13 +403,18 @@ async def quick_deploy(request: QuickDeployRequest):
 
 # ========== Deployment from Job Endpoint ==========
 
+class DeployFromJobBody(BaseModel):
+    """Request body for deploying a model from a job."""
+    model_name: Optional[str] = Field(None, description="Name for the deployed model")
+    function_name: str = Field("predict", description="Name of the predict function")
+    min_replicas: int = Field(1, ge=0, description="Minimum replicas")
+    max_replicas: int = Field(1, ge=1, description="Maximum replicas")
+
+
 @router.post("/deploy-from-job/{job_id}")
 async def deploy_from_job(
     job_id: str,
-    model_name: Optional[str] = None,
-    function_name: str = "predict",
-    min_replicas: int = 1,
-    max_replicas: int = 1,
+    body: DeployFromJobBody,
     project_id: str = Depends(get_request_project_id),
 ):
     """Deploy a trained model from an AutoML job.
@@ -420,9 +425,9 @@ async def deploy_from_job(
 
     return await deploy_from_job_service(
         job_id=job_id,
-        model_name=model_name,
-        function_name=function_name,
-        min_replicas=min_replicas,
-        max_replicas=max_replicas,
+        model_name=body.model_name,
+        function_name=body.function_name,
+        min_replicas=body.min_replicas,
+        max_replicas=body.max_replicas,
         project_id=project_id,
     )

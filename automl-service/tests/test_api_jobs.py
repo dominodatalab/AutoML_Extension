@@ -2,7 +2,7 @@
 
 Covers:
 - POST /svc/v1/jobs — create a tabular job (valid + validation error)
-- POST /svc/v1/jobs/list — list jobs (empty then non-empty)
+- GET  /svc/v1/jobs — list jobs (empty then non-empty)
 - GET  /svc/v1/jobs/{job_id} — get job by ID (found + 404)
 - GET  /svc/v1/jobs/{job_id}/status — job status response
 - GET  /svc/v1/jobs/{job_id}/metrics — job metrics response
@@ -11,8 +11,11 @@ Covers:
 
 .. note:: Requires the ``domino`` package (available in Domino runtime).
 - POST /svc/v1/jobs/bulk-delete — bulk delete
+
 """
 
+from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -25,7 +28,7 @@ pytestmark = pytest.mark.domino
 # ---------------------------------------------------------------------------
 
 VALID_TABULAR_JOB = {
-    "execution_target": "local",
+    "execution_target": "domino_job",
     "name": "test-tabular-job",
     "model_type": "tabular",
     "data_source": "upload",
@@ -49,6 +52,31 @@ def _mock_job_queue():
     mock_queue.get_total_tracked = MagicMock(return_value=0)
     return mock_queue
 
+
+def _mock_domino_launcher():
+    """Return a mock DominoJobLauncher whose async methods are no-ops."""
+    mock = MagicMock()
+    mock.start_training_job = AsyncMock(return_value={"success": True, "domino_job_id": "test-domino-job-123"})
+    mock.stop_job = AsyncMock(return_value={"success": True})
+    return mock
+
+
+async def _fake_resolve_project(project_id):
+    return SimpleNamespace(id=project_id, name="test-project", owner_username="test-owner")
+
+
+@contextmanager
+def _mock_job_infra():
+    """Patch Domino-dependent services so job API tests run without a live Domino environment."""
+    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()), \
+         patch("app.services.job_service.get_domino_job_launcher", return_value=_mock_domino_launcher()), \
+         patch("app.services.project_resolver.resolve_project", side_effect=_fake_resolve_project), \
+         patch("app.services.job_service.attach_external_links", side_effect=lambda job, logger: job), \
+         patch("app.services.job_service._sync_domino_job_state", new=AsyncMock(side_effect=lambda db, job, **kwargs: job)), \
+         patch("app.services.job_service._fetch_domino_job_or_throw", return_value=None), \
+         patch("app.services.job_service.require_job_list"):
+        yield
+
 # ---------------------------------------------------------------------------
 # POST /svc/v1/jobs — create job
 # ---------------------------------------------------------------------------
@@ -57,8 +85,8 @@ def _mock_job_queue():
 @pytest.mark.asyncio
 async def test_create_tabular_job(app_client):
     """POST /svc/v1/jobs with valid tabular payload creates a job and returns 200."""
-    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
-        response = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB)
+    with _mock_job_infra():
+        response = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB, params={"projectId": "test-project-id"})
 
     assert response.status_code == 200
     body = response.json()
@@ -81,7 +109,8 @@ async def test_create_job_missing_target_column(app_client):
         "file_path": "/tmp/test.csv",
         # target_column is missing
     }
-    response = await app_client.post("/svc/v1/jobs", json=payload)
+    with _mock_job_infra():
+        response = await app_client.post("/svc/v1/jobs", json=payload, params={"projectId": "test-project-id"})
 
     assert response.status_code == 422
     body = response.json()
@@ -97,7 +126,8 @@ async def test_create_job_missing_name(app_client):
         "file_path": "/tmp/test.csv",
         "target_column": "target",
     }
-    response = await app_client.post("/svc/v1/jobs", json=payload)
+    with _mock_job_infra():
+        response = await app_client.post("/svc/v1/jobs", json=payload, params={"projectId": "test-project-id"})
 
     assert response.status_code == 422
 
@@ -114,8 +144,8 @@ async def test_create_timeseries_job_missing_time_column(app_client):
         "prediction_length": 10,
         # time_column is missing
     }
-    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
-        response = await app_client.post("/svc/v1/jobs", json=payload)
+    with _mock_job_infra():
+        response = await app_client.post("/svc/v1/jobs", json=payload, params={"projectId": "test-project-id"})
 
     assert response.status_code == 400
 
@@ -127,10 +157,6 @@ async def test_create_timeseries_job_missing_time_column(app_client):
         ("get", "/svc/v1/jobs/cleanup/preview", None),
         ("post", "/svc/v1/jobs/cleanup", {"statuses": ["failed"], "include_orphans": False}),
         ("post", "/svc/v1/jobs/cleanup/orphans", None),
-        ("post", "/svcjobcleanuppreview", {}),
-        ("post", "/svcjobcleanup", {"statuses": ["failed"], "include_orphans": False}),
-        ("post", "/svcjoborphans", {}),
-        ("post", "/svcjobcleanuporphans", {}),
     ],
 )
 async def test_cleanup_routes_allow_extension_editors(app_client, monkeypatch, method, path, payload):
@@ -148,9 +174,9 @@ async def test_cleanup_routes_allow_extension_editors(app_client, monkeypatch, m
     )
 
     if method == "get":
-        response = await app_client.get(path)
+        response = await app_client.get(path, params={"projectId": "test-project-id"})
     else:
-        response = await app_client.post(path, json=payload)
+        response = await app_client.post(path, json=payload, params={"projectId": "test-project-id"})
 
     assert response.status_code == 200
 
@@ -162,10 +188,6 @@ async def test_cleanup_routes_allow_extension_editors(app_client, monkeypatch, m
         ("get", "/svc/v1/jobs/cleanup/preview", None),
         ("post", "/svc/v1/jobs/cleanup", {"statuses": ["failed"], "include_orphans": False}),
         ("post", "/svc/v1/jobs/cleanup/orphans", None),
-        ("post", "/svcjobcleanuppreview", {}),
-        ("post", "/svcjobcleanup", {"statuses": ["failed"], "include_orphans": False}),
-        ("post", "/svcjoborphans", {}),
-        ("post", "/svcjobcleanuporphans", {}),
     ],
 )
 async def test_cleanup_routes_reject_users_without_extension_edit(app_client, monkeypatch, method, path, payload):
@@ -183,29 +205,26 @@ async def test_cleanup_routes_reject_users_without_extension_edit(app_client, mo
     )
 
     if method == "get":
-        response = await app_client.get(path)
+        response = await app_client.get(path, params={"projectId": "test-project-id"})
     else:
-        response = await app_client.post(path, json=payload)
+        response = await app_client.post(path, json=payload, params={"projectId": "test-project-id"})
 
     assert response.status_code == 403
     assert "edit the extension" in response.json()["detail"].lower()
 
 
 # ---------------------------------------------------------------------------
-# POST /svc/v1/jobs/list — list jobs
+# GET /svc/v1/jobs — list jobs
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_list_jobs_empty(app_client, monkeypatch):
-    """POST /svc/v1/jobs/list on a fresh DB returns zero jobs."""
+    """GET /svc/v1/jobs on a fresh DB returns zero jobs."""
     from app.core import authorization as auth
 
-    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
-        response = await app_client.post(
-            "/svc/v1/jobs/list",
-            json={"owner": "", "project_name": ""},
-        )
+    with _mock_job_infra():
+        response = await app_client.get("/svc/v1/jobs")
 
     assert response.status_code == 200
     body = response.json()
@@ -215,7 +234,7 @@ async def test_list_jobs_empty(app_client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_list_jobs_empty_from_domino_project(app_client, monkeypatch):
-    """POST /svc/v1/jobs/list on a fresh DB returns zero jobs."""
+    """GET /svc/v1/jobs on a fresh DB returns zero jobs."""
     from app.core import authorization as auth
     from tests.fake_domino_client import FakeResponse, FakeHttpxClient, FakeDominoClient
 
@@ -230,11 +249,8 @@ async def test_list_jobs_empty_from_domino_project(app_client, monkeypatch):
         raising=True,
     )
 
-    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
-        response = await app_client.post(
-            "/svc/v1/jobs/list",
-            json={"project_id": "1"},
-        )
+    with _mock_job_infra():
+        response = await app_client.get("/svc/v1/jobs", params={"project_id": "1"})
 
     assert response.status_code == 200
     body = response.json()
@@ -244,17 +260,14 @@ async def test_list_jobs_empty_from_domino_project(app_client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_list_jobs_after_creation(app_client):
-    """POST /svc/v1/jobs/list returns the job created earlier in the same session."""
-    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
+    """GET /svc/v1/jobs returns the job created earlier in the same session."""
+    with _mock_job_infra():
         # Create a job first
-        create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB)
+        create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB, params={"projectId": "test-project-id"})
         assert create_resp.status_code == 200
 
-        # List all jobs (empty owner/project to bypass filtering)
-        list_resp = await app_client.post(
-            "/svc/v1/jobs/list",
-            json={"owner": "", "project_name": ""},
-        )
+        # List by project_name so domino_job execution target is included
+        list_resp = await app_client.get("/svc/v1/jobs", params={"project_name": "test-project"})
 
     assert list_resp.status_code == 200
     body = list_resp.json()
@@ -271,11 +284,11 @@ async def test_list_jobs_after_creation(app_client):
 @pytest.mark.asyncio
 async def test_get_job_by_id(app_client):
     """GET /svc/v1/jobs/{id} returns the created job."""
-    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
-        create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB)
+    with _mock_job_infra():
+        create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB, params={"projectId": "test-project-id"})
         job_id = create_resp.json()["id"]
 
-    response = await app_client.get(f"/svc/v1/jobs/{job_id}")
+        response = await app_client.get(f"/svc/v1/jobs/{job_id}")
 
     assert response.status_code == 200
     body = response.json()
@@ -302,11 +315,11 @@ async def test_get_job_not_found(app_client):
 @pytest.mark.asyncio
 async def test_get_job_status(app_client):
     """GET /svc/v1/jobs/{id}/status returns status response shape."""
-    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
-        create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB)
+    with _mock_job_infra():
+        create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB, params={"projectId": "test-project-id"})
         job_id = create_resp.json()["id"]
 
-    response = await app_client.get(f"/svc/v1/jobs/{job_id}/status")
+        response = await app_client.get(f"/svc/v1/jobs/{job_id}/status")
 
     assert response.status_code == 200
     body = response.json()
@@ -333,11 +346,11 @@ async def test_get_job_status_not_found(app_client):
 @pytest.mark.asyncio
 async def test_get_job_metrics(app_client):
     """GET /svc/v1/jobs/{id}/metrics returns metrics response shape."""
-    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
-        create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB)
+    with _mock_job_infra():
+        create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB, params={"projectId": "test-project-id"})
         job_id = create_resp.json()["id"]
 
-    response = await app_client.get(f"/svc/v1/jobs/{job_id}/metrics")
+        response = await app_client.get(f"/svc/v1/jobs/{job_id}/metrics")
 
     assert response.status_code == 200
     body = response.json()
@@ -363,10 +376,9 @@ async def test_get_job_metrics_not_found(app_client):
 @pytest.mark.asyncio
 async def test_cancel_pending_job(app_client):
     """POST /svc/v1/jobs/{id}/cancel cancels a pending job."""
-    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
-        create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB)
+    with _mock_job_infra():
+        create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB, params={"projectId": "test-project-id"})
         job_id = create_resp.json()["id"]
-
         response = await app_client.post(f"/svc/v1/jobs/{job_id}/cancel")
 
     assert response.status_code == 200
@@ -378,14 +390,10 @@ async def test_cancel_pending_job(app_client):
 @pytest.mark.asyncio
 async def test_cancel_already_cancelled_job(app_client):
     """POST /svc/v1/jobs/{id}/cancel on an already-cancelled job returns 400."""
-    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
-        create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB)
+    with _mock_job_infra():
+        create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB, params={"projectId": "test-project-id"})
         job_id = create_resp.json()["id"]
-
-        # Cancel once
         await app_client.post(f"/svc/v1/jobs/{job_id}/cancel")
-
-        # Try to cancel again
         response = await app_client.post(f"/svc/v1/jobs/{job_id}/cancel")
 
     assert response.status_code == 400
@@ -409,19 +417,18 @@ async def test_cancel_nonexistent_job(app_client):
 @pytest.mark.asyncio
 async def test_delete_job(app_client):
     """DELETE /svc/v1/jobs/{id} deletes a job and returns confirmation."""
-    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
-        create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB)
+    with _mock_job_infra():
+        create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB, params={"projectId": "test-project-id"})
         job_id = create_resp.json()["id"]
 
-    response = await app_client.delete(f"/svc/v1/jobs/{job_id}")
+        response = await app_client.delete(f"/svc/v1/jobs/{job_id}")
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["message"] == "Job deleted"
-    assert body["job_id"] == job_id
+        assert response.status_code == 200
+        body = response.json()
+        assert body["message"] == "Job deleted"
+        assert body["job_id"] == job_id
 
-    # Verify the job is actually gone
-    get_resp = await app_client.get(f"/svc/v1/jobs/{job_id}")
+        get_resp = await app_client.get(f"/svc/v1/jobs/{job_id}")
     assert get_resp.status_code == 404
 
 
@@ -441,13 +448,13 @@ async def test_delete_nonexistent_job(app_client):
 @pytest.mark.asyncio
 async def test_bulk_delete_jobs(app_client):
     """POST /svc/v1/jobs/bulk-delete deletes multiple jobs at once."""
-    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
+    with _mock_job_infra():
         # Create two jobs with different names
         job1_payload = {**VALID_TABULAR_JOB, "name": "bulk-job-1"}
         job2_payload = {**VALID_TABULAR_JOB, "name": "bulk-job-2"}
 
-        resp1 = await app_client.post("/svc/v1/jobs", json=job1_payload)
-        resp2 = await app_client.post("/svc/v1/jobs", json=job2_payload)
+        resp1 = await app_client.post("/svc/v1/jobs", json=job1_payload, params={"projectId": "test-project-id"})
+        resp2 = await app_client.post("/svc/v1/jobs", json=job2_payload, params={"projectId": "test-project-id"})
         job_id_1 = resp1.json()["id"]
         job_id_2 = resp2.json()["id"]
 
@@ -499,11 +506,11 @@ async def test_bulk_delete_empty_list_returns_422(app_client):
 @pytest.mark.asyncio
 async def test_create_duplicate_job_name_returns_409(app_client):
     """POST /svc/v1/jobs with a duplicate name in the same scope returns 409."""
-    with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()):
-        resp1 = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB)
+    with _mock_job_infra():
+        resp1 = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB, params={"projectId": "test-project-id"})
         assert resp1.status_code == 200
 
-        resp2 = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB)
+        resp2 = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB, params={"projectId": "test-project-id"})
 
     assert resp2.status_code == 409
     body = resp2.json()

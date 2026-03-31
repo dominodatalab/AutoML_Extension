@@ -30,7 +30,7 @@ export function useJobProgress(jobId: string | undefined, job: Job | undefined, 
     const requestJobId = currentJobIdRef.current
     if (!requestJobId) return
     try {
-      const { data } = await api.post<JobProgress>('jobprogress', { job_id: requestJobId })
+      const { data } = await api.get<JobProgress>(`jobs/${requestJobId}/progress`)
       if (currentJobIdRef.current === requestJobId) {
         setPolledProgress(data)
         setProgressJobId(requestJobId)

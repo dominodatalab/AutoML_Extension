@@ -50,43 +50,41 @@ export interface CleanupOrphansResponse {
 }
 
 export async function getJobs(params?: { skip?: number; limit?: number; status?: string }): Promise<JobListResponse> {
-  // Use POST for Domino compatibility (svcjobs is POST endpoint)
-  const response = await api.post<JobListResponse>('/jobs', params || {})
+  const response = await api.get<JobListResponse>('jobs', { params })
   return response.data
 }
 
 export async function getJob(jobId: string): Promise<Job> {
-  // Use POST with job_id in body (Domino doesn't support path params)
-  const response = await api.post<Job>('/jobget', { job_id: jobId })
+  const response = await api.get<Job>(`jobs/${jobId}`)
   return response.data
 }
 
 export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
-  const response = await api.post<JobStatusResponse>('/jobstatus', { job_id: jobId })
+  const response = await api.get<JobStatusResponse>(`jobs/${jobId}/status`)
   return response.data
 }
 
 export async function getJobMetrics(jobId: string): Promise<JobMetricsResponse> {
-  const response = await api.post<JobMetricsResponse>('/jobmetrics', { job_id: jobId })
+  const response = await api.get<JobMetricsResponse>(`jobs/${jobId}/metrics`)
   return response.data
 }
 
 export async function getJobLogs(jobId: string, _limit?: number): Promise<JobLog[]> {
-  const response = await api.post<JobLog[]>('/joblogs', { job_id: jobId })
+  const response = await api.get<JobLog[]>(`jobs/${jobId}/logs`)
   return response.data
 }
 
 export async function createJob(request: JobCreateRequest): Promise<Job> {
-  const response = await api.post<Job>('/jobcreate', request)
+  const response = await api.post<Job>('jobs', request)
   return response.data
 }
 
 export async function cancelJob(jobId: string): Promise<void> {
-  await api.post('/jobcancel', { job_id: jobId })
+  await api.post(`jobs/${jobId}/cancel`)
 }
 
 export async function deleteJob(jobId: string): Promise<void> {
-  await api.post('/jobdelete', { job_id: jobId })
+  await api.delete(`jobs/${jobId}`)
 }
 
 export interface BulkDeleteJobsResponse {
@@ -95,16 +93,16 @@ export interface BulkDeleteJobsResponse {
 }
 
 export async function bulkDeleteJobs(jobIds: string[]): Promise<BulkDeleteJobsResponse> {
-  const response = await api.post<BulkDeleteJobsResponse>('/jobbulkdelete', { job_ids: jobIds })
+  const response = await api.post<BulkDeleteJobsResponse>('jobs/bulk-delete', { job_ids: jobIds })
   return response.data
 }
 
 export async function getOrphanPreview(): Promise<OrphanPreviewResponse> {
-  const response = await api.post<OrphanPreviewResponse>('/joborphans', {})
+  const response = await api.get<OrphanPreviewResponse>('jobs/orphans/preview')
   return response.data
 }
 
 export async function cleanupOrphans(): Promise<CleanupOrphansResponse> {
-  const response = await api.post<CleanupOrphansResponse>('/jobcleanuporphans', {})
+  const response = await api.post<CleanupOrphansResponse>('jobs/cleanup/orphans')
   return response.data
 }

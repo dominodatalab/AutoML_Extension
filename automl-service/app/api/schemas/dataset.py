@@ -66,17 +66,8 @@ class FileUploadResponse(BaseModel):
     row_count: int
 
 
-class FilePreviewRequest(BaseModel):
-    """Request schema for local file preview."""
-
-    file_path: str
-    limit: int = 100
-    offset: int = 0
-    rows: Optional[int] = None  # Legacy support
-
-
-class CompatDatasetPreviewRequest(BaseModel):
-    """Compat request schema for /svcdatasetpreview."""
+class DatasetFilePreviewRequest(BaseModel):
+    """Request schema for dataset file preview."""
 
     dataset_id: str
     file_path: str

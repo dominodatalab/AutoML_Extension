@@ -603,12 +603,8 @@ async def app_client(async_engine, tmp_data_dir, monkeypatch, mock_viewing_user)
     app.dependency_overrides[get_db] = override_get_db
 
     import app.dependencies as dependencies_module
-    import app.api.compat.custom_jobs as custom_jobs_module
-    import app.api.compat.patterns as patterns_module
 
     monkeypatch.setattr(dependencies_module, "get_db_session", override_get_db_session, raising=True)
-    monkeypatch.setattr(custom_jobs_module, "get_db_session", override_get_db_session, raising=True)
-    monkeypatch.setattr(patterns_module, "get_db_session", override_get_db_session, raising=True)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

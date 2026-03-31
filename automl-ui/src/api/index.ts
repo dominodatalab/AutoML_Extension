@@ -23,19 +23,6 @@ declare global {
   }
 }
 
-// For Domino Apps: use simple single-segment endpoints
-const DOMINO_MODE = true
-
-/**
- * Convert an endpoint name to Domino single-segment compat paths.
- */
-function toDominoPath(endpoint: string): string {
-  const normalized = endpoint.replace(/^\/+|\/+$/g, '')
-  if (!normalized) return 'svc'
-  const lastSegment = normalized.split('/').filter(Boolean).pop() || normalized
-  return `svc${lastSegment.replace(/-/g, '')}`
-}
-
 // Fetch-based API client
 class ApiClient {
   private defaultHeaders: Record<string, string>
@@ -61,15 +48,8 @@ class ApiClient {
   ): Promise<{ data: T }> {
     const cleanEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint
 
-    let fullUrl: string
-    if (DOMINO_MODE) {
-      // Preserve explicit compat paths and map everything else to the single-segment convention.
-      const mappedPath = cleanEndpoint.startsWith('svc') ? cleanEndpoint : toDominoPath(cleanEndpoint)
-      const basePath = getBasePath()
-      fullUrl = `${basePath}/${mappedPath}`
-    } else {
-      fullUrl = `/api/v1/${cleanEndpoint}`
-    }
+    const basePath = getBasePath()
+    let fullUrl = `${basePath}/svc/v1/${cleanEndpoint}`
 
     // Merge default params (e.g. projectId) with per-call params
     const mergedParams = { ...this.defaultParams, ...(config?.params ?? {}) }
@@ -82,7 +62,7 @@ class ApiClient {
       })
       const queryString = searchParams.toString()
       if (queryString) {
-        fullUrl += `?${queryString}`
+        fullUrl += (fullUrl.includes('?') ? '&' : '?') + queryString
       }
     }
 

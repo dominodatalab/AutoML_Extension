@@ -55,8 +55,7 @@ export function useRegistry(): UseRegistryResult {
 
   const fetchRegisteredModelsOp = useAsyncOperation(
     async () => {
-      const { data } = await api.get<RegisteredModel[]>('registeredmodels')
-      // Filter to only show models deployed from this application (prefixed with automlapp-)
+      const { data } = await api.get<RegisteredModel[]>('registry/models')
       const filteredModels = data.filter(model => model.name.startsWith('automlapp-'))
       setRegisteredModels(filteredModels)
       return filteredModels
@@ -66,7 +65,7 @@ export function useRegistry(): UseRegistryResult {
 
   const fetchModelVersionsOp = useAsyncOperation(
     async (modelName: string) => {
-      const { data } = await api.post<ModelVersion[]>('modelversions', { model_name: modelName })
+      const { data } = await api.get<ModelVersion[]>(`registry/models/${encodeURIComponent(modelName)}/versions`)
       setModelVersions(data)
       return data
     },
@@ -82,7 +81,7 @@ export function useRegistry(): UseRegistryResult {
       metrics?: Record<string, number>,
       jobId?: string
     ) => {
-      const { data } = await api.post<RegisterModelResult>('registermodel', {
+      const { data } = await api.post<RegisterModelResult>('registry/register', {
         model_path: modelPath,
         model_name: modelName,
         model_type: modelType,
@@ -102,7 +101,7 @@ export function useRegistry(): UseRegistryResult {
       stage: ModelStage,
       archiveExisting = false
     ) => {
-      const { data } = await api.post<TransitionStageResult>('transitionstage', {
+      const { data } = await api.post<TransitionStageResult>('registry/models/transition-stage', {
         model_name: modelName,
         version,
         stage,
@@ -119,7 +118,7 @@ export function useRegistry(): UseRegistryResult {
       description: string,
       version?: string
     ) => {
-      await api.post('updatedescription', {
+      await api.post('registry/models/update-description', {
         model_name: modelName,
         description,
         version
@@ -131,10 +130,7 @@ export function useRegistry(): UseRegistryResult {
 
   const deleteModelVersionOp = useAsyncOperation(
     async (modelName: string, version: string) => {
-      await api.post('deleteversion', {
-        model_name: modelName,
-        version
-      })
+      await api.delete(`registry/models/${encodeURIComponent(modelName)}/versions/${encodeURIComponent(version)}`)
       return true as const
     },
     { errorMessage: 'Failed to delete model version' }
@@ -142,7 +138,7 @@ export function useRegistry(): UseRegistryResult {
 
   const deleteModelOp = useAsyncOperation(
     async (modelName: string) => {
-      await api.post('deletemodel', { model_name: modelName })
+      await api.delete(`registry/models/${encodeURIComponent(modelName)}`)
       return true as const
     },
     { errorMessage: 'Failed to delete model' }
@@ -150,7 +146,7 @@ export function useRegistry(): UseRegistryResult {
 
   const fetchModelCardOp = useAsyncOperation(
     async (modelName: string, version: string) => {
-      const { data } = await api.post<ModelCard>('modelcard', {
+      const { data } = await api.post<ModelCard>('registry/models/card', {
         model_name: modelName,
         version,
         job_info: {},
@@ -164,10 +160,7 @@ export function useRegistry(): UseRegistryResult {
 
   const downloadModelOp = useAsyncOperation(
     async (modelName: string, version: string) => {
-      const { data } = await api.post<{ local_path: string }>('downloadmodel', {
-        model_name: modelName,
-        version
-      })
+      const { data } = await api.post<{ local_path: string }>(`registry/models/${encodeURIComponent(modelName)}/versions/${encodeURIComponent(version)}/download`)
       return data.local_path
     },
     { errorMessage: 'Failed to download model' }
@@ -185,7 +178,6 @@ export function useRegistry(): UseRegistryResult {
     downloadModelOp,
   ])
 
-  // Wrap execute calls to preserve the original return-type contracts
   const fetchRegisteredModels = useCallback(async () => {
     return orArray(fetchRegisteredModelsOp.execute())
   }, [fetchRegisteredModelsOp.execute])
@@ -234,7 +226,6 @@ export function useRegistry(): UseRegistryResult {
     return orNull(fetchModelCardOp.execute(modelName, version))
   }, [fetchModelCardOp.execute])
 
-  // fetchModelsByStage is a composite operation that calls fetchModelVersions internally
   const fetchModelsByStage = useCallback(async (modelName: string) => {
     try {
       const versions = await fetchModelVersions(modelName)
@@ -248,7 +239,7 @@ export function useRegistry(): UseRegistryResult {
         }
       }
 
-      versions.forEach(v => {
+      versions.forEach((v: ModelVersion) => {
         const stage = v.stage as ModelStage
         if (byStage.stages[stage]) {
           byStage.stages[stage].push(v)

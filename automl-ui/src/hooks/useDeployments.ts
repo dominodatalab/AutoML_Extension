@@ -35,7 +35,7 @@ export function useDeployments(): UseDeploymentsResult {
 
   const fetchDeploymentsOp = useAsyncOperation(
     async () => {
-      const { data } = await api.get<{ success: boolean; data: Deployment[]; error?: string; warning?: string }>('deployments')
+      const { data } = await api.get<{ success: boolean; data: Deployment[]; error?: string; warning?: string }>('deployments/deployments')
       if (!data.success) {
         throw new Error(data.error || data.warning || 'Failed to fetch deployments')
       }
@@ -48,7 +48,7 @@ export function useDeployments(): UseDeploymentsResult {
 
   const fetchModelApisOp = useAsyncOperation(
     async () => {
-      const { data } = await api.get<{ success: boolean; data: ModelApi[]; error?: string; warning?: string }>('modelapis')
+      const { data } = await api.get<{ success: boolean; data: ModelApi[]; error?: string; warning?: string }>('deployments/model-apis')
       if (!data.success) {
         throw new Error(data.error || data.warning || 'Failed to fetch model APIs')
       }
@@ -61,9 +61,7 @@ export function useDeployments(): UseDeploymentsResult {
 
   const getDeploymentOp = useAsyncOperation(
     async (deploymentId: string) => {
-      const { data } = await api.post<{ success: boolean; data: Deployment }>('deploymentget', {
-        deployment_id: deploymentId
-      })
+      const { data } = await api.get<{ success: boolean; data: Deployment }>(`deployments/deployments/${deploymentId}`)
       return data.data || null
     },
     { errorMessage: 'Failed to get deployment' }
@@ -71,9 +69,7 @@ export function useDeployments(): UseDeploymentsResult {
 
   const getDeploymentStatusOp = useAsyncOperation(
     async (deploymentId: string) => {
-      const { data } = await api.post<DeploymentStatusResponse>('deploymentstatus', {
-        deployment_id: deploymentId
-      })
+      const { data } = await api.get<DeploymentStatusResponse>(`deployments/deployments/${deploymentId}/status`)
       return data
     },
     { errorMessage: 'Failed to get deployment status' }
@@ -81,10 +77,7 @@ export function useDeployments(): UseDeploymentsResult {
 
   const startDeploymentOp = useAsyncOperation(
     async (deploymentId: string, refreshFn: () => Promise<Deployment[]>) => {
-      const { data } = await api.post<DeploymentResponse>('deploymentstart', {
-        deployment_id: deploymentId
-      })
-      // Refresh deployments list
+      const { data } = await api.post<DeploymentResponse>(`deployments/deployments/${deploymentId}/start`)
       await refreshFn()
       return data
     },
@@ -93,10 +86,7 @@ export function useDeployments(): UseDeploymentsResult {
 
   const stopDeploymentOp = useAsyncOperation(
     async (deploymentId: string, refreshFn: () => Promise<Deployment[]>) => {
-      const { data } = await api.post<DeploymentResponse>('deploymentstop', {
-        deployment_id: deploymentId
-      })
-      // Refresh deployments list
+      const { data } = await api.post<DeploymentResponse>(`deployments/deployments/${deploymentId}/stop`)
       await refreshFn()
       return data
     },
@@ -105,8 +95,7 @@ export function useDeployments(): UseDeploymentsResult {
 
   const deleteDeploymentOp = useAsyncOperation(
     async (deploymentId: string, refreshFn: () => Promise<Deployment[]>) => {
-      await api.post('deploymentdelete', { deployment_id: deploymentId })
-      // Refresh deployments list
+      await api.delete(`deployments/deployments/${deploymentId}`)
       await refreshFn()
       return true as const
     },
@@ -115,10 +104,7 @@ export function useDeployments(): UseDeploymentsResult {
 
   const getDeploymentLogsOp = useAsyncOperation(
     async (deploymentId: string, logType = 'stdout') => {
-      const { data } = await api.post<DeploymentLogs>('deploymentlogs', {
-        deployment_id: deploymentId,
-        log_type: logType
-      })
+      const { data } = await api.get<DeploymentLogs>(`deployments/deployments/${deploymentId}/logs/${logType}`)
       return data.logs || null
     },
     { errorMessage: 'Failed to get deployment logs' }
@@ -126,8 +112,7 @@ export function useDeployments(): UseDeploymentsResult {
 
   const quickDeployOp = useAsyncOperation(
     async (request: QuickDeployRequest, refreshFn: () => Promise<Deployment[]>) => {
-      const { data } = await api.post<DeploymentResponse>('quickdeploy', request)
-      // Refresh deployments list
+      const { data } = await api.post<DeploymentResponse>('deployments/quick-deploy', request)
       await refreshFn()
       return data
     },
@@ -136,8 +121,12 @@ export function useDeployments(): UseDeploymentsResult {
 
   const deployFromJobOp = useAsyncOperation(
     async (request: DeployFromJobRequest, refreshFn: () => Promise<Deployment[]>) => {
-      const { data } = await api.post<DeploymentResponse>('deployfromjob', request)
-      // Best-effort refresh to avoid masking a successful deployment with a list error.
+      const { data } = await api.post<DeploymentResponse>(`deployments/deploy-from-job/${request.job_id}`, {
+        model_name: request.model_name,
+        function_name: request.function_name,
+        min_replicas: request.min_replicas,
+        max_replicas: request.max_replicas,
+      })
       try {
         await refreshFn()
       } catch (refreshError) {
@@ -161,7 +150,6 @@ export function useDeployments(): UseDeploymentsResult {
     deployFromJobOp,
   ])
 
-  // Wrap execute calls to preserve the original return-type contracts
   const fetchDeployments = useCallback(async () => {
     return orArray(fetchDeploymentsOp.execute())
   }, [fetchDeploymentsOp.execute])

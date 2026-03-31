@@ -139,10 +139,16 @@ async def suggest_target_column(request: ProfileRequest):
         raise HTTPException(status_code=404, detail=f"File not found: {request.file_path}")
 
 
+class QuickProfileRequest(BaseModel):
+    """Request for quick data profiling."""
+    file_path: str = Field(..., description="Path to the data file")
+
+
 @router.post("/profile/quick")
 @handle_errors("Quick profile error")
-async def quick_profile(file_path: str):
+async def quick_profile(request: QuickProfileRequest):
     """Get a quick profile summary (faster than full profile)."""
+    file_path = request.file_path
     profiler = get_data_profiler()
 
     profile = profiler.profile_file(file_path, sample_size=1000)
@@ -169,10 +175,18 @@ async def quick_profile(file_path: str):
     }
 
 
-@router.post("/profile/column/{column_name}")
+class ColumnProfileRequest(BaseModel):
+    """Request for single-column profiling."""
+    file_path: str = Field(..., description="Path to the data file")
+    column_name: str = Field(..., description="Name of the column to profile")
+
+
+@router.post("/profile/column")
 @handle_errors("Column profile error")
-async def profile_column(file_path: str, column_name: str):
+async def profile_column(request: ColumnProfileRequest):
     """Get detailed profile for a specific column."""
+    file_path = request.file_path
+    column_name = request.column_name
     profiler = get_data_profiler()
 
     try:

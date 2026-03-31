@@ -114,7 +114,7 @@ async def _resolve_notebook_data_path(job: Any) -> Optional[str]:
         return None
 
 
-@router.post("/export/deployment", response_model=DeploymentPackageResponse)
+@router.post("/deployment", response_model=DeploymentPackageResponse)
 async def export_deployment_package(
     request: DeploymentPackageRequest,
     db: AsyncSession = Depends(get_db)
@@ -139,7 +139,7 @@ class DeploymentDownloadRequest(BaseModel):
     output_dir: str = Field(..., description="Path to the deployment package directory")
 
 
-@router.post("/export/deployment/download")
+@router.post("/deployment/download")
 async def download_deployment_package(request: DeploymentDownloadRequest):
     """Download a previously exported deployment package as a zip file."""
     target_dir = request.output_dir
@@ -205,7 +205,7 @@ async def compare_models(request: ModelComparisonRequest):
         raise HTTPException(status_code=500, detail=f"Failed to compare models: {e}")
 
 
-@router.get("/export/formats")
+@router.get("/formats")
 async def get_supported_formats():
     """Get list of supported export formats by model type."""
     return {
@@ -247,7 +247,7 @@ class ExportNotebookRequest(BaseModel):
     job_id: str = Field(..., description="ID of the completed training job")
 
 
-@router.post("/export/notebook")
+@router.post("/notebook")
 @handle_errors("Error generating notebook")
 async def export_notebook(
     request: ExportNotebookRequest,

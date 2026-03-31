@@ -29,6 +29,7 @@ from app.services.job_service import (
     create_job_with_context,
     delete_job as delete_job_service,
     delete_orphans as delete_orphans_service,
+    find_orphans_checked,
     get_job_metrics_response,
     get_job_logs as get_job_logs_service,
     get_job_progress_response,
@@ -58,6 +59,15 @@ async def create_job(
         project_name=project_name,
         project_owner=project_owner,
     )
+
+
+@router.get("/orphans/preview")
+async def preview_orphans(
+    db: AsyncSession = Depends(get_db),
+    project_id: str = Depends(get_request_project_id),
+):
+    """Preview orphaned model dirs and upload files with no matching job."""
+    return await find_orphans_checked(db, project_id=project_id)
 
 
 @router.get("/queue/status")
@@ -161,28 +171,33 @@ async def delete_job(job_id: str, db: AsyncSession = Depends(get_db)):
     return await delete_job_service(db, job_id)
 
 
-@router.post("/list", response_model=JobListResponse)
-async def list_jobs_post(
-    list_request: JobListRequest,
+@router.get("", response_model=JobListResponse)
+async def list_jobs(
+    skip: int = 0,
+    limit: int = 100,
+    status: Optional[str] = None,
+    model_type: Optional[str] = None,
+    owner: Optional[str] = None,
+    project_id: Optional[str] = None,
+    project_name: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """List jobs (POST for Domino compatibility).
-
-    Supports filtering by:
-    - status: Filter by job status (pending, running, completed, failed, cancelled)
-    - model_type: Filter by model type (tabular, timeseries)
-    - owner: Filter by owner username. If not provided, uses current user from domino-username header.
-             Pass owner="" (empty string) to see all users' jobs.
-    - project_name: Filter by project name. Pass project_name="" to see jobs from all projects.
-    - project_id: Filter by project ID (legacy, prefer project_name).
-    """
+    """List jobs with optional filters."""
+    list_request = JobListRequest(
+        skip=skip,
+        limit=limit,
+        status=status,
+        model_type=model_type,
+        owner=owner,
+        project_id=project_id,
+        project_name=project_name,
+    )
     jobs = await list_jobs_filtered(db=db, list_request=list_request)
-
     return JobListResponse(
         jobs=[JobResponse.model_validate(j) for j in jobs],
         total=len(jobs),
-        skip=list_request.skip,
-        limit=list_request.limit,
+        skip=skip,
+        limit=limit,
     )
 
 

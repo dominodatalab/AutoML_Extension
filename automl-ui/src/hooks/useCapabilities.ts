@@ -40,7 +40,7 @@ export function useCapabilities(): Capabilities {
   const { data } = useQuery({
     queryKey: ['capabilities'],
     queryFn: async () => {
-      const { data } = await api.get<BackendCapabilities>('capabilities')
+      const { data } = await api.get<BackendCapabilities>('health/capabilities')
       return data
     },
     staleTime: Infinity,
