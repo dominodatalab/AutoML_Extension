@@ -19,6 +19,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from app.core.context.auth import set_request_auth_header
 
 pytestmark = pytest.mark.domino
 
@@ -26,6 +27,9 @@ pytestmark = pytest.mark.domino
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+TEST_PROJECT_ID = "test-project-id"
+JOB_CREATE_URL = f"/svc/v1/jobs?projectId={TEST_PROJECT_ID}"
 
 VALID_TABULAR_JOB = {
     "name": "test-tabular-job",
@@ -67,13 +71,22 @@ async def _fake_resolve_project(project_id):
 @contextmanager
 def _mock_job_infra():
     """Patch Domino-dependent services so job API tests run without a live Domino environment."""
-    with patch("app.services.job_service.get_domino_job_launcher", return_value=_mock_domino_launcher()), \
-         patch("app.services.project_resolver.resolve_project", side_effect=_fake_resolve_project), \
-         patch("app.services.job_service._attach_external_links", side_effect=lambda job: job), \
-         patch("app.services.job_service._sync_domino_job_state", new=AsyncMock(side_effect=lambda db, job, **kwargs: job)), \
-         patch("app.services.job_service._fetch_domino_job_or_throw", return_value=None), \
-         patch("app.services.job_service.require_job_list"):
-        yield
+    set_request_auth_header("Bearer test-token")
+    try:
+        with patch("app.services.job_service.get_domino_job_launcher", return_value=_mock_domino_launcher()), \
+            patch("app.services.project_resolver.resolve_project", side_effect=_fake_resolve_project), \
+            patch("app.services.job_service.require_domino_job_start"), \
+            patch("app.services.job_service.require_domino_job_stop"), \
+            patch("app.services.job_service._attach_external_links", side_effect=lambda job: job), \
+            patch("app.services.job_service._sync_domino_job_state", new=AsyncMock(side_effect=lambda db, job, **kwargs: job)), \
+            patch("app.services.job_service._fetch_domino_job_or_throw", return_value=None), \
+            patch("app.services.job_service.require_domino_job_list"), \
+            patch("app.core.authorization.current_user_can_start_job", return_value=True), \
+            patch("app.core.authorization.current_user_can_stop_job", return_value=True), \
+            patch("app.core.authorization.current_user_can_list_jobs", return_value=True):
+            yield
+    finally:
+        set_request_auth_header(None)
 
 # ---------------------------------------------------------------------------
 # POST /svc/v1/jobs — create job
@@ -140,6 +153,7 @@ async def test_create_timeseries_job_missing_time_column(app_client):
         "file_path": "/tmp/test.csv",
         "target_column": "value",
         "prediction_length": 10,
+        "execution_target": "domino_job",
         # time_column is missing
     }
     with _mock_job_infra():

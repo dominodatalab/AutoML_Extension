@@ -173,7 +173,7 @@ export function CorrelationMatrix({ correlations, columns: _columns }: Correlati
                         )} ${getTextColor(value)}`}
                         title={`${row} vs ${col}: ${value?.toFixed(3) || 'N/A'}`}
                       >
-                        {value !== undefined ? value.toFixed(2) : '-'}
+                        {value !== undefined && value != null ? value.toFixed(2) : '-'}
                       </div>
                     </td>
                   )

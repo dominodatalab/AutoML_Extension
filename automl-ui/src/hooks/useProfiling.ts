@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import api from '../api'
 import { aggregateAsyncState, orArray, useApiState } from './asyncHelpers'
 import { useAsyncOperation } from './useAsyncOperation'
@@ -42,10 +43,13 @@ interface UseProfilingResult {
 
 export function useProfiling(): UseProfilingResult {
   const [suggestions, setSuggestions] = useState<TargetSuggestion[]>([])
+  const [searchParams] = useSearchParams()
+  const datasetId = searchParams.get('dataset_id')
 
   const profileState = useApiState(
     async (filePath: string, sampleSize = 50000, samplingStrategy = 'random', stratifyColumn?: string) => {
       const payload: Record<string, unknown> = {
+        dataset_id: datasetId,
         file_path: filePath,
         sample_size: sampleSize,
         sampling_strategy: samplingStrategy,

@@ -107,6 +107,7 @@ async def test_per_request_user_context_isolation_via_api(app_client, monkeypatc
     """
     from types import SimpleNamespace
 
+    from app.core import authorization as auth
     from app.core.context import user as user_ctx
     from app.api.generated.domino_public_api_client.api import users as users_api
     import app.services.job_service as job_service
@@ -121,7 +122,9 @@ async def test_per_request_user_context_isolation_via_api(app_client, monkeypatc
         else:
             return _make_user_envelope("u-2", "bob", roles=["Viewer"])   # second request
 
+    monkeypatch.setattr(user_ctx, "get_domino_public_api_client_sync", lambda: object(), raising=True)
     monkeypatch.setattr(users_api.get_current_user, "sync", fake_sync)
+    monkeypatch.setattr(auth, "current_user_can_start_job", lambda project_id=None: True, raising=True)
 
     async def fake_resolve_project(project_id: str):
         return SimpleNamespace(

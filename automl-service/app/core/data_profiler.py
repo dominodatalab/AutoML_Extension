@@ -1,6 +1,7 @@
 """Data profiling service for analyzing datasets before training."""
 
 import os
+from io import BytesIO
 import logging
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
@@ -9,6 +10,8 @@ from datetime import datetime
 
 import pandas as pd
 import numpy as np
+
+from app.services import dataset_file_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -19,26 +22,28 @@ class DataProfiler:
     def __init__(self):
         pass
 
-    def profile_file(
+    async def profile_file(
         self,
+        dataset_id: str,
         file_path: str,
         sample_size: int = 50000,
         sampling_strategy: str = "random",
         stratify_column: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Generate a comprehensive profile of a data file."""
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File not found: {file_path}")
+
+        file_bytes = await dataset_file_bytes.fetch(dataset_id=dataset_id, file_path=file_path)
+        content = BytesIO(file_bytes)
 
         # Load data
         if file_path.endswith(".csv"):
-            df = pd.read_csv(file_path)
+            df = pd.read_csv(content)
         elif file_path.endswith((".parquet", ".pq")):
-            df = pd.read_parquet(file_path)
+            df = pd.read_parquet(content)
         elif file_path.endswith(".json"):
-            df = pd.read_json(file_path)
+            df = pd.read_json(content)
         elif file_path.endswith((".xlsx", ".xls")):
-            df = pd.read_excel(file_path)
+            df = pd.read_excel(content)
         else:
             raise ValueError(f"Unsupported file format: {file_path}")
 

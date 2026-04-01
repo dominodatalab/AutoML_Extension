@@ -33,10 +33,9 @@ from app.api.schemas.job import (
     RegisterModelResponse,
 )
 from app.config import get_settings
-from app.core.authorization import require_storage_modify
+from app.core.authorization import require_storage_modify, require_domino_job_start, require_domino_job_list, current_user_can_modify_storage, require_domino_job_stop
 from app.core.context.user import get_viewing_user
 from app.core.domino_http import get_domino_public_api_client_sync
-from app.core.authorization import require_job_list
 from app.core.domino_job_launcher import get_domino_job_launcher
 from app.core.dataset_mounts import resolve_dataset_mount_paths
 from app.db.models import Job, JobLog, JobStatus, ModelType, ProblemType
@@ -70,6 +69,14 @@ _CANONICAL_GIT_SERVICE_PROVIDER_VALUES = {
     provider.value.lower(): provider.value for provider in GitServiceProviderV1
 }
 
+async def require_user_owns_local_job(db, job_id: str):
+    """Return the job when the current viewer may access it."""
+    username = get_viewing_user_name()
+    job = await get_job_or_404(db, job_id, username)
+
+    if job.owner != username:
+        if not current_user_can_modify_storage(project_id=job.project_id):
+            raise HTTPException(403, "Forbidden")
 
 def _normalize_job_name(name: str) -> str:
     """Return canonical job name used for validation and persistence."""
@@ -230,7 +237,6 @@ async def create_job_with_context(
     project_owner: Optional[str],
 ) -> Job:
     """Validate, create, and enqueue a job using request-derived context."""
-    # TODO can user launch job in project?
     owner = get_viewing_user_name()
 
     logger.info(
@@ -253,6 +259,7 @@ async def create_job_with_context(
 
     # Capacity gate: reject early when queue is full (before DB insert)
     settings = get_settings()
+    require_domino_job_start(project_id=project_id)
     active_domino = await _count_active_domino_jobs(db)
     if active_domino >= settings.max_domino_queue_size:
         raise HTTPException(
@@ -344,7 +351,8 @@ async def list_jobs_filtered(
     ) = resolve_job_list_filters(list_request)
 
     if project_id_filter:
-        require_job_list(project_id_filter)
+        # require domino job listing auth if project_id set
+        require_domino_job_list(project_id_filter)
 
     await _sync_active_domino_jobs_for_overview(db)
 
@@ -1001,7 +1009,6 @@ async def get_job_progress_response(db: AsyncSession, job_id: str)  -> JobProgre
         started_at=job.started_at,
     )
 
-
 async def cancel_job(db: AsyncSession, job_id: str) -> dict:
     """Cancel a pending/running job and queue task."""
     owner_user_name = get_viewing_user_name()
@@ -1016,6 +1023,7 @@ async def cancel_job(db: AsyncSession, job_id: str) -> dict:
     stop_success = False
     stop_error = None
     if job.domino_job_id:
+        require_domino_job_stop(job.domino_job_id)
         stop_result = await get_domino_job_launcher().stop_job(job.domino_job_id, project_id=job.project_id)
         stop_success = bool(stop_result.get("success"))
         stop_error = stop_result.get("error")
@@ -1042,24 +1050,27 @@ async def cancel_job(db: AsyncSession, job_id: str) -> dict:
 async def delete_job(db: AsyncSession, job_id: str) -> dict:
     """Delete job artifacts and DB row."""
     from app.core.cleanup_service import get_cleanup_service
-    # TODO needs own auth
+    await require_user_owns_local_job(db, job_id)
+
     owner_user_name = get_viewing_user_name()
     job = await get_job_or_404(db, job_id, owner_user_name)
     cleanup_result = await get_cleanup_service().delete_job_artifacts(job, db)
     await crud.delete_job(db, job_id)
+
+    # we don't delete the domino job
+
     return {"message": "Job deleted", "job_id": job_id, "cleanup": cleanup_result}
 
 
 async def bulk_delete_jobs(db: AsyncSession, job_ids: list[str]) -> dict:
     """Delete multiple jobs, cancelling active ones first. Continues on per-job failure."""
     from app.core.cleanup_service import get_cleanup_service
-    # TODO needs own auth
-
     deleted_job_ids: list[str] = []
     failed: list[dict[str, str]] = []
 
     for job_id in job_ids:
         try:
+            await require_user_owns_local_job(db, job_id)
             job = await crud.get_job(db, job_id)
             if not job:
                 failed.append({"job_id": job_id, "error": "Job not found"})
@@ -1089,7 +1100,8 @@ async def register_model_for_job(
     request: RegisterModelRequest,
 ) -> RegisterModelResponse:
     """Register a completed job's trained model in Domino registry."""
-    job = await get_job_or_404(db, job_id)
+    owner_user_name = get_viewing_user_name()
+    job = await get_job_or_404(db, job_id, owner_user_name)
     if job.status != JobStatus.COMPLETED:
         raise HTTPException(
             status_code=400,
