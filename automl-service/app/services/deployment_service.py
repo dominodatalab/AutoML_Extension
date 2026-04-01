@@ -1,5 +1,6 @@
 """Service helpers for deployment route orchestration."""
 
+import asyncio
 import logging
 import keyword
 import os
@@ -9,7 +10,7 @@ from typing import Optional
 from fastapi import HTTPException
 
 from app.core.domino_model_api import get_domino_model_api
-from app.core.utils import remap_shared_path
+from app.core.job_file_cache import download_mlflow_artifact
 from app.db import crud
 from app.db.models import JobStatus
 from app.dependencies import get_db_session
@@ -83,11 +84,13 @@ async def deploy_from_job(
         )
 
     deploy_name = model_name or job.name or f"automl-model-{job_id[:8]}"
-    model_path = remap_shared_path(job.model_path)
-    if not model_path:
+    if not job.model_path:
         raise HTTPException(status_code=400, detail="Model path not found for this job")
-    if not os.path.isdir(model_path):
-        raise HTTPException(status_code=400, detail=f"Model directory not found: {model_path}")
+    loop = asyncio.get_event_loop()
+    try:
+        model_path = await loop.run_in_executor(None, download_mlflow_artifact, job.model_path, job_id)
+    except (ValueError, FileNotFoundError) as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
     resolved_function_name = (function_name or "predict").strip() or "predict"
     if not _is_valid_python_identifier(resolved_function_name):

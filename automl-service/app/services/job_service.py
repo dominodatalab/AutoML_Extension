@@ -816,10 +816,10 @@ async def _fetch_mlflow_results(job_id: str) -> Optional[dict]:
     """Fetch training results from MLflow for a completed Domino job."""
     def _sync_fetch():
         import json
-        import os
-        import tempfile
 
         import mlflow
+
+        from app.core.job_file_cache import download_mlflow_artifact
 
         runs = mlflow.search_runs(
             filter_string=f"tags.job_id = '{job_id}' and tags.run_type = 'evaluation_summary'",
@@ -836,12 +836,9 @@ async def _fetch_mlflow_results(job_id: str) -> Optional[dict]:
 
         leaderboard = []
         try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                client.download_artifacts(run_id, "leaderboard.json", tmpdir)
-                lb_path = os.path.join(tmpdir, "leaderboard.json")
-                if os.path.exists(lb_path):
-                    with open(lb_path) as f:
-                        leaderboard = json.load(f).get("models", [])
+            lb_path = download_mlflow_artifact(f"runs:/{run_id}/leaderboard.json", job_id)
+            with open(lb_path) as f:
+                leaderboard = json.load(f).get("models", [])
         except Exception as e:
             logger.warning("Could not fetch leaderboard artifact for job %s: %s", job_id, e)
 

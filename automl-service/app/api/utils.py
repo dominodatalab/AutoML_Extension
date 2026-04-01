@@ -1,11 +1,11 @@
 """Shared utilities for API route handlers."""
 
+import asyncio
 from typing import Optional, Tuple
 
 from fastapi import HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.utils import remap_shared_path
 from app.db import crud
 
 
@@ -29,12 +29,17 @@ async def get_job_paths(
     """
     Look up a job and return (model_path, model_type, file_path, problem_type).
 
-    Paths are remapped via ``remap_shared_path`` so they resolve correctly
-    when the App and child jobs run in different Domino projects.
+    model_path must be an MLflow URI (runs:/...). It is downloaded to the app's
+    local cache (settings.temp_path/mlflow_models/{run_id}/) via
+    download_mlflow_artifact so callers can load the model from disk. Raises
+    HTTP 500 if model_path is not a runs:/ URI or if the download fails.
 
     Raises HTTPException(404) if job not found.
     Raises HTTPException(400) if model_path not available.
+    Raises HTTPException(500) if model_path is not an MLflow URI or download fails.
     """
+    from app.core.job_file_cache import download_mlflow_artifact
+
     job = await crud.get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
@@ -45,9 +50,22 @@ async def get_job_paths(
             detail=f"Job {job_id} has no trained model. Status: {job.status.value}",
         )
 
+    loop = asyncio.get_event_loop()
+    try:
+        local_model_path = await loop.run_in_executor(
+            None, download_mlflow_artifact, job.model_path, job_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    # TODO: file_path refers to a dataset path in the training job's project, which is
+    # inaccessible to this app (different project, no cross-project dataset mounting).
+    # Future: use the Domino Datasets API to download the file and cache it at
+    # settings.temp_path/mlflow_models/{run_id}/training_data/ so it is cleaned up
+    # alongside the rest of the job's cached artifacts when the job is deleted.
     return (
-        remap_shared_path(job.model_path),
+        local_model_path,
         job.model_type.value,
-        remap_shared_path(job.file_path) if job.file_path else None,
+        None,
         job.problem_type.value if job.problem_type else None,
     )

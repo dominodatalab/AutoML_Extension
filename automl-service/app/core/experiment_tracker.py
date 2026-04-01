@@ -124,12 +124,11 @@ class ExperimentTracker:
         import mlflow
 
         try:
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-                json.dump(data, f, indent=2, default=str)
-                temp_path = f.name
-
-            mlflow.log_artifact(temp_path, artifact_path=None)
-            os.unlink(temp_path)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                filepath = os.path.join(tmpdir, filename)
+                with open(filepath, "w") as f:
+                    json.dump(data, f, indent=2, default=str)
+                mlflow.log_artifact(filepath, artifact_path=None)
             logger.debug(f"Logged dict artifact: {filename}")
         except Exception as e:
             logger.warning(f"Failed to log artifact dict {filename}: {e}")
