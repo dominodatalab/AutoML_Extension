@@ -248,11 +248,12 @@ class TestDeleteJobArtifacts:
         models_dir = str(tmp_data_dir["models"])
         job = make_job(name="del-model", status=JobStatus.COMPLETED)
         model_dir = _make_model_dir(models_dir, job.id, [100, 200])
-        job.model_path = model_dir
+        job.model_path = f"runs:/fake-run-id/autogluon_model"
 
         svc = CleanupService()
         with patch("app.core.cleanup_service._delete_mlflow_runs", return_value=0), \
-             patch.object(crud, "delete_job_logs", new_callable=AsyncMock, return_value=0):
+             patch.object(crud, "delete_job_logs", new_callable=AsyncMock, return_value=0), \
+             patch("app.core.job_file_cache.cache_dir_for_job", return_value=model_dir):
             result = await svc.delete_job_artifacts(job, db_session)
 
         assert result["model_files_deleted"] is True
@@ -326,13 +327,15 @@ class TestDeleteJobArtifacts:
         models_dir = str(tmp_data_dir["models"])
         job = make_job(name="partial-fail", status=JobStatus.COMPLETED)
         model_dir = _make_model_dir(models_dir, job.id, [50])
-        job.model_path = model_dir
+        job.model_path = f"runs:/fake-run-id/autogluon_model"
 
         with patch(
             "app.core.cleanup_service._delete_mlflow_runs",
             side_effect=RuntimeError("mlflow exploded"),
         ), patch.object(
             crud, "delete_job_logs", new_callable=AsyncMock, return_value=3
+        ), patch(
+            "app.core.job_file_cache.cache_dir_for_job", return_value=model_dir
         ), patch(
             "shutil.rmtree", side_effect=PermissionError("denied")
         ):
@@ -435,19 +438,23 @@ class TestBulkCleanup:
 
         job1 = make_job(name="bulk-1", status=JobStatus.FAILED)
         model1 = _make_model_dir(models_dir, job1.id, [100])
-        job1.model_path = model1
+        job1.model_path = "runs:/fake-run-id-1/autogluon_model"
         db_session.add(job1)
 
         job2 = make_job(name="bulk-2", status=JobStatus.FAILED)
         model2 = _make_model_dir(models_dir, job2.id, [250])
-        job2.model_path = model2
+        job2.model_path = "runs:/fake-run-id-2/autogluon_model"
         db_session.add(job2)
 
         await db_session.commit()
 
+        def _cache_dir(job_id):
+            return model1 if job_id == job1.id else model2
+
         svc = CleanupService()
         with patch("app.core.cleanup_service._delete_mlflow_runs", return_value=0), \
-             patch.object(crud, "delete_job_logs", new_callable=AsyncMock, return_value=0):
+             patch.object(crud, "delete_job_logs", new_callable=AsyncMock, return_value=0), \
+             patch("app.core.job_file_cache.cache_dir_for_job", side_effect=_cache_dir):
             result = await svc.bulk_cleanup(
                 db_session,
                 statuses=[JobStatus.FAILED],

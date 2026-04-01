@@ -204,384 +204,357 @@ async def run_training_job(
     job_config: Optional[JobConfig] = None,
     advanced_config: Optional[Dict[str, Any]] = None,
 ):
-    """
-    Run a training job in the background with Domino experiment tracking.
+    """Run a training job with Domino experiment tracking."""
+    db = None
+    settings = get_settings()
+    tracker = None
 
-    This function is called as a background task by FastAPI.
-    """
+    try:
+        job_config = await _get_job_config(job_config, job_id, db)
+        if not job_config:
+            logger.error(f"Job config unresolved for job: {job_id}")
+            return
 
-    if job_config is None or job_config.execution_target == "local":
+        await _check_cancelled(job_id, db)
 
-        async with async_session_maker() as db:
-            await run_training_job_with_db(
-                job_id,
-                job_config,
-                advanced_config,
-                db,
+        # Update status to running
+        await update_job_status(
+            job_id, JobStatus.RUNNING, db, started_at=utc_now()
+        )
+        await add_job_log(job_id, "Training job started", db)
+
+        # Initialize components
+        runner = AutoGluonRunner()
+        if not settings.standalone_mode:
+            tracker = ExperimentTracker()
+        else:
+            await add_job_log(job_id, "Experiment tracking disabled (standalone mode)", db)
+        data_path = job_config.file_path
+        logger.info(f"[TRAINING] data_path: {data_path}")
+        await add_job_log(job_id, f"Using data file: {data_path}", db)
+
+        await _check_cancelled(job_id, db)
+
+        # Check if file exists
+        if not os.path.exists(data_path):
+            logger.error(f"[TRAINING DEBUG] FILE NOT FOUND: {data_path}")
+            await add_job_log(job_id, f"[DEBUG] FILE DOES NOT EXIST: {data_path}", db, "ERROR")
+
+        # Set up experiment tracking (Domino uses MLflow)
+        experiment_name = job_config.experiment_name or f"{job_config.name}__{utc_now().strftime('%Y%m%d_%H%M%S')}"
+        run_id = None
+        if tracker:
+            tracker.create_experiment(experiment_name)
+            await add_job_log(job_id, f"MLflow experiment: {experiment_name}", db)
+
+            # Start MLflow run with comprehensive tags
+            run_id = tracker.start_run(
+                run_name=job_config.name,
+                tags={
+                    "job_id": job_id,
+                    "model_type": job_config.model_type.value,
+                    "target_column": job_config.target_column or "",
+                    "preset": job_config.preset or "medium_quality",
+                    "framework": "autogluon",
+                    "created_by": "automl-service",
+                    "domino_run": os.environ.get("DOMINO_RUN_ID", ""),
+                    "domino_project": job_config.project_name or os.environ.get("DOMINO_PROJECT_NAME", ""),
+                },
+                project_id=job_config.project_id,
+                project_name=job_config.project_name,
             )
 
-    else:
-        await run_training_job_with_db(
-            job_id,
-            job_config,
-            advanced_config,
+        # Create progress reporter
+        progress_reporter = TrainingProgressReporter(job_id, db, tracker)
+
+        await add_job_log(job_id, "Starting AutoGluon training...", db)
+        await progress_reporter.on_progress_update(5, "Initializing AutoGluon")
+
+        # Parse advanced config from job_config.autogluon_config
+        adv_config = None
+        if advanced_config:
+            adv_config = parse_advanced_config(advanced_config)
+        elif job_config.autogluon_config:
+            # Config is stored as {"advanced": {...}, "timeseries": {...}}
+            if "advanced" in job_config.autogluon_config:
+                adv_config = parse_advanced_config(job_config.autogluon_config["advanced"])
+                logger.info(f"[TRAINING] Parsed advanced config: {adv_config}")
+            else:
+                # Legacy format - try direct parsing
+                adv_config = parse_advanced_config(job_config.autogluon_config)
+                logger.info(f"[TRAINING] Parsed legacy config: {adv_config}")
+
+        # Log all training parameters to MLflow
+        training_params = {
+            "model_type": job_config.model_type.value,
+            "target_column": job_config.target_column,
+            "preset": job_config.preset,
+            "time_limit": job_config.time_limit,
+            "eval_metric": job_config.eval_metric,
+            "problem_type": job_config.problem_type.value if job_config.problem_type else "auto",
+        }
+
+        if job_config.model_type.value == "timeseries":
+            training_params.update({
+                "time_column": job_config.time_column,
+                "id_column": job_config.id_column,
+                "prediction_length": job_config.prediction_length,
+            })
+
+        if adv_config:
+            training_params.update({
+                "num_gpus": adv_config.num_gpus,
+                "num_cpus": adv_config.num_cpus,
+                "num_bag_folds": adv_config.num_bag_folds,
+                "num_stack_levels": adv_config.num_stack_levels,
+                "auto_stack": adv_config.auto_stack,
+                "calibrate": adv_config.calibrate,
+                "refit_full": adv_config.refit_full,
+            })
+
+        if tracker:
+            tracker.log_params(training_params)
+
+        await progress_reporter.on_progress_update(10, "Loading data")
+
+        # Parse timeseries config
+        timeseries_config = None
+        if job_config.autogluon_config:
+            if "timeseries" in job_config.autogluon_config:
+                timeseries_config = job_config.autogluon_config["timeseries"]
+                logger.info(f"[TRAINING] Parsed timeseries config: {timeseries_config}")
+
+        # Run training with advanced config
+        result = await runner.run_training(
+            job_id=job_id,
+            model_type=job_config.model_type,
+            data_path=data_path,
+            target_column=job_config.target_column,
+            time_column=job_config.time_column,
+            id_column=job_config.id_column,
+            prediction_length=job_config.prediction_length,
+            problem_type=job_config.problem_type,
+            preset=job_config.preset,
+            time_limit=job_config.time_limit,
+            eval_metric=job_config.eval_metric,
+            advanced_config=adv_config,
+            timeseries_config=timeseries_config,
         )
 
-async def run_training_job_with_db(
-    job_id: str,
-    job_config: Optional[JobConfig] = None,
-    advanced_config: Optional[Dict[str, Any]] = None,
-    db: Optional[AsyncSession] = None,
-):
-        settings = get_settings()
-        tracker = None
+        await add_job_log(job_id, "Training completed successfully", db)
+        await _check_cancelled(job_id, db)
 
+        # Update progress with actual models trained from results
+        num_models = result.get("metrics", {}).get("num_models", 0)
+        best_model = result.get("metrics", {}).get("best_model", None)
+        await update_job_progress(
+            job_id,
+            progress=90,
+            db=db,
+            current_step="Processing results",
+            models_trained=num_models,
+            current_model=best_model,
+            eta_seconds=0  # Training complete, no ETA
+        )
+        await add_job_log(job_id, f"Trained {num_models} models, best: {best_model}", db)
+
+        # End the initial training run before logging individual models
+        if tracker:
+            tracker.end_run(status="FINISHED")
+
+        # Generate feature importance
+        feature_importance = None
         try:
-            job_config = await _get_job_config(job_config, job_id, db)
-            if not job_config:
-                logger.error(f"Job config unresolved for job: {job_id}")
-                return
-
-            await _check_cancelled(job_id, db)
-
-            # Update status to running
-            await update_job_status(
-                job_id, JobStatus.RUNNING, db, started_at=utc_now()
+            diagnostics = get_model_diagnostics()
+            fi_result = diagnostics.get_feature_importance(
+                model_path=result.get("model_path"),
+                model_type=job_config.model_type.value,
+                data_path=data_path
             )
-            await add_job_log(job_id, "Training job started", db)
+            if fi_result.get("features"):
+                feature_importance = fi_result["features"]
+        except Exception as e:
+            logger.warning(f"Could not generate feature importance: {e}")
 
-            # Initialize components
-            runner = AutoGluonRunner()
-            if not settings.standalone_mode:
-                tracker = ExperimentTracker()
-            else:
-                await add_job_log(job_id, "Experiment tracking disabled (standalone mode)", db)
-            data_path = job_config.file_path
-            logger.info(f"[TRAINING] data_path: {data_path}")
-            await add_job_log(job_id, f"Using data file: {data_path}", db)
+        # Get the predictor for hyperparameter extraction
+        predictor = None
+        model_path = result.get("model_path")
+        if model_path and os.path.exists(model_path):
+            try:
+                predictor = load_predictor(model_path, job_config.model_type.value)
+            except Exception as e:
+                logger.warning(f"Could not load predictor for hyperparameter logging: {e}")
 
-            await _check_cancelled(job_id, db)
+        # Log individual model runs to Domino Experiments (like notebooks do)
+        # This creates separate runs for each model in the leaderboard
+        # IMPORTANT: Use the DETECTED problem_type from AutoGluon (result["metrics"]["problem_type"]),
+        # NOT the user-provided job_config.problem_type which may be "auto".
+        # This ensures per-model metrics are calculated correctly for classification/regression.
+        detected_problem_type = result.get("metrics", {}).get("problem_type", "auto")
+        experiment_job_config = {
+            "job_id": job_id,
+            "name": job_config.name,
+            "model_type": job_config.model_type.value,
+            "target_column": job_config.target_column,
+            "preset": job_config.preset,
+            "time_limit": job_config.time_limit,
+            "eval_metric": job_config.eval_metric,
+            "problem_type": detected_problem_type,  # Use detected type, not user-provided "auto"
+        }
 
-            # Check if file exists
-            if not os.path.exists(data_path):
-                logger.error(f"[TRAINING DEBUG] FILE NOT FOUND: {data_path}")
-                await add_job_log(job_id, f"[DEBUG] FILE DOES NOT EXIST: {data_path}", db, "ERROR")
+        metrics_with_fi = result.get("metrics", {}).copy()
+        if feature_importance:
+            metrics_with_fi["feature_importance"] = feature_importance
 
-            # Set up experiment tracking (Domino uses MLflow)
-            experiment_name = job_config.experiment_name or f"{job_config.name}__{utc_now().strftime('%Y%m%d_%H%M%S')}"
-            run_id = None
-            if tracker:
-                tracker.create_experiment(experiment_name)
-                await add_job_log(job_id, f"MLflow experiment: {experiment_name}", db)
+        # Load test data for per-model metric calculation (like notebooks do)
+        test_data = None
+        try:
+            test_data = load_dataframe(data_path)
 
-                # Start MLflow run with comprehensive tags
-                run_id = tracker.start_run(
-                    run_name=job_config.name,
-                    tags={
-                        "job_id": job_id,
-                        "model_type": job_config.model_type.value,
-                        "target_column": job_config.target_column or "",
-                        "preset": job_config.preset or "medium_quality",
-                        "framework": "autogluon",
-                        "created_by": "automl-service",
-                        "domino_run": os.environ.get("DOMINO_RUN_ID", ""),
-                        "domino_project": job_config.project_name or os.environ.get("DOMINO_PROJECT_NAME", ""),
-                    },
+            # Add data shape info to experiment_job_config for logging
+            if test_data is not None:
+                experiment_job_config["n_train_samples"] = len(test_data)
+                experiment_job_config["n_features"] = len(test_data.columns) - 1  # Exclude target
+
+            logger.info(f"Loaded test data with {len(test_data)} rows for per-model metrics")
+        except Exception as e:
+            logger.warning(f"Could not load test data for per-model metrics: {e}")
+
+        if tracker:
+            await add_job_log(job_id, f"Logging {num_models} individual model runs to Domino Experiments", db)
+
+            run_id = tracker.log_training_results(
+                job_config=experiment_job_config,
+                metrics=metrics_with_fi,
+                leaderboard=result.get("leaderboard", {}),
+                model_path=model_path,
+                predictor=predictor,
+                test_data=test_data,
+            )
+
+            await add_job_log(job_id, f"Model runs logged to MLflow experiment", db)
+        await _check_cancelled(job_id, db)
+
+        # Update progress: finalizing
+        await update_job_progress(
+            job_id,
+            progress=95,
+            db=db,
+            current_step="Finalizing",
+            models_trained=num_models,
+            current_model=best_model,
+            eta_seconds=0
+        )
+
+        # Final progress update: complete
+        await update_job_progress(
+            job_id,
+            progress=100,
+            db=db,
+            current_step="Complete",
+            models_trained=num_models,
+            current_model=best_model,
+            eta_seconds=0
+        )
+
+        # Update job status to COMPLETED
+        await update_job_status(
+            job_id, JobStatus.COMPLETED, db, completed_at=utc_now()
+        )
+
+        # Auto-register to Domino Model Registry if configured
+        if job_config.auto_register and model_path and not settings.standalone_mode:
+            reg_model_name = job_config.register_name or f"{job_config.name}-{job_id[:8]}"
+            await add_job_log(
+                job_id,
+                f"Auto-registering model as '{reg_model_name}' in project {job_config.project_name or job_config.project_id}",
+                db,
+            )
+            try:
+                registry = get_domino_registry()
+                reg_result = registry.register_model(
+                    model_path=model_path,
+                    model_name=reg_model_name,
+                    model_type=job_config.model_type.value,
+                    description=f"AutoML model from job {job_config.name}",
+                    metrics=result.get("metrics", {}),
+                    params=training_params,
+                    experiment_name=experiment_name,  # Use same experiment as training
                     project_id=job_config.project_id,
                     project_name=job_config.project_name,
                 )
-
-            # Create progress reporter
-            progress_reporter = TrainingProgressReporter(job_id, db, tracker)
-
-            await add_job_log(job_id, "Starting AutoGluon training...", db)
-            await progress_reporter.on_progress_update(5, "Initializing AutoGluon")
-
-            # Parse advanced config from job_config.autogluon_config
-            adv_config = None
-            if advanced_config:
-                adv_config = parse_advanced_config(advanced_config)
-            elif job_config.autogluon_config:
-                # Config is stored as {"advanced": {...}, "timeseries": {...}}
-                if "advanced" in job_config.autogluon_config:
-                    adv_config = parse_advanced_config(job_config.autogluon_config["advanced"])
-                    logger.info(f"[TRAINING] Parsed advanced config: {adv_config}")
-                else:
-                    # Legacy format - try direct parsing
-                    adv_config = parse_advanced_config(job_config.autogluon_config)
-                    logger.info(f"[TRAINING] Parsed legacy config: {adv_config}")
-
-            # Log all training parameters to MLflow
-            training_params = {
-                "model_type": job_config.model_type.value,
-                "target_column": job_config.target_column,
-                "preset": job_config.preset,
-                "time_limit": job_config.time_limit,
-                "eval_metric": job_config.eval_metric,
-                "problem_type": job_config.problem_type.value if job_config.problem_type else "auto",
-            }
-
-            if job_config.model_type.value == "timeseries":
-                training_params.update({
-                    "time_column": job_config.time_column,
-                    "id_column": job_config.id_column,
-                    "prediction_length": job_config.prediction_length,
-                })
-
-            if adv_config:
-                training_params.update({
-                    "num_gpus": adv_config.num_gpus,
-                    "num_cpus": adv_config.num_cpus,
-                    "num_bag_folds": adv_config.num_bag_folds,
-                    "num_stack_levels": adv_config.num_stack_levels,
-                    "auto_stack": adv_config.auto_stack,
-                    "calibrate": adv_config.calibrate,
-                    "refit_full": adv_config.refit_full,
-                })
-
-            if tracker:
-                tracker.log_params(training_params)
-
-            await progress_reporter.on_progress_update(10, "Loading data")
-
-            # Parse timeseries config
-            timeseries_config = None
-            if job_config.autogluon_config:
-                if "timeseries" in job_config.autogluon_config:
-                    timeseries_config = job_config.autogluon_config["timeseries"]
-                    logger.info(f"[TRAINING] Parsed timeseries config: {timeseries_config}")
-
-            # Run training with advanced config
-            result = await runner.run_training(
-                job_id=job_id,
-                model_type=job_config.model_type,
-                data_path=data_path,
-                target_column=job_config.target_column,
-                time_column=job_config.time_column,
-                id_column=job_config.id_column,
-                prediction_length=job_config.prediction_length,
-                problem_type=job_config.problem_type,
-                preset=job_config.preset,
-                time_limit=job_config.time_limit,
-                eval_metric=job_config.eval_metric,
-                advanced_config=adv_config,
-                timeseries_config=timeseries_config,
-            )
-
-            await add_job_log(job_id, "Training completed successfully", db)
-            await _check_cancelled(job_id, db)
-
-            # Update progress with actual models trained from results
-            num_models = result.get("metrics", {}).get("num_models", 0)
-            best_model = result.get("metrics", {}).get("best_model", None)
-            await update_job_progress(
-                job_id,
-                progress=90,
-                db=db,
-                current_step="Processing results",
-                models_trained=num_models,
-                current_model=best_model,
-                eta_seconds=0  # Training complete, no ETA
-            )
-            await add_job_log(job_id, f"Trained {num_models} models, best: {best_model}", db)
-
-            # End the initial training run before logging individual models
-            if tracker:
-                tracker.end_run(status="FINISHED")
-
-            # Generate feature importance
-            feature_importance = None
-            try:
-                diagnostics = get_model_diagnostics()
-                fi_result = diagnostics.get_feature_importance(
-                    model_path=result.get("model_path"),
-                    model_type=job_config.model_type.value,
-                    data_path=data_path
-                )
-                if fi_result.get("features"):
-                    feature_importance = fi_result["features"]
-            except Exception as e:
-                logger.warning(f"Could not generate feature importance: {e}")
-
-            # Get the predictor for hyperparameter extraction
-            predictor = None
-            model_path = result.get("model_path")
-            if model_path and os.path.exists(model_path):
-                try:
-                    predictor = load_predictor(model_path, job_config.model_type.value)
-                except Exception as e:
-                    logger.warning(f"Could not load predictor for hyperparameter logging: {e}")
-
-            # Log individual model runs to Domino Experiments (like notebooks do)
-            # This creates separate runs for each model in the leaderboard
-            # IMPORTANT: Use the DETECTED problem_type from AutoGluon (result["metrics"]["problem_type"]),
-            # NOT the user-provided job_config.problem_type which may be "auto".
-            # This ensures per-model metrics are calculated correctly for classification/regression.
-            detected_problem_type = result.get("metrics", {}).get("problem_type", "auto")
-            experiment_job_config = {
-                "job_id": job_id,
-                "name": job_config.name,
-                "model_type": job_config.model_type.value,
-                "target_column": job_config.target_column,
-                "preset": job_config.preset,
-                "time_limit": job_config.time_limit,
-                "eval_metric": job_config.eval_metric,
-                "problem_type": detected_problem_type,  # Use detected type, not user-provided "auto"
-            }
-
-            metrics_with_fi = result.get("metrics", {}).copy()
-            if feature_importance:
-                metrics_with_fi["feature_importance"] = feature_importance
-
-            # Load test data for per-model metric calculation (like notebooks do)
-            test_data = None
-            try:
-                test_data = load_dataframe(data_path)
-
-                # Add data shape info to experiment_job_config for logging
-                if test_data is not None:
-                    experiment_job_config["n_train_samples"] = len(test_data)
-                    experiment_job_config["n_features"] = len(test_data.columns) - 1  # Exclude target
-
-                logger.info(f"Loaded test data with {len(test_data)} rows for per-model metrics")
-            except Exception as e:
-                logger.warning(f"Could not load test data for per-model metrics: {e}")
-
-            if tracker:
-                await add_job_log(job_id, f"Logging {num_models} individual model runs to Domino Experiments", db)
-
-                run_id = tracker.log_training_results(
-                    job_config=experiment_job_config,
-                    metrics=metrics_with_fi,
-                    leaderboard=result.get("leaderboard", {}),
-                    model_path=model_path,
-                    predictor=predictor,
-                    test_data=test_data,
-                )
-
-                await add_job_log(job_id, f"Model runs logged to MLflow experiment", db)
-            await _check_cancelled(job_id, db)
-
-            # Update progress: finalizing
-            await update_job_progress(
-                job_id,
-                progress=95,
-                db=db,
-                current_step="Finalizing",
-                models_trained=num_models,
-                current_model=best_model,
-                eta_seconds=0
-            )
-
-            # Final progress update: complete
-            await update_job_progress(
-                job_id,
-                progress=100,
-                db=db,
-                current_step="Complete",
-                models_trained=num_models,
-                current_model=best_model,
-                eta_seconds=0
-            )
-
-            # Update job status to COMPLETED
-            await update_job_status(
-                job_id, JobStatus.COMPLETED, db, completed_at=utc_now()
-            )
-
-            # Auto-register to Domino Model Registry if configured
-            if job_config.auto_register and model_path and not settings.standalone_mode:
-                reg_model_name = job_config.register_name or f"{job_config.name}-{job_id[:8]}"
-                await add_job_log(
-                    job_id,
-                    f"Auto-registering model as '{reg_model_name}' in project {job_config.project_name or job_config.project_id}",
-                    db,
-                )
-                try:
-                    registry = get_domino_registry()
-                    reg_result = registry.register_model(
-                        model_path=model_path,
-                        model_name=reg_model_name,
-                        model_type=job_config.model_type.value,
-                        description=f"AutoML model from job {job_config.name}",
-                        metrics=result.get("metrics", {}),
-                        params=training_params,
-                        experiment_name=experiment_name,  # Use same experiment as training
-                        project_id=job_config.project_id,
-                        project_name=job_config.project_name,
-                    )
-                    if reg_result.get("success"):
-                        await add_job_log(
-                            job_id,
-                            f"Model registered: {reg_result.get('model_name')} v{reg_result.get('model_version')}",
-                            db,
-                        )
-                    else:
-                        await add_job_log(
-                            job_id,
-                            f"Model registration returned failure: {reg_result.get('error', 'unknown')}",
-                            db,
-                            "WARNING",
-                        )
-                except Exception as e:
-                    logger.warning(f"Auto-registration failed: {e}")
+                if reg_result.get("success"):
                     await add_job_log(
                         job_id,
-                        f"Auto-registration failed: {e}",
+                        f"Model registered: {reg_result.get('model_name')} v{reg_result.get('model_version')}",
                         db,
-                        "ERROR",
                     )
+                else:
+                    await add_job_log(
+                        job_id,
+                        f"Model registration returned failure: {reg_result.get('error', 'unknown')}",
+                        db,
+                        "WARNING",
+                    )
+            except Exception as e:
+                logger.warning(f"Auto-registration failed: {e}")
+                await add_job_log(
+                    job_id,
+                    f"Auto-registration failed: {e}",
+                    db,
+                    "ERROR",
+                )
 
-            await add_job_log(
-                job_id,
-                f"Job completed. Best model: {result['metrics'].get('best_model')}",
-                db=db,
-            )
+        await add_job_log(
+            job_id,
+            f"Job completed. Best model: {result['metrics'].get('best_model')}",
+            db=db,
+        )
 
-            # End MLflow run with success status
-            if tracker:
-                try:
-                    tracker.end_run(status="FINISHED")
-                except Exception as mlflow_err:
-                    logger.warning(f"Could not end MLflow run: {mlflow_err}")
+        # End MLflow run with success status
+        if tracker:
+            try:
+                tracker.end_run(status="FINISHED")
+            except Exception as mlflow_err:
+                logger.warning(f"Could not end MLflow run: {mlflow_err}")
 
-            logger.info(f"Training job completed: {job_id}")
+        logger.info(f"Training job completed: {job_id}")
 
-        except asyncio.CancelledError:
-            logger.info(f"Training job cancelled: {job_id}")
-            await update_job_status(
-                job_id,
-                JobStatus.CANCELLED,
-                db,
-                completed_at=utc_now(),
-            )
-            await add_job_log(job_id, "Training cancelled", db, "WARNING")
-            if tracker:
-                try:
-                    tracker.end_run(status="KILLED")
-                except Exception:
-                    pass
-            raise  # Re-raise so the Task is properly marked cancelled
+    except asyncio.CancelledError:
+        logger.info(f"Training job cancelled: {job_id}")
+        await update_job_status(
+            job_id,
+            JobStatus.CANCELLED,
+            db,
+            completed_at=utc_now(),
+        )
+        await add_job_log(job_id, "Training cancelled", db, "WARNING")
+        if tracker:
+            try:
+                tracker.end_run(status="KILLED")
+            except Exception:
+                pass
+        raise  # Re-raise so the Task is properly marked cancelled
 
-        except Exception as e:
-            logger.exception(f"Training job failed: {job_id}")
+    except Exception as e:
+        logger.exception(f"Training job failed: {job_id}")
 
-            # Update job status to failed
-            await update_job_status(
-                job_id,
-                JobStatus.FAILED,
-                db,
-                error_message=str(e),
-                completed_at=utc_now(),
-            )
-            await add_job_log(job_id, f"Training failed: {str(e)}", db, "ERROR")
+        # Update job status to failed
+        await update_job_status(
+            job_id,
+            JobStatus.FAILED,
+            db,
+            error_message=str(e),
+            completed_at=utc_now(),
+        )
+        await add_job_log(job_id, f"Training failed: {str(e)}", db, "ERROR")
 
-            # End MLflow run with failure status
-            if tracker:
-                try:
-                    tracker.end_run(status="FAILED")
-                except Exception:
-                    pass
+        # End MLflow run with failure status
+        if tracker:
+            try:
+                tracker.end_run(status="FAILED")
+            except Exception:
+                pass
 
 
 # TODO this is not called from in here. Is it ever used in domino job?
