@@ -480,20 +480,36 @@ async def run_training_job_with_db(
                 raise RuntimeError(
                     f"Job {job_id} has no callback_url or callback_token — cannot persist results"
                 )
+            logger.info(f"POSTing results to callback URL: {job_config.callback_url}")
+            callback_payload = {
+                "metrics": result["metrics"],
+                "leaderboard": result["leaderboard"],
+                "model_path": result["model_path"],
+                "experiment_run_id": run_id,
+                "experiment_name": experiment_name,
+            }
+            logger.debug(f"Callback payload keys: {list(callback_payload.keys())}")
             async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    job_config.callback_url,
-                    params={"token": job_config.callback_token},
-                    json={
-                        "metrics": result["metrics"],
-                        "leaderboard": result["leaderboard"],
-                        "model_path": result["model_path"],
-                        "experiment_run_id": run_id,
-                        "experiment_name": experiment_name,
-                    },
-                    timeout=30.0,
-                )
-                response.raise_for_status()
+                try:
+                    response = await client.post(
+                        job_config.callback_url,
+                        params={"token": job_config.callback_token},
+                        json=callback_payload,
+                        timeout=30.0,
+                    )
+                    logger.info(f"Callback response status: {response.status_code}")
+                    if response.status_code >= 400:
+                        logger.error(f"Callback error response body: {response.text}")
+                    response.raise_for_status()
+                except httpx.ConnectError as e:
+                    logger.exception(f"Callback connection failed (URL: {job_config.callback_url})")
+                    raise
+                except httpx.HTTPStatusError as e:
+                    logger.error(f"Callback HTTP error {e.response.status_code}: {e.response.text}")
+                    raise
+                except Exception as e:
+                    logger.exception(f"Unexpected error during callback POST")
+                    raise
 
             # Final progress update: complete
             await update_job_progress(
@@ -586,7 +602,7 @@ async def run_training_job_with_db(
             raise  # Re-raise so the Task is properly marked cancelled
 
         except Exception as e:
-            logger.error(f"Training job failed: {job_id} - {str(e)}")
+            logger.exception(f"Training job failed: {job_id}")
 
             # Update job status to failed
             await update_job_status(
