@@ -29,11 +29,6 @@ async def get_job_paths(
     """
     Look up a job and return (model_path, model_type, file_path, problem_type).
 
-    model_path must be an MLflow URI (runs:/...). It is downloaded to the app's
-    local cache (settings.temp_path/mlflow_models/{run_id}/) via
-    download_mlflow_artifact so callers can load the model from disk. Raises
-    HTTP 500 if model_path is not a runs:/ URI or if the download fails.
-
     Raises HTTPException(404) if job not found.
     Raises HTTPException(400) if model_path not available.
     Raises HTTPException(500) if model_path is not an MLflow URI or download fails.
@@ -60,9 +55,8 @@ async def get_job_paths(
 
     # TODO: file_path refers to a dataset path in the training job's project, which is
     # inaccessible to this app (different project, no cross-project dataset mounting).
-    # Future: use the Domino Datasets API to download the file and cache it at
-    # settings.temp_path/mlflow_models/{run_id}/training_data/ so it is cleaned up
-    # alongside the rest of the job's cached artifacts when the job is deleted.
+    # Future: the file cache should use the Domino Datasets API to download the file and cache.
+    # this func would read that (populating the cache if missing).
     return (
         local_model_path,
         job.model_type.value,

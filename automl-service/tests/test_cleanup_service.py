@@ -248,7 +248,6 @@ class TestDeleteJobArtifacts:
         models_dir = str(tmp_data_dir["models"])
         job = make_job(name="del-model", status=JobStatus.COMPLETED)
         model_dir = _make_model_dir(models_dir, job.id, [100, 200])
-        job.model_path = f"runs:/fake-run-id/autogluon_model"
 
         svc = CleanupService()
         with patch("app.core.cleanup_service._delete_mlflow_runs", return_value=0), \
@@ -327,7 +326,6 @@ class TestDeleteJobArtifacts:
         models_dir = str(tmp_data_dir["models"])
         job = make_job(name="partial-fail", status=JobStatus.COMPLETED)
         model_dir = _make_model_dir(models_dir, job.id, [50])
-        job.model_path = f"runs:/fake-run-id/autogluon_model"
 
         with patch(
             "app.core.cleanup_service._delete_mlflow_runs",
@@ -438,12 +436,10 @@ class TestBulkCleanup:
 
         job1 = make_job(name="bulk-1", status=JobStatus.FAILED)
         model1 = _make_model_dir(models_dir, job1.id, [100])
-        job1.model_path = "runs:/fake-run-id-1/autogluon_model"
         db_session.add(job1)
 
         job2 = make_job(name="bulk-2", status=JobStatus.FAILED)
         model2 = _make_model_dir(models_dir, job2.id, [250])
-        job2.model_path = "runs:/fake-run-id-2/autogluon_model"
         db_session.add(job2)
 
         await db_session.commit()

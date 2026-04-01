@@ -38,19 +38,18 @@ class CleanupService:
         job_logs_deleted = 0
         registered_model_deleted = False
 
-        # 1. Local MLflow model cache (downloaded artifacts in the app's temp_path)
-        if job.model_path and job.model_path.startswith("runs:/"):
-            try:
-                from app.core.job_file_cache import cache_dir_for_job
-                cache_dir = cache_dir_for_job(job.id)
-                if os.path.isdir(cache_dir):
-                    model_files_size_bytes = _dir_size(cache_dir)
-                    shutil.rmtree(cache_dir)
-                    model_files_deleted = True
-                    logger.info(f"Deleted MLflow model cache {cache_dir} ({model_files_size_bytes} bytes)")
-            except Exception as e:
-                errors.append(f"model_files: {e}")
-                logger.warning(f"Failed to delete MLflow model cache for job {job.id}: {e}")
+        # 1. Job file cache (MLflow artifacts downloaded to app's temp_path)
+        try:
+            from app.core.job_file_cache import cache_dir_for_job
+            cache_dir = cache_dir_for_job(job.id)
+            if os.path.isdir(cache_dir):
+                model_files_size_bytes = _dir_size(cache_dir)
+                shutil.rmtree(cache_dir)
+                model_files_deleted = True
+                logger.info(f"Deleted job file cache {cache_dir} ({model_files_size_bytes} bytes)")
+        except Exception as e:
+            errors.append(f"model_files: {e}")
+            logger.warning(f"Failed to delete job file cache for job {job.id}: {e}")
 
         # 2. Upload file (only if data_source == "upload" and no other job shares it)
         if (
