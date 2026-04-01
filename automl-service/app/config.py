@@ -117,7 +117,7 @@ class Settings(BaseSettings):
     @property
     def is_domino_environment(self) -> bool:
         """Check if Domino runtime config exists for API calls/job launches."""
-        return self.domino_api_host is not None and bool(os.environ.get("DOMINO_API_PROXY"))
+        return self.domino_api_host is not None or bool(os.environ.get("DOMINO_API_PROXY"))
 
     @property
     def standalone_mode(self) -> bool:
