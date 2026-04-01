@@ -637,10 +637,12 @@ async def get_job_or_404(db: AsyncSession, job_id: str, owner_user_name: str) ->
     """Get job by id if user may retrieve the job"""
     job = await crud.get_job(db, job_id)
     if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     if job.domino_job_id:
         await asyncio.to_thread(_fetch_domino_job_or_throw, job.domino_job_id)
+    else:
+        raise HTTPException(status_code=500, detail=f"No domino job ID exists for job {job_id}")
     return job
 
 
