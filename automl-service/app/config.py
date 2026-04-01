@@ -150,13 +150,6 @@ class Settings(BaseSettings):
         return self.domino_api_host is not None and (has_proxy_auth or has_key_auth)
 
     @property
-    def job_callback_base_url(self) -> Optional[str]:
-        run_id = os.environ.get("DOMINO_RUN_ID")
-        if run_id:
-            return f"http://run-{run_id}.domino-compute.svc.cluster.local:8765"
-        return None
-
-    @property
     def standalone_mode(self) -> bool:
         """True when Domino platform services are unavailable.
 

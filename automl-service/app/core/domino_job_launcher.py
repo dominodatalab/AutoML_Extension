@@ -353,16 +353,6 @@ class DominoJobLauncher:
             else:
                 job_config_payload = job_config
 
-            callback_base_url = self.settings.job_callback_base_url
-            if not callback_base_url:
-                raise RuntimeError(
-                    "Cannot launch training job: DOMINO_RUN_ID is not set, "
-                    "so the callback URL cannot be derived."
-                )
-            job_config_payload["callback_url"] = (
-                f"{callback_base_url}/svc/v1/jobs/{job_id}/results"
-            )
-
             command = self._build_command_from_path(
                 self.TRAINING_RUNNER_PATH,
                 {

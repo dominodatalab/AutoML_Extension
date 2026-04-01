@@ -1,14 +1,12 @@
 """Job management endpoints."""
 
-from typing import Any, Dict, Optional
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db, get_project_context, get_request_project_id
-from app.db import crud
 from app.api.schemas.job import (
     BulkDeleteJobsRequest,
     BulkDeleteJobsResponse,
@@ -219,33 +217,3 @@ async def register_job_model(
     return await register_model_for_job(db, job_id, request)
 
 
-class JobResultsCallbackRequest(BaseModel):
-    metrics: Dict[str, Any]
-    leaderboard: Any
-    model_path: str
-    experiment_run_id: Optional[str] = None
-    experiment_name: Optional[str] = None
-
-
-@router.post("/{job_id}/results")
-async def job_results_callback(
-    job_id: str,
-    payload: JobResultsCallbackRequest,
-    token: str = Query(...),
-    db: AsyncSession = Depends(get_db),
-):
-    job = await crud.get_job(db, job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if not job.callback_token or token != job.callback_token:
-        raise HTTPException(status_code=403, detail="Invalid callback token")
-    await crud.update_job_results(
-        db,
-        job_id,
-        metrics=payload.metrics,
-        leaderboard=payload.leaderboard,
-        model_path=payload.model_path,
-        experiment_run_id=payload.experiment_run_id,
-        experiment_name=payload.experiment_name,
-    )
-    return {"ok": True}

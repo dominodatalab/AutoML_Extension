@@ -104,8 +104,6 @@ class Job(Base):
     registered_model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     registered_model_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
-    callback_token: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

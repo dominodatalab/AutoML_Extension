@@ -7,7 +7,6 @@ import os
 from typing import Any, Dict, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import httpx
 
 from app.config import get_settings
 from app.db.database import async_session_maker
@@ -253,11 +252,10 @@ async def run_training_job_with_db(
 
             # Initialize components
             runner = AutoGluonRunner()
-            if job_config.enable_mlflow and not settings.standalone_mode:
+            if not settings.standalone_mode:
                 tracker = ExperimentTracker()
             else:
-                reason = "not requested" if not job_config.enable_mlflow else "standalone mode"
-                await add_job_log(job_id, f"Experiment tracking disabled ({reason})", db)
+                await add_job_log(job_id, "Experiment tracking disabled (standalone mode)", db)
             data_path = job_config.file_path
             logger.info(f"[TRAINING] data_path: {data_path}")
             await add_job_log(job_id, f"Using data file: {data_path}", db)
@@ -474,42 +472,6 @@ async def run_training_job_with_db(
                 current_model=best_model,
                 eta_seconds=0
             )
-
-            # Update job with results
-            if not job_config.callback_url or not job_config.callback_token:
-                raise RuntimeError(
-                    f"Job {job_id} has no callback_url or callback_token — cannot persist results"
-                )
-            logger.info(f"POSTing results to callback URL: {job_config.callback_url}")
-            callback_payload = {
-                "metrics": result["metrics"],
-                "leaderboard": result["leaderboard"],
-                "model_path": result["model_path"],
-                "experiment_run_id": run_id,
-                "experiment_name": experiment_name,
-            }
-            logger.debug(f"Callback payload keys: {list(callback_payload.keys())}")
-            async with httpx.AsyncClient() as client:
-                try:
-                    response = await client.post(
-                        job_config.callback_url,
-                        params={"token": job_config.callback_token},
-                        json=callback_payload,
-                        timeout=30.0,
-                    )
-                    logger.info(f"Callback response status: {response.status_code}")
-                    if response.status_code >= 400:
-                        logger.error(f"Callback error response body: {response.text}")
-                    response.raise_for_status()
-                except httpx.ConnectError as e:
-                    logger.exception(f"Callback connection failed (URL: {job_config.callback_url})")
-                    raise
-                except httpx.HTTPStatusError as e:
-                    logger.error(f"Callback HTTP error {e.response.status_code}: {e.response.text}")
-                    raise
-                except Exception as e:
-                    logger.exception(f"Unexpected error during callback POST")
-                    raise
 
             # Final progress update: complete
             await update_job_progress(

@@ -715,7 +715,7 @@ class ExperimentTracker:
                     )
 
                 # Log model artifacts
-                if model_path and os.path.exists(model_path):
+                if model_path:
                     mlflow.log_artifacts(model_path, artifact_path="autogluon_model")
                     logger.info(f"Logged model artifacts from: {model_path}")
 

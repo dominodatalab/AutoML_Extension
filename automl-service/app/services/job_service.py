@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import os
-import uuid
 from typing import Optional
 
 from app.core.utils import utc_now
@@ -188,7 +187,6 @@ def build_job_model(
 
     return Job(
         name=job_name,
-        callback_token=str(uuid.uuid4()),
         description=job_request.description,
         owner=owner,
         project_id=project_id,
@@ -814,6 +812,57 @@ async def _mark_pending_job_failed_for_missing_data(
     return updated or job
 
 
+async def _fetch_mlflow_results(job_id: str) -> Optional[dict]:
+    """Fetch training results from MLflow for a completed Domino job."""
+    def _sync_fetch():
+        import json
+        import os
+        import tempfile
+
+        import mlflow
+
+        runs = mlflow.search_runs(
+            filter_string=f"tags.job_id = '{job_id}' and tags.run_type = 'evaluation_summary'",
+            search_all_experiments=True,
+        )
+        if runs.empty:
+            logger.warning("No MLflow evaluation_summary run found for job %s", job_id)
+            return None
+
+        row = runs.iloc[0]
+        run_id = row["run_id"]
+        client = mlflow.tracking.MlflowClient()
+        experiment_name = client.get_experiment(row["experiment_id"]).name
+
+        leaderboard = []
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                client.download_artifacts(run_id, "leaderboard.json", tmpdir)
+                lb_path = os.path.join(tmpdir, "leaderboard.json")
+                if os.path.exists(lb_path):
+                    with open(lb_path) as f:
+                        leaderboard = json.load(f).get("models", [])
+        except Exception as e:
+            logger.warning("Could not fetch leaderboard artifact for job %s: %s", job_id, e)
+
+        return {
+            "metrics": {
+                "best_model": row.get("params.best_model"),
+                "best_score": float(row["metrics.best_score"]) if row.get("metrics.best_score") is not None else None,
+                "num_models": int(row.get("metrics.num_models_trained") or 0),
+                "eval_metric": row.get("params.eval_metric"),
+                "problem_type": row.get("params.problem_type"),
+            },
+            "leaderboard": leaderboard,
+            "experiment_run_id": run_id,
+            "experiment_name": experiment_name,
+            "model_path": f"runs:/{run_id}/autogluon_model",
+        }
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _sync_fetch)
+
+
 async def _sync_domino_job_state(
     db: AsyncSession,
     job: Job,
@@ -921,12 +970,29 @@ async def _sync_domino_job_state(
         return job
 
     if terminal_status == JobStatus.COMPLETED:
-        updated = await crud.update_job_status(
-            db=db,
-            job_id=job.id,
-            status=JobStatus.COMPLETED,
-            completed_at=job.completed_at or utc_now(),
-        )
+        mlflow_results = None
+        try:
+            mlflow_results = await _fetch_mlflow_results(job.id)
+        except Exception:
+            logger.exception("Failed to fetch MLflow results for job %s", job.id)
+
+        if mlflow_results:
+            updated = await crud.update_job_results(
+                db=db,
+                job_id=job.id,
+                metrics=mlflow_results["metrics"],
+                leaderboard=mlflow_results["leaderboard"],
+                model_path=mlflow_results["model_path"],
+                experiment_run_id=mlflow_results["experiment_run_id"],
+                experiment_name=mlflow_results["experiment_name"],
+            )
+        else:
+            updated = await crud.update_job_status(
+                db=db,
+                job_id=job.id,
+                status=JobStatus.COMPLETED,
+                completed_at=job.completed_at or utc_now(),
+            )
         return updated or job
 
     if terminal_status == JobStatus.FAILED:
