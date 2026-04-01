@@ -1,5 +1,6 @@
 """Time series prediction trainer."""
 
+import json
 import logging
 from typing import Any, Dict, Optional
 
@@ -190,7 +191,7 @@ class TimeSeriesTrainer(BaseTrainer):
         }
 
         # Return leaderboard as list (schema expects List[Dict])
-        leaderboard_list = leaderboard.to_dict(orient="records")
+        leaderboard_list = json.loads(leaderboard.to_json(orient="records"))
 
         if progress:
             progress.on_progress(100, "Training completed successfully")
