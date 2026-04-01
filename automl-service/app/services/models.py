@@ -23,7 +23,6 @@ class JobConfig(BaseModel):
     project_id: Optional[str] = None
     project_name: Optional[str] = None
     project_owner: Optional[str] = None
-    execution_target: str = "local"
     domino_job_id: Optional[str] = None
     model_type: ModelType
     problem_type: Optional[ProblemType] = None

@@ -42,7 +42,6 @@ def training_worker_db_harness(make_job, tmp_path):
     def make_job_config(**overrides):
         defaults = {
             "file_path": str(training_csv),
-            "execution_target": "local",
             "experiment_name": "exp-1",
         }
         defaults.update(overrides)
@@ -133,7 +132,7 @@ class TestRunTrainingJob:
 
     @pytest.mark.asyncio
     async def test_domino_job_config_skips_db_session_and_delegates(self, make_job):
-        job_config = JobConfig.from_job(make_job(execution_target="domino_job"))
+        job_config = JobConfig.from_job(make_job())
         advanced_config = {"num_gpus": 1}
 
         with (

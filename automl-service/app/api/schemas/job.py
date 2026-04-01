@@ -360,11 +360,6 @@ class JobCreateRequest(BaseModel):
         None, description="Name for registered model"
     )
 
-    # Execution target
-    execution_target: Literal["domino_job"] = Field(
-        "domino_job",
-        description="Where to run training: external Domino Job",
-    )
     run_as_domino_job: bool = Field(
         False,
         description="Legacy flag for Domino execution; equivalent to execution_target='domino_job'",
@@ -395,7 +390,6 @@ class JobResponse(BaseModel):
     model_type: str
     problem_type: Optional[str] = None
     status: str
-    execution_target: str = "domino_job"
     domino_job_id: Optional[str] = None
     domino_job_url: Optional[str] = None
     domino_job_status: Optional[str] = None

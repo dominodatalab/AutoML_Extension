@@ -204,7 +204,6 @@ def build_job_model(
         auto_register=job_request.auto_register,
         register_name=job_request.register_name,
         status=JobStatus.PENDING,
-        execution_target="domino_job",
         autogluon_config=build_autogluon_config(job_request),
     )
 
@@ -219,9 +218,7 @@ def build_job_config(job: Job, *, file_path: Optional[str] = None) -> JobConfig:
 
 async def _count_active_domino_jobs(db: AsyncSession) -> int:
     """Count in-flight Domino jobs (pending + running)."""
-    jobs = await crud.get_jobs_by_statuses(
-        db, [JobStatus.PENDING, JobStatus.RUNNING], execution_target="domino_job"
-    )
+    jobs = await crud.get_jobs_by_statuses(db, [JobStatus.PENDING, JobStatus.RUNNING])
     return len(jobs)
 
 
@@ -372,11 +369,7 @@ async def list_jobs_filtered(
 
 async def _sync_active_domino_jobs_for_overview(db: AsyncSession) -> None:
     """Refresh active Domino-backed jobs so list views show current status."""
-    active_jobs = await crud.get_jobs_by_statuses(
-        db,
-        [JobStatus.PENDING, JobStatus.RUNNING],
-        execution_target="domino_job",
-    )
+    active_jobs = await crud.get_jobs_by_statuses(db, [JobStatus.PENDING, JobStatus.RUNNING])
     if active_jobs:
         for job in active_jobs:
             if not job.domino_job_id:
@@ -758,8 +751,6 @@ async def _sync_domino_job_state(
     This keeps UI state accurate when external runs fail before they can
     update our local database (for example, import/runtime bootstrap errors).
     """
-    if getattr(job, "execution_target", "local") != "domino_job":
-        return job
     if not job.domino_job_id:
         return job
 
@@ -906,17 +897,16 @@ async def reconcile_jobs_for_storage_cleanup(db: AsyncSession) -> dict:
 
     for job in active_jobs:
         active_jobs_checked += 1
-        if getattr(job, "execution_target", "local") == "domino_job":
-            domino_jobs_checked += 1
-            previous_status = job.status
-            previous_error = job.error_message
-            job = await _sync_domino_job_state(db, job, finalize_missing=True)
-            if (
-                previous_status != JobStatus.CANCELLED
-                and job.status == JobStatus.CANCELLED
-                and (job.error_message or previous_error or "") == _DOMINO_MISSING_JOB_MESSAGE
-            ):
-                missing_domino_jobs_finalized += 1
+        domino_jobs_checked += 1
+        previous_status = job.status
+        previous_error = job.error_message
+        job = await _sync_domino_job_state(db, job, finalize_missing=True)
+        if (
+            previous_status != JobStatus.CANCELLED
+            and job.status == JobStatus.CANCELLED
+            and (job.error_message or previous_error or "") == _DOMINO_MISSING_JOB_MESSAGE
+        ):
+            missing_domino_jobs_finalized += 1
 
         if job.status == JobStatus.PENDING and job.data_source in {"upload", "domino_dataset"}:
             updated_job = await _mark_pending_job_failed_for_missing_data(
@@ -1023,42 +1013,30 @@ async def cancel_job(db: AsyncSession, job_id: str) -> dict:
             detail=f"Cannot cancel job with status: {job.status.value}",
         )
 
-    if getattr(job, "execution_target", "local") == "domino_job":
-        stop_success = False
-        stop_error = None
-        if job.domino_job_id:
-            stop_result = await get_domino_job_launcher().stop_job(job.domino_job_id, project_id=job.project_id)
-            stop_success = bool(stop_result.get("success"))
-            stop_error = stop_result.get("error")
-            await crud.update_job_domino_fields(
-                db=db,
-                job_id=job_id,
-                domino_job_status="Cancelled" if stop_success else "CancelFailed",
-            )
-        await crud.update_job_status(
-            db,
-            job_id,
-            JobStatus.CANCELLED,
-            completed_at=utc_now(),
-            error_message=stop_error if stop_error and not stop_success else None,
+    stop_success = False
+    stop_error = None
+    if job.domino_job_id:
+        stop_result = await get_domino_job_launcher().stop_job(job.domino_job_id, project_id=job.project_id)
+        stop_success = bool(stop_result.get("success"))
+        stop_error = stop_result.get("error")
+        await crud.update_job_domino_fields(
+            db=db,
+            job_id=job_id,
+            domino_job_status="Cancelled" if stop_success else "CancelFailed",
         )
-        return {
-            "message": "Job cancelled",
-            "job_id": job_id,
-            "external_cancelled": stop_success,
-            "external_error": stop_error,
-        }
-
-    from app.core.job_queue import get_job_queue
-
-    task_cancelled = await get_job_queue().cancel(job_id)
     await crud.update_job_status(
         db,
         job_id,
         JobStatus.CANCELLED,
         completed_at=utc_now(),
+        error_message=stop_error if stop_error and not stop_success else None,
     )
-    return {"message": "Job cancelled", "job_id": job_id, "task_cancelled": task_cancelled}
+    return {
+        "message": "Job cancelled",
+        "job_id": job_id,
+        "external_cancelled": stop_success,
+        "external_error": stop_error,
+    }
 
 
 async def delete_job(db: AsyncSession, job_id: str) -> dict:

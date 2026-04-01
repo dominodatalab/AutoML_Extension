@@ -112,14 +112,20 @@ class TestIsDominoEnvironment:
         s = Settings(domino_api_host="https://example.domino.tech")
         assert s.is_domino_environment is True
 
-    def test_false_without_host(self, monkeypatch):
-        """False when domino_api_host is not set."""
+    def test_true_with_proxy_only(self, monkeypatch):
+        """True when DOMINO_API_PROXY is set even without domino_api_host."""
         monkeypatch.setenv("DOMINO_API_PROXY", "http://proxy:8080")
         s = Settings(domino_api_host=None)
-        assert s.is_domino_environment is False
+        assert s.is_domino_environment is True
 
-    def test_false_without_proxy(self, monkeypatch):
-        """False when host is set but DOMINO_API_PROXY is absent."""
+    def test_true_with_host_only(self, monkeypatch):
+        """True when domino_api_host is set even without DOMINO_API_PROXY."""
         monkeypatch.delenv("DOMINO_API_PROXY", raising=False)
         s = Settings(domino_api_host="https://example.domino.tech")
+        assert s.is_domino_environment is True
+
+    def test_false_with_neither(self, monkeypatch):
+        """False when neither domino_api_host nor DOMINO_API_PROXY is set."""
+        monkeypatch.delenv("DOMINO_API_PROXY", raising=False)
+        s = Settings(domino_api_host=None)
         assert s.is_domino_environment is False

@@ -28,7 +28,6 @@ pytestmark = pytest.mark.domino
 # ---------------------------------------------------------------------------
 
 VALID_TABULAR_JOB = {
-    "execution_target": "domino_job",
     "name": "test-tabular-job",
     "model_type": "tabular",
     "data_source": "upload",

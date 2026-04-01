@@ -301,7 +301,6 @@ class TestBuildJobModel:
             time_limit=120,
             eval_metric="accuracy",
             experiment_name="exp-1",
-            execution_target="domino_job",
         )
         job = build_job_model(
             job_request=req,
@@ -332,7 +331,6 @@ class TestBuildJobModel:
             time_column="ts",
             id_column="item_id",
             prediction_length=14,
-            execution_target="domino_job",
         )
         job = build_job_model(req, "ts-job", "alice", None, None)
         assert job.model_type == ModelType.TIMESERIES
@@ -340,14 +338,9 @@ class TestBuildJobModel:
         assert job.id_column == "item_id"
         assert job.prediction_length == 14
 
-    def test_execution_target_domino_job(self):
-        req = _make_create_request(execution_target="domino_job")
-        job = build_job_model(req, "job", "user", None, None)
-        assert job.execution_target == "domino_job"
-
     def test_autogluon_config_stored(self):
         adv = AdvancedAutoGluonConfig(num_gpus=1)
-        req = _make_create_request(advanced_config=adv, execution_target="domino_job")
+        req = _make_create_request(advanced_config=adv)
         job = build_job_model(req, "job", "user", None, None)
         assert job.autogluon_config is not None
         assert "advanced" in job.autogluon_config
@@ -361,7 +354,6 @@ class TestBuildJobConfig:
             name="transport-job",
             model_type=ModelType.TABULAR,
             problem_type=ProblemType.BINARY,
-            execution_target="domino_job",
             dataset_id="dataset-1",
         )
 
@@ -372,7 +364,6 @@ class TestBuildJobConfig:
         assert job_config.name == "transport-job"
         assert job_config.model_type == ModelType.TABULAR
         assert job_config.problem_type == ProblemType.BINARY
-        assert job_config.execution_target == "domino_job"
         assert job_config.dataset_id == "dataset-1"
 
         dumped = job_config.model_dump(mode="json")
@@ -661,7 +652,7 @@ class TestQueueCapacity:
     @pytest.mark.asyncio
     async def test_domino_queue_full_returns_429(self, db_session, mock_viewing_user):
         mock_viewing_user
-        req = _make_create_request(execution_target="domino_job")
+        req = _make_create_request()
         with (
             patch(
                 "app.services.job_service._count_active_domino_jobs",
@@ -702,23 +693,19 @@ class TestGetJobOr404:
     """Tests for fetching jobs with optional Domino validation."""
 
     @pytest.mark.asyncio
-    async def test_returns_local_job_without_domino_fetch(self, db_session, make_job):
+    async def test_raises_500_when_no_domino_job_id(self, db_session, make_job):
         job = make_job()
         db_session.add(job)
         await db_session.commit()
 
-        with patch(
-            "app.services.job_service._fetch_domino_job_or_throw",
-            new_callable=AsyncMock,
-        ) as mock_fetch:
-            result = await get_job_or_404(db_session, job.id, "test-user")
+        with pytest.raises(HTTPException) as exc_info:
+            await get_job_or_404(db_session, job.id, "test-user")
 
-        assert result.id == job.id
-        mock_fetch.assert_not_awaited()
+        assert exc_info.value.status_code == 500
 
     @pytest.mark.asyncio
     async def test_fetches_domino_job_when_domino_job_id_present(self, db_session, make_job):
-        job = make_job(execution_target="domino_job", domino_job_id="run-123")
+        job = make_job(domino_job_id="run-123")
         db_session.add(job)
         await db_session.commit()
 
@@ -733,7 +720,7 @@ class TestGetJobOr404:
 
     @pytest.mark.asyncio
     async def test_propagates_domino_fetch_error(self, db_session, make_job):
-        job = make_job(execution_target="domino_job", domino_job_id="run-123")
+        job = make_job(domino_job_id="run-123")
         db_session.add(job)
         await db_session.commit()
 
