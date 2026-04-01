@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import uuid
 from typing import Optional
 
 from app.core.utils import utc_now
@@ -187,6 +188,7 @@ def build_job_model(
 
     return Job(
         name=job_name,
+        callback_token=str(uuid.uuid4()),
         description=job_request.description,
         owner=owner,
         project_id=project_id,

@@ -65,6 +65,7 @@ async def run_migrations():
         ("jobs", "enable_mlflow", "BOOLEAN DEFAULT 0"),
         ("jobs", "auto_register", "BOOLEAN DEFAULT 0"),
         ("jobs", "register_name", "VARCHAR(255)"),
+        ("jobs", "callback_token", "VARCHAR(36)"),
     ]
 
     async with engine.begin() as conn:

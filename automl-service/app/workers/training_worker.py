@@ -7,6 +7,8 @@ import os
 from typing import Any, Dict, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import httpx
+
 from app.config import get_settings
 from app.db.database import async_session_maker
 from app.db import crud
@@ -474,15 +476,24 @@ async def run_training_job_with_db(
             )
 
             # Update job with results
-            await crud.update_job_results(
-                db,
-                job_id,
-                metrics=result["metrics"],
-                leaderboard=result["leaderboard"],
-                model_path=result["model_path"],
-                experiment_run_id=run_id,
-                experiment_name=experiment_name,
-            )
+            if not job_config.callback_url or not job_config.callback_token:
+                raise RuntimeError(
+                    f"Job {job_id} has no callback_url or callback_token — cannot persist results"
+                )
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    job_config.callback_url,
+                    params={"token": job_config.callback_token},
+                    json={
+                        "metrics": result["metrics"],
+                        "leaderboard": result["leaderboard"],
+                        "model_path": result["model_path"],
+                        "experiment_run_id": run_id,
+                        "experiment_name": experiment_name,
+                    },
+                    timeout=30.0,
+                )
+                response.raise_for_status()
 
             # Final progress update: complete
             await update_job_progress(

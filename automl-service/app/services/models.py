@@ -49,6 +49,8 @@ class JobConfig(BaseModel):
     registered_model_name: Optional[str] = None
     registered_model_version: Optional[str] = None
     created_at: datetime
+    callback_token: Optional[str] = None
+    callback_url: Optional[str] = None
 
     @classmethod
     def from_job(cls, job: Job, **overrides: Any) -> "JobConfig":
