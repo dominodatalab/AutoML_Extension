@@ -16,11 +16,10 @@ const presetOptions = [
 
 function Step3Configuration() {
   const { modelType, dataSource, training, setTraining, setJobInfo, jobName, jobDescription } = useWizard()
-  const { dominoJobs, modelRegistry } = useCapabilities()
+  const { modelRegistry } = useCapabilities()
   const isTimeSeries = modelType?.modelType === 'timeseries'
 
   const [localConfig, setLocalConfig] = useState({
-    executionTarget: training?.executionTarget || (dominoJobs ? 'domino_job' : 'local'),
     targetColumn: training?.targetColumn || '',
     timeColumn: training?.timeColumn || '',
     idColumn: training?.idColumn || '',
@@ -45,21 +44,13 @@ function Step3Configuration() {
     training?.timeseriesConfig || {}
   )
 
-  // Force local if Domino Jobs capability is unavailable
-  useEffect(() => {
-    if (!dominoJobs && localConfig.executionTarget === 'domino_job') {
-      setLocalConfig((prev) => ({ ...prev, executionTarget: 'local' }))
-    }
-  }, [dominoJobs])
-
-  // Get columns from data source
+// Get columns from data source
   const columns = dataSource?.columns || []
   const columnOptions = columns.map((col) => ({ value: col, label: col }))
 
   // Update wizard state when local config changes
   useEffect(() => {
     setTraining({
-      executionTarget: localConfig.executionTarget as 'local' | 'domino_job',
       targetColumn: localConfig.targetColumn,
       timeColumn: localConfig.timeColumn || undefined,
       idColumn: localConfig.idColumn || undefined,

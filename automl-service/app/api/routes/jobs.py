@@ -35,7 +35,6 @@ from app.services.job_service import (
     get_job_progress_response,
     get_job_response,
     get_job_status_response,
-    get_queue_status as get_queue_status_service,
     list_jobs_filtered,
     preview_cleanup as preview_cleanup_service,
     register_model_for_job,
@@ -68,12 +67,6 @@ async def preview_orphans(
 ):
     """Preview orphaned model dirs and upload files with no matching job."""
     return await find_orphans_checked(db, project_id=project_id)
-
-
-@router.get("/queue/status")
-async def get_queue_status():
-    """Get current job queue status."""
-    return get_queue_status_service()
 
 
 @router.get("/cleanup/preview")
@@ -178,7 +171,7 @@ async def list_jobs(
     status: Optional[str] = None,
     modelType: Optional[str] = None,
     owner: Optional[str] = None,
-    projectId: Optional[str] = None,
+    projectId: str = Depends(get_request_project_id),
     projectName: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):

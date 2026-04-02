@@ -1,14 +1,10 @@
 """Tests for app.services.job_service helper functions."""
 
-import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
-import httpx
 import pytest
-import pytest_asyncio
 from fastapi import HTTPException
 
 from app.api.generated.domino_public_api_client.models.job_logs_v1 import JobLogsV1
@@ -25,12 +21,10 @@ from app.api.schemas.job import (
 )
 from app.db.models import Job, JobLog, JobStatus, ModelType, ProblemType
 from app.services.job_service import (
-    _count_active_domino_jobs,
     _build_domino_job_logs,
     _is_domino_missing_error,
     _is_domino_terminal_status,
     _normalize_job_name,
-    _parse_get_job_details_response,
     _parse_statuses_csv,
     _terminal_status_from_domino,
     build_autogluon_config,
@@ -43,10 +37,7 @@ from app.services.job_service import (
     extract_metrics_leaderboard,
     get_job_logs,
     get_job_or_404,
-    get_queue_status,
-    list_jobs_filtered,
     normalize_job_leaderboard,
-    resolve_execution_target,
     resolve_job_list_filters,
     validate_job_create_request,
     validate_job_name_availability,
@@ -306,7 +297,6 @@ class TestBuildJobModel:
             time_limit=120,
             eval_metric="accuracy",
             experiment_name="exp-1",
-            execution_target="domino_job",
         )
         job = build_job_model(
             job_request=req,
@@ -314,7 +304,6 @@ class TestBuildJobModel:
             owner="bob",
             project_id="pid-1",
             project_name="my-proj",
-            execution_target="domino_job",
         )
         assert isinstance(job, Job)
         assert job.name == "my-job"
@@ -338,22 +327,16 @@ class TestBuildJobModel:
             time_column="ts",
             id_column="item_id",
             prediction_length=14,
-            execution_target="domino_job",
         )
-        job = build_job_model(req, "ts-job", "alice", None, None, execution_target="domino_job")
+        job = build_job_model(req, "ts-job", "alice", None, None)
         assert job.model_type == ModelType.TIMESERIES
         assert job.time_column == "ts"
         assert job.id_column == "item_id"
         assert job.prediction_length == 14
 
-    def test_execution_target_domino_job(self):
-        req = _make_create_request(execution_target="domino_job")
-        job = build_job_model(req, "job", "user", None, None)
-        assert job.execution_target == "domino_job"
-
     def test_autogluon_config_stored(self):
         adv = AdvancedAutoGluonConfig(num_gpus=1)
-        req = _make_create_request(advanced_config=adv, execution_target="domino_job")
+        req = _make_create_request(advanced_config=adv)
         job = build_job_model(req, "job", "user", None, None)
         assert job.autogluon_config is not None
         assert "advanced" in job.autogluon_config
@@ -367,7 +350,6 @@ class TestBuildJobConfig:
             name="transport-job",
             model_type=ModelType.TABULAR,
             problem_type=ProblemType.BINARY,
-            execution_target="domino_job",
             dataset_id="dataset-1",
         )
 
@@ -378,7 +360,6 @@ class TestBuildJobConfig:
         assert job_config.name == "transport-job"
         assert job_config.model_type == ModelType.TABULAR
         assert job_config.problem_type == ProblemType.BINARY
-        assert job_config.execution_target == "domino_job"
         assert job_config.dataset_id == "dataset-1"
 
         dumped = job_config.model_dump(mode="json")
@@ -391,29 +372,6 @@ class TestBuildJobConfig:
         job_config = build_job_config(job, file_path="/mnt/data/train.csv")
 
         assert job_config.file_path == "/mnt/data/train.csv"
-
-
-# ===========================================================================
-# resolve_execution_target
-# ===========================================================================
-
-
-class TestResolveExecutionTarget:
-    """Tests for resolve_execution_target."""
-
-
-    def test_explicit_domino_job(self):
-        req = _make_create_request(execution_target="domino_job")
-        assert resolve_execution_target(req) == "domino_job"
-
-    def test_legacy_run_as_domino_job_flag(self):
-        req = _make_create_request(run_as_domino_job=True)
-        assert resolve_execution_target(req) == "domino_job"
-
-
-# ===========================================================================
-# resolve_job_list_filters
-# ===========================================================================
 
 
 class TestResolveJobListFilters:
@@ -478,84 +436,6 @@ class TestResolveJobListFilters:
         _, _, _, pid, _ = resolve_job_list_filters(lr)
         assert pid == "pid-42"
 
-    @pytest.mark.asyncio
-    async def test_with_project_filters_includes_all_job_types(
-        self,
-        db_session,
-        make_job,
-        mock_viewing_user,
-    ):
-        mock_viewing_user
-        local_job = make_job(name="local-job", execution_target="local")
-        domino_job = make_job(
-            name="domino-job",
-            execution_target="domino_job",
-            status=JobStatus.COMPLETED,
-            domino_job_id="run-123",
-            project_name = "test-project",
-        )
-        db_session.add_all([local_job, domino_job])
-        await db_session.commit()
-
-        jobs = await list_jobs_filtered(
-            db=db_session,
-            list_request=_make_list_request(project_name="test-project"),
-        )
-
-        assert set([j.name for j in jobs]) == set(["local-job", "domino-job"])
-
-    @pytest.mark.asyncio
-    async def test_no_project_filters_excludes_domino_jobs(
-        self,
-        db_session,
-        make_job,
-        mock_viewing_user,
-    ):
-        mock_viewing_user
-        local_job = make_job(name="local-job", execution_target="local")
-        domino_job = make_job(
-            name="domino-job",
-            execution_target="domino_job",
-            status=JobStatus.COMPLETED,
-            domino_job_id="run-123",
-        )
-        db_session.add_all([local_job, domino_job])
-        await db_session.commit()
-
-        jobs = await list_jobs_filtered(db=db_session, list_request=_make_list_request())
-
-        returned_ids = {job.id for job in jobs}
-        assert local_job.id in returned_ids
-        assert domino_job.id not in returned_ids
-        assert all(job.execution_target != "domino_job" for job in jobs)
-
-    @pytest.mark.asyncio
-    async def test_blank_project_filters_exclude_domino_jobs(
-        self,
-        db_session,
-        make_job,
-        mock_viewing_user,
-    ):
-        mock_viewing_user
-        local_job = make_job(name="blank-local-job", execution_target="local")
-        domino_job = make_job(
-            name="blank-domino-job",
-            execution_target="domino_job",
-            status=JobStatus.COMPLETED,
-            domino_job_id="run-blank-123",
-        )
-        db_session.add_all([local_job, domino_job])
-        await db_session.commit()
-
-        jobs = await list_jobs_filtered(
-            db=db_session,
-            list_request=_make_list_request(project_id="", project_name=""),
-        )
-
-        returned_ids = {job.id for job in jobs}
-        assert local_job.id in returned_ids
-        assert domino_job.id not in returned_ids
-        assert all(job.execution_target != "domino_job" for job in jobs)
 
 
 # ===========================================================================
@@ -758,7 +638,7 @@ class TestCreateJobAuthorization:
     @pytest.mark.asyncio
     async def test_domino_job_launch_requires_start_permission(self, db_session, mock_viewing_user):
         mock_viewing_user
-        req = _make_create_request(execution_target="domino_job")
+        req = _make_create_request()
 
         with (
             patch(
@@ -812,7 +692,6 @@ class TestQueueCapacity:
     def _mock_settings(self, **overrides):
         """Build a settings mock with safe defaults for DB-interacting tests."""
         defaults = dict(
-            max_local_queue_size=10,
             max_domino_queue_size=20,
             domino_project_id=None,
             domino_project_name=None,
@@ -823,7 +702,7 @@ class TestQueueCapacity:
     @pytest.mark.asyncio
     async def test_domino_queue_full_returns_429(self, db_session, mock_viewing_user):
         mock_viewing_user
-        req = _make_create_request(execution_target="domino_job")
+        req = _make_create_request()
         with (
             patch(
                 "app.services.job_service._count_active_domino_jobs",
@@ -874,7 +753,6 @@ class TestCancelJob:
         mock_viewing_user
         job = make_job(
             status=JobStatus.PENDING,
-            execution_target="domino_job",
             domino_job_id="run-123",
             project_id="proj-1",
         )
@@ -923,7 +801,7 @@ class TestDeleteJob:
         mock_viewing_user,
     ):
         mock_viewing_user
-        job = make_job(execution_target="domino_job", domino_job_id="run-123")
+        job = make_job(domino_job_id="run-123")
         cleanup_service = MagicMock()
         cleanup_service.delete_job_artifacts = AsyncMock(return_value={"deleted_files": 1})
 
@@ -1017,23 +895,19 @@ class TestGetJobOr404:
     """Tests for fetching jobs with optional Domino validation."""
 
     @pytest.mark.asyncio
-    async def test_returns_local_job_without_domino_fetch(self, db_session, make_job):
+    async def test_raises_500_when_no_domino_job_id(self, db_session, make_job):
         job = make_job()
         db_session.add(job)
         await db_session.commit()
 
-        with patch(
-            "app.services.job_service._fetch_domino_job_or_throw",
-            new_callable=AsyncMock,
-        ) as mock_fetch:
-            result = await get_job_or_404(db_session, job.id, "test-user")
+        with pytest.raises(HTTPException) as exc_info:
+            await get_job_or_404(db_session, job.id, "test-user")
 
-        assert result.id == job.id
-        mock_fetch.assert_not_awaited()
+        assert exc_info.value.status_code == 500
 
     @pytest.mark.asyncio
     async def test_fetches_domino_job_when_domino_job_id_present(self, db_session, make_job):
-        job = make_job(execution_target="domino_job", domino_job_id="run-123")
+        job = make_job(domino_job_id="run-123")
         db_session.add(job)
         await db_session.commit()
 
@@ -1048,7 +922,7 @@ class TestGetJobOr404:
 
     @pytest.mark.asyncio
     async def test_propagates_domino_fetch_error(self, db_session, make_job):
-        job = make_job(execution_target="domino_job", domino_job_id="run-123")
+        job = make_job(domino_job_id="run-123")
         db_session.add(job)
         await db_session.commit()
 
@@ -1145,32 +1019,3 @@ class TestDominoJobLogs:
         mock_get_db_logs.assert_not_awaited()
 
 
-# ===========================================================================
-# get_queue_status includes limits
-# ===========================================================================
-
-
-class TestGetQueueStatusLimits:
-    """Tests for queue status response including capacity limits."""
-
-    def test_queue_status_includes_limits(self):
-        with (
-            patch("app.core.job_queue.get_job_queue") as mock_queue,
-            patch("app.services.job_service.get_settings") as mock_get_settings,
-        ):
-            mock_queue.return_value.get_queue_status.return_value = {
-                "max_concurrent_jobs": 2,
-                "running_jobs": 1,
-                "queued_jobs": 0,
-                "total_tracked": 1,
-                "shutting_down": False,
-            }
-            mock_get_settings.return_value = MagicMock(
-                max_local_queue_size=10,
-                max_domino_queue_size=20,
-            )
-
-            status = get_queue_status()
-            assert status["max_local_queue_size"] == 10
-            assert status["max_domino_queue_size"] == 20
-            assert "running_jobs" in status

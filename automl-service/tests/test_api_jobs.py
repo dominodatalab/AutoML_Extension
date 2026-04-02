@@ -32,7 +32,6 @@ TEST_PROJECT_ID = "test-project-id"
 JOB_CREATE_URL = f"/svc/v1/jobs?projectId={TEST_PROJECT_ID}"
 
 VALID_TABULAR_JOB = {
-    "execution_target": "domino_job",
     "name": "test-tabular-job",
     "model_type": "tabular",
     "data_source": "upload",
@@ -74,18 +73,17 @@ def _mock_job_infra():
     """Patch Domino-dependent services so job API tests run without a live Domino environment."""
     set_request_auth_header("Bearer test-token")
     try:
-        with patch("app.core.job_queue.get_job_queue", return_value=_mock_job_queue()), \
-             patch("app.services.job_service.get_domino_job_launcher", return_value=_mock_domino_launcher()), \
-             patch("app.services.project_resolver.resolve_project", side_effect=_fake_resolve_project), \
-             patch("app.services.job_service.require_domino_job_start"), \
-             patch("app.services.job_service.require_domino_job_stop"), \
-             patch("app.services.job_service.attach_external_links", side_effect=lambda job, logger: job), \
-             patch("app.services.job_service._sync_domino_job_state", new=AsyncMock(side_effect=lambda db, job, **kwargs: job)), \
-             patch("app.services.job_service._fetch_domino_job_or_throw", return_value=None), \
-             patch("app.services.job_service.require_domino_job_list"), \
-             patch("app.core.authorization.current_user_can_start_job", return_value=True), \
-             patch("app.core.authorization.current_user_can_stop_job", return_value=True), \
-             patch("app.core.authorization.current_user_can_list_jobs", return_value=True):
+        with patch("app.services.job_service.get_domino_job_launcher", return_value=_mock_domino_launcher()), \
+            patch("app.services.project_resolver.resolve_project", side_effect=_fake_resolve_project), \
+            patch("app.services.job_service.require_domino_job_start"), \
+            patch("app.services.job_service.require_domino_job_stop"), \
+            patch("app.services.job_service._attach_external_links", side_effect=lambda job: job), \
+            patch("app.services.job_service._sync_domino_job_state", new=AsyncMock(side_effect=lambda db, job, **kwargs: job)), \
+            patch("app.services.job_service._fetch_domino_job_or_throw", return_value=None), \
+            patch("app.services.job_service.require_domino_job_list"), \
+            patch("app.core.authorization.current_user_can_start_job", return_value=True), \
+            patch("app.core.authorization.current_user_can_stop_job", return_value=True), \
+            patch("app.core.authorization.current_user_can_list_jobs", return_value=True):
             yield
     finally:
         set_request_auth_header(None)
@@ -155,7 +153,6 @@ async def test_create_timeseries_job_missing_time_column(app_client):
         "file_path": "/tmp/test.csv",
         "target_column": "value",
         "prediction_length": 10,
-        "execution_target": "domino_job",
         # time_column is missing
     }
     with _mock_job_infra():
@@ -238,7 +235,7 @@ async def test_list_jobs_empty(app_client, monkeypatch):
     from app.core import authorization as auth
 
     with _mock_job_infra():
-        response = await app_client.get("/svc/v1/jobs")
+        response = await app_client.get("/svc/v1/jobs", params={"projectId": "test-project-id"})
 
     assert response.status_code == 200
     body = response.json()
@@ -264,7 +261,7 @@ async def test_list_jobs_empty_from_domino_project(app_client, monkeypatch):
     )
 
     with _mock_job_infra():
-        response = await app_client.get("/svc/v1/jobs", params={"project_id": "1"})
+        response = await app_client.get("/svc/v1/jobs", params={"projectId": "1"})
 
     assert response.status_code == 200
     body = response.json()
@@ -280,8 +277,7 @@ async def test_list_jobs_after_creation(app_client):
         create_resp = await app_client.post("/svc/v1/jobs", json=VALID_TABULAR_JOB, params={"projectId": "test-project-id"})
         assert create_resp.status_code == 200
 
-        # List by projectName so domino_job execution target is included
-        list_resp = await app_client.get("/svc/v1/jobs", params={"projectName": "test-project"})
+        list_resp = await app_client.get("/svc/v1/jobs", params={"projectId": "test-project-id"})
 
     assert list_resp.status_code == 200
     body = list_resp.json()

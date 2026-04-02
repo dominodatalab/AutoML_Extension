@@ -72,7 +72,6 @@ async def get_jobs(
     owner: Optional[str] = None,
     project_id: Optional[str] = None,
     project_name: Optional[str] = None,
-    execution_target: Optional[str] = None,
 ) -> Sequence[Job]:
     """Get all jobs with optional filtering.
 
@@ -85,12 +84,8 @@ async def get_jobs(
         owner: Filter by owner username (from Domino header)
         project_id: Filter by project ID (from Domino environment)
         project_name: Filter by project name (from Domino environment)
-        execution_target: Filter by job execution target. If none, fetches all
     """
     query = select(Job).order_by(desc(Job.created_at))
-
-    if execution_target:
-        query = query.where(Job.execution_target == execution_target)
 
     if status:
         query = query.where(Job.status == status)
@@ -118,12 +113,9 @@ async def get_jobs(
 async def get_jobs_by_statuses(
     db: AsyncSession,
     statuses: list[JobStatus],
-    execution_target: Optional[str] = None,
 ) -> Sequence[Job]:
     """Get jobs matching any of the given statuses, ordered by created_at (FIFO)."""
     query = select(Job).where(Job.status.in_(statuses))
-    if execution_target is not None:
-        query = query.where(Job.execution_target == execution_target)
     query = query.order_by(Job.created_at)
     result = await db.execute(query)
     return result.scalars().all()

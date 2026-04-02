@@ -150,7 +150,6 @@ async def test_per_request_user_context_isolation_via_api(app_client, monkeypatc
         "/svc/v1/jobs",
         params={"projectId": "test-project-id"},
         json={
-            "execution_target": "domino_job",
             "name": "req1",
             "model_type": "tabular",
             "data_source": "upload",
@@ -167,7 +166,6 @@ async def test_per_request_user_context_isolation_via_api(app_client, monkeypatc
         "/svc/v1/jobs",
         params={"projectId": "test-project-id"},
         json={
-            "execution_target": "domino_job",
             "name": "req2",
             "model_type": "tabular",
             "data_source": "upload",

@@ -36,7 +36,6 @@ class TestJobCreateRequest:
         assert req.target_column == "target"
         assert req.preset == "medium_quality_faster_train"  # default
         assert req.time_limit == 3600  # default
-        assert req.execution_target == "local"  # default
         assert req.auto_register is False
 
     def test_valid_tabular_full(self):
@@ -56,7 +55,6 @@ class TestJobCreateRequest:
             experiment_name="exp-1",
             auto_register=True,
             register_name="my-model",
-            execution_target="domino_job",
         )
         assert req.description == "A full test"
         assert req.problem_type == "binary"
@@ -64,7 +62,6 @@ class TestJobCreateRequest:
         assert req.feature_columns == ["age", "income"]
         assert req.preset == "best_quality"
         assert req.time_limit == 7200
-        assert req.execution_target == "domino_job"
 
     def test_valid_timeseries(self):
         """Valid timeseries request with time_column and prediction_length."""

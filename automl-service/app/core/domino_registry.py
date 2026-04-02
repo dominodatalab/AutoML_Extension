@@ -82,17 +82,6 @@ class DominoModelRegistry:
             mlflow.set_tracking_uri(tracking_uri)
             logger.info(f"MLflow tracking URI: {tracking_uri}")
 
-        # Set authentication token for MLflow
-        # Domino provides MLFLOW_TRACKING_TOKEN in workspaces
-        # For Apps, we may need to use DOMINO_API_KEY
-        mlflow_token = os.environ.get("MLFLOW_TRACKING_TOKEN")
-        if not mlflow_token:
-            # Try to get from Domino API key
-            api_key = self.settings.effective_api_key
-            if api_key:
-                os.environ["MLFLOW_TRACKING_TOKEN"] = api_key
-                logger.info("Set MLFLOW_TRACKING_TOKEN from DOMINO_API_KEY")
-
         # Domino's proxy multipart endpoint can mis-handle MLflow logged-model artifact paths
         # (models:/m-...); keep multipart opt-in instead of forcing it on.
         if "MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD" not in os.environ:
