@@ -14,10 +14,6 @@ function getDisplayStatus(job: Job): string {
   return job.status
 }
 
-function getExecutionTarget(job: Job): string {
-  return job.execution_target === 'domino_job' ? 'Domino Job' : 'Local'
-}
-
 interface JobCardViewProps {
   jobs: Job[]
   onDeleteRequest: (job: Job) => void
@@ -55,9 +51,6 @@ export function JobCardView({ jobs, onDeleteRequest, selectedIds, onToggleJob }:
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-xs text-domino-text-muted capitalize">{job.model_type}</p>
-                  <p className="text-xs text-domino-text-secondary mt-0.5">
-                    Execution: {getExecutionTarget(job)}
-                  </p>
                   <Link
                     to={buildAppPath(`/jobs/${job.id}`)}
                     className="text-base font-medium text-domino-accent-purple hover:underline block truncate"

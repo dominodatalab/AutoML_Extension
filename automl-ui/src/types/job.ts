@@ -1,7 +1,6 @@
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 export type ModelType = 'tabular' | 'timeseries'
 export type ProblemType = 'binary' | 'multiclass' | 'regression' | 'quantile'
-export type ExecutionTarget = 'local' | 'domino_job'
 export type Preset =
   | 'best_quality'
   | 'high_quality'
@@ -136,7 +135,6 @@ export interface Job {
   model_type: ModelType
   problem_type?: ProblemType
   status: JobStatus
-  execution_target?: ExecutionTarget
   domino_job_id?: string
   domino_job_url?: string
   domino_job_status?: string
@@ -177,8 +175,6 @@ export interface JobCreateRequest {
   description?: string
   model_type: ModelType
   problem_type?: ProblemType
-  execution_target?: ExecutionTarget
-  run_as_domino_job?: boolean
   domino_hardware_tier_name?: string
   domino_environment_id?: string
   data_source: 'upload' | 'domino_dataset' | 'mounted'

@@ -97,15 +97,7 @@ The `app.sh` script starts both backend and frontend as a combined Domino App:
 
 ### Training Execution Modes
 
-Training requests support two execution targets:
-
-- `local` (default): Runs in the app process using the in-app queue
-- `domino_job`: Launches an external Domino Job via `python-domino`
-
-Both modes are available from the UI wizard and API payloads via:
-
-- `execution_target`: `"local"` or `"domino_job"`
-- `run_as_domino_job`: legacy boolean alias for external execution
+Training requests lLaunch an external Domino Job via `python-domino`.
 
 ### Async EDA Profiling
 

@@ -65,8 +65,6 @@ export function useWizard() {
       description: wizard.jobDescription || undefined,
       model_type: wizard.modelType.modelType,
       problem_type: wizard.modelType.problemType,
-      execution_target: wizard.training.executionTarget,
-      run_as_domino_job: wizard.training.executionTarget === 'domino_job',
       data_source: wizard.dataSource.type,
       dataset_id: wizard.dataSource.datasetId,
       file_path: wizard.dataSource.filePath,

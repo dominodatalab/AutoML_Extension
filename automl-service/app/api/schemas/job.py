@@ -360,10 +360,6 @@ class JobCreateRequest(BaseModel):
         None, description="Name for registered model"
     )
 
-    run_as_domino_job: bool = Field(
-        False,
-        description="Legacy flag for Domino execution; equivalent to execution_target='domino_job'",
-    )
     domino_hardware_tier_name: Optional[str] = Field(
         None,
         description="Optional Domino hardware tier name for external training jobs",

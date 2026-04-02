@@ -153,7 +153,6 @@ async def test_create_timeseries_job_missing_time_column(app_client):
         "file_path": "/tmp/test.csv",
         "target_column": "value",
         "prediction_length": 10,
-        "execution_target": "domino_job",
         # time_column is missing
     }
     with _mock_job_infra():
