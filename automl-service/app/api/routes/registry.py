@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.domino_registry import get_domino_registry
-from app.core.utils import remap_shared_path
 from app.db import crud
 from app.db.models import RegisteredModel as DBRegisteredModel
 from app.dependencies import get_db
@@ -149,14 +148,10 @@ async def register_model(request: RegisterModelRequest, db: AsyncSession = Depen
 
             logger.info(f"Built tags={tags}, metrics={metrics} from job {request.job_id}")
 
-    # Use request-provided experiment name if given; otherwise let the
-    # registry create a new experiment scoped to *this* project.
-    # Do NOT reuse the training job's experiment_name because it may
-    # belong to a different Domino project (cross-project permission error).
     experiment_name = request.experiment_name
 
     result = registry.register_model(
-        model_path=remap_shared_path(request.model_path),
+        model_path=request.model_path,
         model_name=request.model_name,
         model_type=request.model_type,
         description=request.description,
@@ -230,7 +225,7 @@ async def list_registered_models(db: AsyncSession = Depends(get_db), *, project_
             domino_model_id=m.domino_model_id,
             deployed=m.deployed,
             created_at=m.created_at,
-            model_path=remap_shared_path(job.model_path) if job and job.model_path else None,
+            model_path=job.model_path if job else None,
             model_type=job.model_type.value if job else None,
             metrics=numeric_metrics,
         ))

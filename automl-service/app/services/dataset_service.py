@@ -35,6 +35,7 @@ from app.core.dataset_mounts import resolve_dataset_mount_paths
 from app.core.dataset_manager import DominoDatasetManager
 
 from app.services import dataset_file_bytes
+from app.services.dataset_file_bytes import _is_unset
 
 ALLOWED_UPLOAD_EXTENSIONS = (".csv", ".parquet", ".pq")
 DEFAULT_PREVIEW_LIMIT = 100

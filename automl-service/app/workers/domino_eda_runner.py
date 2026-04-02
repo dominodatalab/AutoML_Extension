@@ -40,9 +40,7 @@ def main() -> None:
     from app.core.data_profiler import get_data_profiler
     from app.core.eda_job_store import get_eda_job_store
     from app.core.ts_profiler import get_ts_profiler
-    from app.core.utils import remap_shared_path
-
-    file_path = remap_shared_path(args.file_path)
+    file_path = args.file_path
 
     store = get_eda_job_store()
     store.update_request(args.request_id, status="running")

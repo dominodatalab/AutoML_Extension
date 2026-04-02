@@ -9,7 +9,6 @@ from typing import Optional
 from fastapi import HTTPException
 
 from app.core.domino_model_api import get_domino_model_api
-from app.core.utils import remap_shared_path
 from app.db import crud
 from app.db.models import JobStatus
 from app.dependencies import get_db_session
@@ -83,7 +82,7 @@ async def deploy_from_job(
         )
 
     deploy_name = model_name or job.name or f"automl-model-{job_id[:8]}"
-    model_path = remap_shared_path(job.model_path)
+    model_path = job.model_path
     if not model_path:
         raise HTTPException(status_code=400, detail="Model path not found for this job")
     if not os.path.isdir(model_path):
