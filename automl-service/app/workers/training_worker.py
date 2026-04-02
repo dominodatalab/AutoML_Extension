@@ -99,12 +99,7 @@ async def _check_cancelled(
     job_id: str,
     db_session: Optional[Any] = None,
 ) -> None:
-    """Raise CancelledError if the job has been cancelled via queue or DB status."""
-    from app.core.job_queue import get_job_queue
-    if get_job_queue().is_job_cancelled(job_id):
-        raise asyncio.CancelledError(f"Job {job_id} cancelled via queue")
-
-    # Domino jobs run outside the in-process queue, so cancellation is reflected in DB.
+    """Raise CancelledError if the job has been cancelled in the database."""
     if db_session is not None:
         job = await crud.get_job(db_session, job_id)
         if job and job.status == JobStatus.CANCELLED:

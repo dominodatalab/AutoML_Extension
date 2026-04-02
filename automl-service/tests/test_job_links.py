@@ -36,7 +36,6 @@ def _stub_job(**overrides) -> Job:
         owner="test-user",
         project_name="test-project",
         project_id="project-001",
-        execution_target="domino_job",
         domino_job_id="run-abc-123",
         experiment_run_id=None,
         experiment_name=None,

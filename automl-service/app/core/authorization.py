@@ -50,6 +50,25 @@ def _current_user_can_list_jobs(client, project_id: str) -> bool:
     )
     return authorized_action_allowed(client, action)
 
+
+def _current_user_can_start_job(client, project_id: str) -> bool:
+    action = AuthorizedActionRequestItem(
+        id=f"job.project.start_job-{project_id}",
+        code="job.project.start_job",
+        context={"projectId": project_id},
+    )
+    return authorized_action_allowed(client, action)
+
+
+def _current_user_can_stop_job(client, job_id: str) -> bool:
+    action = AuthorizedActionRequestItem(
+        id=f"job.project.stop_job-{job_id}",
+        code="job.project.stop_job",
+        context={"jobId": job_id},
+    )
+    return authorized_action_allowed(client, action)
+
+
 def current_user_can_list_jobs(project_id: Optional[str] = None) -> bool:
     try:
         client = get_domino_public_api_client_sync()
@@ -59,9 +78,45 @@ def current_user_can_list_jobs(project_id: Optional[str] = None) -> bool:
         logger.exception("Failed to resolve project job listing permissions")
         return False
 
-def require_job_list(project_id: Optional[str] = None) -> None:
+
+def current_user_can_start_job(project_id: Optional[str] = None) -> bool:
+    try:
+        client = get_domino_public_api_client_sync()
+        effective_project_id = project_id or resolve_domino_project_id()
+        return _current_user_can_start_job(client, effective_project_id)
+    except Exception:
+        logger.exception("Failed to resolve project job start permissions")
+        return False
+
+
+def current_user_can_stop_job(job_id: str) -> bool:
+    try:
+        client = get_domino_public_api_client_sync()
+        return _current_user_can_stop_job(client, job_id)
+    except Exception:
+        logger.exception("Failed to resolve job stop permissions")
+        return False
+
+
+def require_domino_job_list(project_id: Optional[str] = None) -> None:
     if not current_user_can_list_jobs(project_id=project_id):
         raise HTTPException(
             status_code=403,
             detail="This operation requires permission to list jobs in the target project",
+        )
+
+
+def require_domino_job_start(project_id: Optional[str] = None) -> None:
+    if not current_user_can_start_job(project_id=project_id):
+        raise HTTPException(
+            status_code=403,
+            detail="This operation requires permission to start jobs in the target project",
+        )
+
+
+def require_domino_job_stop(job_id: str) -> None:
+    if not current_user_can_stop_job(job_id=job_id):
+        raise HTTPException(
+            status_code=403,
+            detail="This operation requires permission to stop the target job",
         )

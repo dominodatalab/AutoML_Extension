@@ -84,8 +84,6 @@ class Settings(BaseSettings):
                 object.__setattr__(self, field, default)
 
     # Domino environment (auto-populated in Domino)
-    domino_api_key: Optional[str] = None  # DOMINO_API_KEY for REST API access
-    domino_user_api_key: Optional[str] = None  # Legacy - DOMINO_USER_API_KEY
     domino_api_host: Optional[str] = None  # e.g., https://se-demo.domino.tech
     domino_project_id: Optional[str] = None
     domino_project_name: Optional[str] = None
@@ -97,28 +95,8 @@ class Settings(BaseSettings):
     domino_eda_hardware_tier_name: Optional[str] = None
     domino_eda_environment_id: Optional[str] = None
 
-    @property
-    def effective_api_key(self) -> Optional[str]:
-        """Get the effective API key (prefer DOMINO_API_KEY over DOMINO_USER_API_KEY)."""
-        if self.domino_api_key:
-            return self.domino_api_key
-        if self.domino_user_api_key:
-            return self.domino_user_api_key
-
-        token_file = os.environ.get("DOMINO_TOKEN_FILE")
-        if not token_file:
-            return None
-
-        try:
-            with open(token_file, "r", encoding="utf-8") as handle:
-                token = handle.read().strip()
-            return token or None
-        except OSError:
-            return None
-
     # MLflow - auto-populated in Domino workspaces
     mlflow_tracking_uri: Optional[str] = None
-    mlflow_tracking_token: Optional[str] = None  # MLFLOW_TRACKING_TOKEN
 
     # Training defaults
     default_time_limit: int = 3600
@@ -126,8 +104,6 @@ class Settings(BaseSettings):
     default_preview_rows: int = 10
     max_shap_samples: int = 100
     max_scatter_points: int = 500
-    max_concurrent_jobs: int = 2
-    max_local_queue_size: int = 10
     max_domino_queue_size: int = 20
 
     # CORS
@@ -140,14 +116,8 @@ class Settings(BaseSettings):
 
     @property
     def is_domino_environment(self) -> bool:
-        """Check if Domino runtime config exists for API calls/job launches.
-
-        Domino Apps/Runs can authenticate through DOMINO_API_PROXY without an
-        explicit API key environment variable.
-        """
-        has_proxy_auth = bool(os.environ.get("DOMINO_API_PROXY"))
-        has_key_auth = self.effective_api_key is not None
-        return self.domino_api_host is not None and (has_proxy_auth or has_key_auth)
+        """Check if Domino runtime config exists for API calls/job launches."""
+        return self.domino_api_host is not None or bool(os.environ.get("DOMINO_API_PROXY"))
 
     @property
     def standalone_mode(self) -> bool:

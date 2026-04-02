@@ -60,6 +60,6 @@ async def get_job_paths(
     return (
         local_model_path,
         job.model_type.value,
-        None,
+        job.file_path,
         job.problem_type.value if job.problem_type else None,
     )

@@ -20,28 +20,29 @@ def profiler():
 class TestProfileFile:
     """Tests for DataProfiler.profile_file."""
 
-    def test_csv_loads_and_profiles(self, profiler, tabular_csv):
-        result = profiler.profile_file(tabular_csv)
-        assert result["summary"]["total_rows"] == 200
-        assert result["summary"]["total_columns"] == 8
+    @pytest.mark.asyncio
+    async def test_reads_dataset_file_bytes_via_data_api(self, profiler, monkeypatch):
+        calls = []
+
+        async def fake_fetch(dataset_id: str, file_path: str) -> bytes:
+            calls.append((dataset_id, file_path))
+            return b"id,feature,target\n1,10,0\n2,20,1\n"
+
+        monkeypatch.setattr(
+            "app.core.data_profiler.dataset_file_bytes.fetch",
+            fake_fetch,
+        )
+
+        result = await profiler.profile_file(
+            dataset_id="ds-123",
+            file_path="folder/train.csv",
+        )
+
+        assert calls == [("ds-123", "folder/train.csv")]
+        assert result["summary"]["total_rows"] == 2
+        assert result["summary"]["total_columns"] == 3
         assert isinstance(result["columns"], list)
-        assert len(result["columns"]) == 8
-
-    def test_parquet_loads_and_profiles(self, profiler, parquet_file):
-        result = profiler.profile_file(parquet_file)
-        assert result["summary"]["total_rows"] == 200
-        assert len(result["columns"]) > 0
-
-    def test_unsupported_format_raises(self, profiler, tmp_path):
-        bad_path = str(tmp_path / "data.unsupported")
-        with open(bad_path, "w") as f:
-            f.write("hello")
-        with pytest.raises(ValueError, match="Unsupported file format"):
-            profiler.profile_file(bad_path)
-
-    def test_file_not_found_raises(self, profiler):
-        with pytest.raises(FileNotFoundError, match="File not found"):
-            profiler.profile_file("/nonexistent/path/data.csv")
+        assert len(result["columns"]) == 3
 
 
 # ---------------------------------------------------------------------------

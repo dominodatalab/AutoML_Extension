@@ -1,4 +1,4 @@
-import { ModelType, ProblemType, Preset, ExecutionTarget, AdvancedAutoGluonConfig, TimeSeriesAdvancedConfig } from './job'
+import { ModelType, ProblemType, Preset, AdvancedAutoGluonConfig, TimeSeriesAdvancedConfig } from './job'
 
 export interface DataSourceConfig {
   type: 'upload' | 'domino_dataset'
@@ -15,7 +15,6 @@ export interface ModelTypeConfig {
 }
 
 export interface TrainingConfig {
-  executionTarget: ExecutionTarget
   targetColumn: string
   timeColumn?: string
   idColumn?: string

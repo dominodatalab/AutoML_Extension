@@ -1,0 +1,21 @@
+name: Build docker image on push
+
+on:
+  push:
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.ref_name }}
+    - name: Build the Docker image
+      run: |
+        echo "FROM python:3.10-slim-bullseye" | cat - Dockerfile | docker build \
+            --build-arg EXTENSION_VERSION=${{ github.ref_name }} \
+            --build-arg GITHUB_ORG=${{ github.repository_owner }} \
+            -

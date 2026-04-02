@@ -8,7 +8,6 @@ import pytest
 from app.workers.training_worker import add_job_log
 
 
-
 class TestAddJobLog:
     """Tests for stdout/logger emission when no DB session is available."""
 

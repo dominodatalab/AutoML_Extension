@@ -22,7 +22,6 @@ class TestJobErrors:
                 "target_column": "target",
                 "preset": "medium_quality_faster_train",
                 "time_limit": 60,
-                "execution_target": "local",
             },
         )
         # Service should accept the job but it will fail during execution,
@@ -56,7 +55,6 @@ class TestJobErrors:
                 # time_column missing
                 "preset": "fast_training",
                 "time_limit": 60,
-                "execution_target": "local",
             },
         )
         # Should fail with 400 or 422

@@ -26,7 +26,6 @@ class TestLocalTabularTraining:
                 "target_column": "target",
                 "preset": "medium_quality_faster_train",
                 "time_limit": 120,
-                "execution_target": "local",
             },
         )
         assert resp.status_code == 200, f"Create job failed: {resp.text}"
@@ -112,7 +111,6 @@ class TestLocalTimeSeriesTraining:
                 "prediction_length": 7,
                 "preset": "fast_training",
                 "time_limit": 120,
-                "execution_target": "local",
             },
         )
         assert resp.status_code == 200, f"Create TS job failed: {resp.text}"
@@ -173,7 +171,6 @@ class TestDominoJobTraining:
                 "target_column": "target",
                 "preset": "medium_quality_faster_train",
                 "time_limit": 120,
-                "execution_target": "domino_job",
             },
         )
         assert resp.status_code == 200, f"Create domino job failed: {resp.text}"

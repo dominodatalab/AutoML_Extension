@@ -148,10 +148,6 @@ async def register_model(request: RegisterModelRequest, db: AsyncSession = Depen
 
             logger.info(f"Built tags={tags}, metrics={metrics} from job {request.job_id}")
 
-    # Use request-provided experiment name if given; otherwise let the
-    # registry create a new experiment scoped to *this* project.
-    # Do NOT reuse the training job's experiment_name because it may
-    # belong to a different Domino project (cross-project permission error).
     experiment_name = request.experiment_name
 
     result = registry.register_model(
@@ -229,7 +225,7 @@ async def list_registered_models(db: AsyncSession = Depends(get_db), *, project_
             domino_model_id=m.domino_model_id,
             deployed=m.deployed,
             created_at=m.created_at,
-            model_path=job.model_path if job and job.model_path else None,
+            model_path=job.model_path if job else None,
             model_type=job.model_type.value if job else None,
             metrics=numeric_metrics,
         ))

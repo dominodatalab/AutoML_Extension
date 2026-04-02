@@ -349,6 +349,7 @@ function EDAAnalysis() {
         <label className="text-sm text-domino-text-secondary">Execution:</label>
         <select
           value={edaExecutionTarget}
+          disabled={true}
           onChange={(e) => setEdaExecutionTarget(e.target.value as 'local' | 'domino_job')}
           className="h-[32px] px-3 text-sm border border-domino-border rounded-[2px] bg-white"
         >

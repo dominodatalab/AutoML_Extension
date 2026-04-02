@@ -33,10 +33,9 @@ from app.api.schemas.job import (
     RegisterModelResponse,
 )
 from app.config import get_settings
-from app.core.authorization import require_storage_modify
+from app.core.authorization import require_storage_modify, require_domino_job_start, require_domino_job_list, current_user_can_modify_storage, require_domino_job_stop
 from app.core.context.user import get_viewing_user
 from app.core.domino_http import get_domino_public_api_client_sync
-from app.core.authorization import require_job_list
 from app.core.domino_job_launcher import get_domino_job_launcher
 from app.core.dataset_mounts import resolve_dataset_mount_paths
 from app.db.models import Job, JobLog, JobStatus, ModelType, ProblemType
@@ -47,8 +46,6 @@ from app.services.project_resolver import resolve_project
 from app.workers.training_worker import register_trained_model
 
 logger = logging.getLogger(__name__)
-
-LOCAL_PROJECT_ID = "local"
 
 _TERMINAL_JOB_STATUSES = {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}
 _DOMINO_PENDING_STATUSES = {"submitted", "queued", "pending", "initializing", "provisioning"}
@@ -72,6 +69,14 @@ _CANONICAL_GIT_SERVICE_PROVIDER_VALUES = {
     provider.value.lower(): provider.value for provider in GitServiceProviderV1
 }
 
+async def require_user_owns_local_job(db, job_id: str):
+    """Return the job when the current viewer may access it."""
+    username = get_viewing_user_name()
+    job = await get_job_or_404(db, job_id, username)
+
+    if job.owner != username:
+        if not current_user_can_modify_storage(project_id=job.project_id):
+            raise HTTPException(403, "Forbidden")
 
 def _normalize_job_name(name: str) -> str:
     """Return canonical job name used for validation and persistence."""
@@ -180,11 +185,8 @@ def build_job_model(
     project_id: Optional[str],
     project_name: Optional[str],
     project_owner: Optional[str] = None,
-    execution_target: Optional[str] = None,
 ) -> Job:
     """Build a Job ORM model from request and resolved context."""
-    model_execution_target = execution_target or resolve_execution_target(job_request)
-
     return Job(
         name=job_name,
         description=job_request.description,
@@ -209,7 +211,6 @@ def build_job_model(
         auto_register=job_request.auto_register,
         register_name=job_request.register_name,
         status=JobStatus.PENDING,
-        execution_target=model_execution_target,
         autogluon_config=build_autogluon_config(job_request),
     )
 
@@ -224,20 +225,8 @@ def build_job_config(job: Job, *, file_path: Optional[str] = None) -> JobConfig:
 
 async def _count_active_domino_jobs(db: AsyncSession) -> int:
     """Count in-flight Domino jobs (pending + running)."""
-    jobs = await crud.get_jobs_by_statuses(
-        db, [JobStatus.PENDING, JobStatus.RUNNING], execution_target="domino_job"
-    )
+    jobs = await crud.get_jobs_by_statuses(db, [JobStatus.PENDING, JobStatus.RUNNING])
     return len(jobs)
-
-
-def resolve_execution_target(job_request: JobCreateRequest) -> str:
-    """Resolve training execution target, supporting legacy and explicit flags."""
-    if job_request.execution_target == "domino_job" or job_request.run_as_domino_job:
-        return "domino_job"
-    raise HTTPException(
-        status_code=400,
-        detail="In-process (local) training is not supported; set execution_target to 'domino_job'.",
-    )
 
 
 async def create_job_with_context(
@@ -248,7 +237,6 @@ async def create_job_with_context(
     project_owner: Optional[str],
 ) -> Job:
     """Validate, create, and enqueue a job using request-derived context."""
-    # TODO can user launch job in project?
     owner = get_viewing_user_name()
 
     logger.info(
@@ -270,31 +258,17 @@ async def create_job_with_context(
     )
 
     # Capacity gate: reject early when queue is full (before DB insert)
-    execution_target = resolve_execution_target(job_request)
     settings = get_settings()
-
-    if execution_target == "domino_job":
-        active_domino = await _count_active_domino_jobs(db)
-        if active_domino >= settings.max_domino_queue_size:
-            raise HTTPException(
-                status_code=429,
-                detail=(
-                    f"The Domino job queue is full ({active_domino}/{settings.max_domino_queue_size}). "
-                    f"Wait for running jobs to complete, then try again."
-                ),
-            )
-    else:
-        from app.core.job_queue import get_job_queue
-
-        active_local = get_job_queue().get_total_tracked()
-        if active_local >= settings.max_local_queue_size:
-            raise HTTPException(
-                status_code=429,
-                detail=(
-                    f"The local job queue is full ({active_local}/{settings.max_local_queue_size}). "
-                    f"Wait for running jobs to complete, then try again."
-                ),
-            )
+    require_domino_job_start(project_id=project_id)
+    active_domino = await _count_active_domino_jobs(db)
+    if active_domino >= settings.max_domino_queue_size:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"The Domino job queue is full ({active_domino}/{settings.max_domino_queue_size}). "
+                f"Wait for running jobs to complete, then try again."
+            ),
+        )
 
     job = build_job_model(
         job_request=job_request,
@@ -303,7 +277,6 @@ async def create_job_with_context(
         project_id=project_id,
         project_name=project_name,
         project_owner=project_owner,
-        execution_target=execution_target,
     )
     try:
         job = await crud.create_job(db, job)
@@ -315,59 +288,53 @@ async def create_job_with_context(
             ) from exc
         raise
 
-    if job.execution_target == "domino_job":
-        if not job.file_path:
-            raise ValueError(f"Job {job.id} has no file_path")
+    if not job.file_path:
+        raise ValueError(f"Job {job.id} has no file_path")
 
-        file_path = job.file_path
+    file_path = job.file_path
 
-        if job.data_source == "domino_dataset" and job.dataset_id:
-            from app.services.dataset_service import get_dataset_manager
-            dataset_manager = get_dataset_manager()
-            dataset_path = await dataset_manager.get_dataset_path(job.dataset_id)
-            if not dataset_path:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Could not resolve dataset path for dataset {job.dataset_id}",
-                )
-            file_path = f"{dataset_path}/{job.file_path}"
-
-        job_config = build_job_config(job, file_path=file_path)
-
-        settings = get_settings()
-        launcher = get_domino_job_launcher()
-        launch_result = await launcher.start_training_job(
-            job_id=job.id,
-            file_path=file_path,
-            title=job.name,
-            job_config=job_config,
-            hardware_tier_name=job_request.domino_hardware_tier_name or settings.domino_training_hardware_tier_name,
-            project_id=project_id,
-        )
-        if not launch_result.get("success"):
-            error_message = launch_result.get("error", "Failed to launch Domino Job")
-            await crud.update_job_status(
-                db=db,
-                job_id=job.id,
-                status=JobStatus.FAILED,
-                error_message=error_message,
-                completed_at=utc_now(),
+    if job.data_source == "domino_dataset" and job.dataset_id:
+        from app.services.dataset_service import get_dataset_manager
+        dataset_manager = get_dataset_manager()
+        dataset_path = await dataset_manager.get_dataset_path(job.dataset_id)
+        if not dataset_path:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Could not resolve dataset path for dataset {job.dataset_id}",
             )
-            raise HTTPException(status_code=502, detail=error_message)
+        file_path = f"{dataset_path}/{job.file_path}"
 
-        await crud.update_job_domino_fields(
+    job_config = build_job_config(job, file_path=file_path)
+
+    settings = get_settings()
+    launcher = get_domino_job_launcher()
+    launch_result = await launcher.start_training_job(
+        job_id=job.id,
+        file_path=file_path,
+        title=job.name,
+        job_config=job_config,
+        hardware_tier_name=job_request.domino_hardware_tier_name or settings.domino_training_hardware_tier_name,
+        project_id=project_id,
+    )
+    if not launch_result.get("success"):
+        error_message = launch_result.get("error", "Failed to launch Domino Job")
+        await crud.update_job_status(
             db=db,
             job_id=job.id,
-            domino_job_id=launch_result.get("domino_job_id"),
-            domino_job_status=launch_result.get("domino_job_status", "Submitted"),
+            status=JobStatus.FAILED,
+            error_message=error_message,
+            completed_at=utc_now(),
         )
-        refreshed = await crud.get_job(db, job.id)
-        return _attach_external_links(refreshed or job)
+        raise HTTPException(status_code=502, detail=error_message)
 
-    from app.core.job_queue import get_job_queue
-
-    await get_job_queue().enqueue(job.id)
-    return _attach_external_links(job)
+    await crud.update_job_domino_fields(
+        db=db,
+        job_id=job.id,
+        domino_job_id=launch_result.get("domino_job_id"),
+        domino_job_status=launch_result.get("domino_job_status", "Submitted"),
+    )
+    refreshed = await crud.get_job(db, job.id)
+    return _attach_external_links(refreshed or job)
 
 
 async def list_jobs_filtered(
@@ -383,22 +350,15 @@ async def list_jobs_filtered(
         project_name_filter,
     ) = resolve_job_list_filters(list_request)
 
-    execution_target_filter = None
-    has_project_filter = bool(project_id_filter or project_name_filter)
-
     if project_id_filter:
         # require domino job listing auth if project_id set
-        require_job_list(project_id_filter)
-    if not has_project_filter:
-        # Without project scope, hide Domino-backed jobs from generic listings.
-        execution_target_filter = "local"
+        require_domino_job_list(project_id_filter)
 
     await _sync_active_domino_jobs_for_overview(db)
 
     logger.debug(
         f"[JOB LIST] Filters - owner: {owner_filter}, "
-        f"project_name: {project_name_filter}, status: {status_filter}, "
-        f"execution_target: {execution_target_filter}"
+        f"project_id: {project_id_filter}, project_name: {project_name_filter}, status: {status_filter}"
     )
 
     jobs = await crud.get_jobs(
@@ -410,7 +370,6 @@ async def list_jobs_filtered(
         owner=owner_filter,
         project_id=project_id_filter,
         project_name=project_name_filter,
-        execution_target=execution_target_filter
     )
 
     return list(jobs)
@@ -418,11 +377,7 @@ async def list_jobs_filtered(
 
 async def _sync_active_domino_jobs_for_overview(db: AsyncSession) -> None:
     """Refresh active Domino-backed jobs so list views show current status."""
-    active_jobs = await crud.get_jobs_by_statuses(
-        db,
-        [JobStatus.PENDING, JobStatus.RUNNING],
-        execution_target="domino_job",
-    )
+    active_jobs = await crud.get_jobs_by_statuses(db, [JobStatus.PENDING, JobStatus.RUNNING])
     if active_jobs:
         for job in active_jobs:
             if not job.domino_job_id:
@@ -440,8 +395,6 @@ async def _sync_recent_terminal_domino_metadata_for_overview(db: AsyncSession) -
 
     candidates: list[Job] = []
     for job in recent_jobs:
-        if getattr(job, "execution_target", "local") != "domino_job":
-            continue
         if job.status not in _TERMINAL_JOB_STATUSES:
             continue
         if not job.domino_job_id:
@@ -470,17 +423,6 @@ async def get_job_logs(
     else:
         logs = await crud.get_job_logs(db, job_id, limit=limit)
     return list(logs)
-
-
-def get_queue_status() -> dict:
-    """Return current queue status."""
-    from app.core.job_queue import get_job_queue
-
-    settings = get_settings()
-    status = get_job_queue().get_queue_status()
-    status["max_local_queue_size"] = settings.max_local_queue_size
-    status["max_domino_queue_size"] = settings.max_domino_queue_size
-    return status
 
 
 def resolve_job_list_filters(
@@ -696,18 +638,12 @@ async def get_job_or_404(db: AsyncSession, job_id: str, owner_user_name: str) ->
     """Get job by id if user may retrieve the job"""
     job = await crud.get_job(db, job_id)
     if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
-    if job.execution_target == "local":
-        # for local jobs, only the owner may retrieve
-        if job.owner != owner_user_name:
-            raise HTTPException(status_code=403, detail="Forbidden")
+    if job.domino_job_id:
+        await asyncio.to_thread(_fetch_domino_job_or_throw, job.domino_job_id)
     else:
-        # for domino jobs, we use domino auth
-        if job.domino_job_id:
-            await asyncio.to_thread(_fetch_domino_job_or_throw, job.domino_job_id)
-        else:
-            raise HTTPException(status_code=500, detail="No domino job ID exists for domino_job, so cannot authorize")
+        raise HTTPException(status_code=500, detail=f"No domino job ID exists for job {job_id}")
     return job
 
 
@@ -871,8 +807,6 @@ async def _sync_domino_job_state(
     This keeps UI state accurate when external runs fail before they can
     update our local database (for example, import/runtime bootstrap errors).
     """
-    if getattr(job, "execution_target", "local") != "domino_job":
-        return job
     if not job.domino_job_id:
         return job
 
@@ -1036,17 +970,16 @@ async def reconcile_jobs_for_storage_cleanup(db: AsyncSession) -> dict:
 
     for job in active_jobs:
         active_jobs_checked += 1
-        if getattr(job, "execution_target", "local") == "domino_job":
-            domino_jobs_checked += 1
-            previous_status = job.status
-            previous_error = job.error_message
-            job = await _sync_domino_job_state(db, job, finalize_missing=True)
-            if (
-                previous_status != JobStatus.CANCELLED
-                and job.status == JobStatus.CANCELLED
-                and (job.error_message or previous_error or "") == _DOMINO_MISSING_JOB_MESSAGE
-            ):
-                missing_domino_jobs_finalized += 1
+        domino_jobs_checked += 1
+        previous_status = job.status
+        previous_error = job.error_message
+        job = await _sync_domino_job_state(db, job, finalize_missing=True)
+        if (
+            previous_status != JobStatus.CANCELLED
+            and job.status == JobStatus.CANCELLED
+            and (job.error_message or previous_error or "") == _DOMINO_MISSING_JOB_MESSAGE
+        ):
+            missing_domino_jobs_finalized += 1
 
         if job.status == JobStatus.PENDING and job.data_source in {"upload", "domino_dataset"}:
             updated_job = await _mark_pending_job_failed_for_missing_data(
@@ -1141,7 +1074,6 @@ async def get_job_progress_response(db: AsyncSession, job_id: str)  -> JobProgre
         started_at=job.started_at,
     )
 
-
 async def cancel_job(db: AsyncSession, job_id: str) -> dict:
     """Cancel a pending/running job and queue task."""
     owner_user_name = get_viewing_user_name()
@@ -1153,65 +1085,57 @@ async def cancel_job(db: AsyncSession, job_id: str) -> dict:
             detail=f"Cannot cancel job with status: {job.status.value}",
         )
 
-    if getattr(job, "execution_target", "local") == "domino_job":
-        stop_success = False
-        stop_error = None
-        if job.domino_job_id:
-            stop_result = await get_domino_job_launcher().stop_job(job.domino_job_id, project_id=job.project_id)
-            stop_success = bool(stop_result.get("success"))
-            stop_error = stop_result.get("error")
-            await crud.update_job_domino_fields(
-                db=db,
-                job_id=job_id,
-                domino_job_status="Cancelled" if stop_success else "CancelFailed",
-            )
-        await crud.update_job_status(
-            db,
-            job_id,
-            JobStatus.CANCELLED,
-            completed_at=utc_now(),
-            error_message=stop_error if stop_error and not stop_success else None,
+    stop_success = False
+    stop_error = None
+    if job.domino_job_id:
+        require_domino_job_stop(job.domino_job_id)
+        stop_result = await get_domino_job_launcher().stop_job(job.domino_job_id, project_id=job.project_id)
+        stop_success = bool(stop_result.get("success"))
+        stop_error = stop_result.get("error")
+        await crud.update_job_domino_fields(
+            db=db,
+            job_id=job_id,
+            domino_job_status="Cancelled" if stop_success else "CancelFailed",
         )
-        return {
-            "message": "Job cancelled",
-            "job_id": job_id,
-            "external_cancelled": stop_success,
-            "external_error": stop_error,
-        }
-
-    from app.core.job_queue import get_job_queue
-
-    task_cancelled = await get_job_queue().cancel(job_id)
     await crud.update_job_status(
         db,
         job_id,
         JobStatus.CANCELLED,
         completed_at=utc_now(),
+        error_message=stop_error if stop_error and not stop_success else None,
     )
-    return {"message": "Job cancelled", "job_id": job_id, "task_cancelled": task_cancelled}
+    return {
+        "message": "Job cancelled",
+        "job_id": job_id,
+        "external_cancelled": stop_success,
+        "external_error": stop_error,
+    }
 
 
 async def delete_job(db: AsyncSession, job_id: str) -> dict:
     """Delete job artifacts and DB row."""
     from app.core.cleanup_service import get_cleanup_service
-    # TODO needs own auth
+    await require_user_owns_local_job(db, job_id)
+
     owner_user_name = get_viewing_user_name()
     job = await get_job_or_404(db, job_id, owner_user_name)
     cleanup_result = await get_cleanup_service().delete_job_artifacts(job, db)
     await crud.delete_job(db, job_id)
+
+    # we don't delete the domino job
+
     return {"message": "Job deleted", "job_id": job_id, "cleanup": cleanup_result}
 
 
 async def bulk_delete_jobs(db: AsyncSession, job_ids: list[str]) -> dict:
     """Delete multiple jobs, cancelling active ones first. Continues on per-job failure."""
     from app.core.cleanup_service import get_cleanup_service
-    # TODO needs own auth
-
     deleted_job_ids: list[str] = []
     failed: list[dict[str, str]] = []
 
     for job_id in job_ids:
         try:
+            await require_user_owns_local_job(db, job_id)
             job = await crud.get_job(db, job_id)
             if not job:
                 failed.append({"job_id": job_id, "error": "Job not found"})
@@ -1241,7 +1165,8 @@ async def register_model_for_job(
     request: RegisterModelRequest,
 ) -> RegisterModelResponse:
     """Register a completed job's trained model in Domino registry."""
-    job = await get_job_or_404(db, job_id)
+    owner_user_name = get_viewing_user_name()
+    job = await get_job_or_404(db, job_id, owner_user_name)
     if job.status != JobStatus.COMPLETED:
         raise HTTPException(
             status_code=400,

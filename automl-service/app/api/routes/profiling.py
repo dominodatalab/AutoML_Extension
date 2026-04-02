@@ -4,10 +4,10 @@ import logging
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 
-from app.core.data_profiler import get_data_profiler
+from app.core.data_profiler import get_data_profiler, DataProfiler
 from app.core.domino_job_launcher import get_domino_job_launcher
 from app.core.eda_job_store import get_eda_job_store
 from app.core.ts_profiler import get_ts_profiler
@@ -20,6 +20,7 @@ router = APIRouter()
 
 class ProfileRequest(BaseModel):
     """Request for data profiling."""
+    dataset_id: str = Field(..., description="The dataset to profile")
     file_path: str = Field(..., description="Path to the data file")
     sample_size: int = Field(50000, description="Max rows to sample for profiling")
     sampling_strategy: str = Field("random", description="Sampling strategy: random, stratified, head, full")
@@ -91,12 +92,11 @@ class TargetSuggestionsResponse(BaseModel):
 
 @router.post("/profile", response_model=ProfileResponse)
 @handle_errors("Profiling error")
-async def profile_data(request: ProfileRequest):
+async def profile_data(request: ProfileRequest, profiler: DataProfiler=Depends(get_data_profiler)):
     """Generate a comprehensive profile of a data file."""
-    profiler = get_data_profiler()
-
     try:
-        profile = profiler.profile_file(
+        profile = await profiler.profile_file(
+            dataset_id=request.dataset_id,
             file_path=request.file_path,
             sample_size=request.sample_size,
             sampling_strategy=request.sampling_strategy,

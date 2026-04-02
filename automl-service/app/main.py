@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 import re
 from typing import Optional
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -26,46 +26,10 @@ logger = logging.getLogger(__name__)
 def is_auth_header(header_key) -> bool:
     return re.search(r'(cookie|api|key|auth)', header_key, flags=re.I) is not None
 
-def _is_truthy(value: Optional[str]) -> bool:
-    """Parse common truthy string values from environment variables."""
-    if value is None:
-        return False
-    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
-
-
-def validate_local_compute_worker_settings() -> None:
-    """Fail fast on unsupported local-queue + multi-worker configuration."""
-    local_compute_enabled = _is_truthy(os.environ.get("ENABLE_LOCAL_COMPUTE", "true"))
-    if not local_compute_enabled:
-        return
-
-    # Uvicorn reload mode runs a single worker process.
-    if _is_truthy(os.environ.get("RELOAD", "false")):
-        return
-
-    workers_raw = os.environ.get("WORKERS") or os.environ.get("WEB_CONCURRENCY")
-    if workers_raw is None:
-        return
-
-    try:
-        workers = int(workers_raw)
-    except ValueError as exc:
-        raise RuntimeError(
-            f"Invalid worker setting: WORKERS/WEB_CONCURRENCY='{workers_raw}'"
-        ) from exc
-
-    if workers > 1:
-        raise RuntimeError(
-            "Local compute is enabled, but multiple API workers are configured. "
-            "Set WORKERS=1 (or WEB_CONCURRENCY=1), or set ENABLE_LOCAL_COMPUTE=false."
-        )
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup/shutdown events."""
     settings = get_settings()
-    validate_local_compute_worker_settings()
 
     logger.info(f"Starting {settings.app_name} v{settings.app_version}")
 
@@ -80,13 +44,8 @@ async def lifespan(app: FastAPI):
     os.makedirs(os.path.join(settings.datasets_path, "uploads"), exist_ok=True)
     logger.info(f"Required directories created (uploads: {settings.uploads_path})")
 
-    from app.core.job_queue import get_job_queue
-    queue = get_job_queue()
-    await queue.startup()
-
     yield
 
-    await queue.shutdown(timeout=30.0)
     logger.info("Shutting down application")
 
 
@@ -215,30 +174,36 @@ def create_app() -> FastAPI:
 
     # Root endpoint
     @app.get("/")
-    async def root(request: Request, project_name: Optional[str] = None):
-        from app.api.routes.jobs import JobListRequest, list_jobs
+    async def root(
+        request: Request,
+        projectId: Optional[str] = Query(None),
+        project_name: Optional[str] = Query(None),
+    ):
+        from app.api.schemas.job import JobListRequest, JobResponse
+        from app.services.job_service import list_jobs_filtered
 
         username = request.headers.get("domino-username", "anonymous")
-        list_request = JobListRequest(
-            owner=username,
-            project_name=project_name if project_name else "",
-            limit=100,
-        )
 
-        async with get_db_session() as db:
-            jobs_response = await list_jobs(db=db, owner=username, project_name=project_name or "")
-
-        current_project_name = settings.domino_project_name or os.environ.get("DOMINO_PROJECT_NAME")
+        jobs_list = []
+        if projectId:
+            list_request = JobListRequest(
+                owner=username,
+                project_id=projectId,
+                project_name=project_name or None,
+                limit=100,
+            )
+            async with get_db_session() as db:
+                jobs = await list_jobs_filtered(db=db, list_request=list_request)
+            jobs_list = [JobResponse.model_validate(j) for j in jobs]
 
         return {
             "service": settings.app_name,
             "version": settings.app_version,
             "status": "running",
             "user": username,
-            "current_project_name": current_project_name,
-            "filter": {"owner": username, "project_name": project_name},
-            "jobs": jobs_response.jobs,
-            "total_jobs": jobs_response.total,
+            "filter": {"owner": username, "project_name": project_name, "project_id": projectId},
+            "jobs": jobs_list,
+            "total_jobs": len(jobs_list),
         }
 
     return app

@@ -59,6 +59,7 @@ async def preview_dataset(
     rows: int = Query(100, ge=1, le=1000, description="Number of rows to preview"),
     dataset_manager=Depends(get_dataset_manager),
 ):
+    # TODO when is this used?
     """Preview dataset content."""
     return await preview_dataset_response(
         dataset_manager=dataset_manager,
@@ -94,10 +95,9 @@ async def get_dataset_files(dataset_id: str):
 @handle_errors("Failed to preview dataset file", detail_prefix="Failed to preview dataset file")
 async def preview_dataset_file(
     body: DatasetFilePreviewRequest,
-    dataset_manager=Depends(get_dataset_manager),
 ):
     """Preview a dataset file by file path or dataset ID."""
-    return await preview_file_path_response(dataset_manager=dataset_manager, body=body)
+    return await preview_file_path_response(body=body)
 
 
 @router.post("/upload", response_model=FileUploadResponse)
