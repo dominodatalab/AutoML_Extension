@@ -784,15 +784,16 @@ async def _fetch_mlflow_results(job_id: str) -> Optional[dict]:
         runs = mlflow.search_runs(
             filter_string=f"tags.job_id = '{job_id}' and tags.run_type = 'evaluation_summary'",
             search_all_experiments=True,
+            output_format="list",
         )
-        if runs.empty:
+        if not runs:
             logger.warning("No MLflow evaluation_summary run found for job %s", job_id)
             return None
 
-        row = runs.iloc[0]
-        run_id = row["run_id"]
+        run = runs[0]
+        run_id = run.info.run_id
         client = mlflow.tracking.MlflowClient()
-        experiment_name = client.get_experiment(row["experiment_id"]).name
+        experiment_name = client.get_experiment(run.info.experiment_id).name
 
         leaderboard = []
         try:
@@ -812,11 +813,11 @@ async def _fetch_mlflow_results(job_id: str) -> Optional[dict]:
 
         return {
             "metrics": {
-                "best_model": row.get("params.best_model"),
-                "best_score": float(row["metrics.best_score"]) if row.get("metrics.best_score") is not None else None,
-                "num_models": int(row.get("metrics.num_models_trained") or 0),
-                "eval_metric": row.get("params.eval_metric"),
-                "problem_type": row.get("params.problem_type"),
+                "best_model": run.data.params.get("best_model"),
+                "best_score": run.data.metrics.get("best_score"),
+                "num_models": int(run.data.metrics.get("num_models_trained") or 0),
+                "eval_metric": run.data.params.get("eval_metric"),
+                "problem_type": run.data.params.get("problem_type"),
             },
             "leaderboard": leaderboard,
             "feature_importance": feature_importance,
