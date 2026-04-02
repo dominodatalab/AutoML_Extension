@@ -15,6 +15,7 @@ from app.db import crud
 from app.dependencies import get_db
 from app.api.utils import get_job_paths
 from app.api.error_handler import handle_errors
+from app.services.job_service import _ensure_mlflow_results
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -257,6 +258,7 @@ async def get_feature_importance(
     if not job:
         raise HTTPException(status_code=404, detail=f"Job not found: {request.job_id}")
 
+    job = await _ensure_mlflow_results(db, job)
     model_type = request.model_type or (job.model_type.value if job.model_type else "tabular")
 
     if not job.feature_importance:

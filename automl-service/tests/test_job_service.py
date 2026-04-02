@@ -22,6 +22,7 @@ from app.api.schemas.job import (
 from app.db.models import Job, JobLog, JobStatus, ModelType, ProblemType
 from app.services.job_service import (
     _build_domino_job_logs,
+    _ensure_mlflow_results,
     _is_domino_missing_error,
     _is_domino_terminal_status,
     _normalize_job_name,
@@ -1017,5 +1018,101 @@ class TestDominoJobLogs:
             limit=25,
         )
         mock_get_db_logs.assert_not_awaited()
+
+
+# ===========================================================================
+# _ensure_mlflow_results
+# ===========================================================================
+
+
+class TestEnsureMlflowResults:
+    """Tests for the lazy MLflow result fetch on completed jobs."""
+
+    _MLFLOW_RESULTS = {
+        "metrics": {"best_model": "LightGBM", "best_score": 0.92},
+        "leaderboard": [{"model": "LightGBM", "score": 0.92}],
+        "feature_importance": [{"feature": "age", "importance": 0.5}],
+        "model_path": "runs:/run-xyz/autogluon_model",
+        "experiment_run_id": "run-xyz",
+        "experiment_name": "my-experiment",
+    }
+
+    @pytest.mark.asyncio
+    async def test_fetches_and_persists_when_completed_without_results(self, db_session, make_job):
+        job = make_job(status=JobStatus.COMPLETED)
+        db_session.add(job)
+        await db_session.commit()
+
+        with patch(
+            "app.services.job_service._fetch_mlflow_results",
+            new_callable=AsyncMock,
+            return_value=self._MLFLOW_RESULTS,
+        ):
+            result = await _ensure_mlflow_results(db_session, job)
+
+        assert result.model_path == "runs:/run-xyz/autogluon_model"
+        assert result.leaderboard == self._MLFLOW_RESULTS["leaderboard"]
+        assert result.feature_importance == self._MLFLOW_RESULTS["feature_importance"]
+
+    @pytest.mark.asyncio
+    async def test_skips_fetch_when_model_path_already_set(self, db_session, make_job):
+        job = make_job(status=JobStatus.COMPLETED, model_path="runs:/existing/model")
+        db_session.add(job)
+        await db_session.commit()
+
+        with patch(
+            "app.services.job_service._fetch_mlflow_results",
+            new_callable=AsyncMock,
+        ) as mock_fetch:
+            result = await _ensure_mlflow_results(db_session, job)
+
+        mock_fetch.assert_not_awaited()
+        assert result.model_path == "runs:/existing/model"
+
+    @pytest.mark.asyncio
+    async def test_skips_fetch_when_job_not_completed(self, db_session, make_job):
+        for status in (JobStatus.PENDING, JobStatus.RUNNING, JobStatus.FAILED):
+            job = make_job(status=status)
+            db_session.add(job)
+            await db_session.commit()
+
+            with patch(
+                "app.services.job_service._fetch_mlflow_results",
+                new_callable=AsyncMock,
+            ) as mock_fetch:
+                result = await _ensure_mlflow_results(db_session, job)
+
+            mock_fetch.assert_not_awaited()
+            assert result.model_path is None
+
+    @pytest.mark.asyncio
+    async def test_returns_original_job_when_fetch_returns_none(self, db_session, make_job):
+        job = make_job(status=JobStatus.COMPLETED)
+        db_session.add(job)
+        await db_session.commit()
+
+        with patch(
+            "app.services.job_service._fetch_mlflow_results",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            result = await _ensure_mlflow_results(db_session, job)
+
+        assert result.model_path is None
+
+    @pytest.mark.asyncio
+    async def test_returns_original_job_when_fetch_raises(self, db_session, make_job):
+        job = make_job(status=JobStatus.COMPLETED)
+        db_session.add(job)
+        await db_session.commit()
+
+        with patch(
+            "app.services.job_service._fetch_mlflow_results",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("MLflow unavailable"),
+        ):
+            result = await _ensure_mlflow_results(db_session, job)
+
+        assert result.model_path is None
 
 

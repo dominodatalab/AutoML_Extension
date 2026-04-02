@@ -748,6 +748,34 @@ async def _mark_pending_job_failed_for_missing_data(
     return updated or job
 
 
+async def _ensure_mlflow_results(db: AsyncSession, job: Job) -> Job:
+    """Lazily fetch and persist MLflow results for a completed job that has none.
+
+    If a transient failure prevented result storage at completion time, this
+    retries on the next read so results are never permanently lost.
+    """
+    if job.status != JobStatus.COMPLETED or job.model_path is not None:
+        return job
+    try:
+        mlflow_results = await _fetch_mlflow_results(job.id)
+    except Exception:
+        logger.exception("Lazy MLflow fetch failed for job %s", job.id)
+        return job
+    if not mlflow_results:
+        return job
+    updated = await crud.update_job_results(
+        db=db,
+        job_id=job.id,
+        metrics=mlflow_results["metrics"],
+        leaderboard=mlflow_results["leaderboard"],
+        feature_importance=mlflow_results["feature_importance"],
+        model_path=mlflow_results["model_path"],
+        experiment_run_id=mlflow_results["experiment_run_id"],
+        experiment_name=mlflow_results["experiment_name"],
+    )
+    return updated or job
+
+
 async def _fetch_mlflow_results(job_id: str) -> Optional[dict]:
     """Fetch training results from MLflow for a completed Domino job."""
     def _sync_fetch():
@@ -1027,6 +1055,7 @@ async def get_job_response(db: AsyncSession, job_id: str) -> Job:
     owner_user_name = get_viewing_user_name()
     job = await get_job_or_404(db, job_id, owner_user_name)
     job = await _sync_domino_job_state(db, job, sync_terminal_metadata=True)
+    job = await _ensure_mlflow_results(db, job)
     job = normalize_job_leaderboard(job)
     return _attach_external_links(job)
 
@@ -1061,6 +1090,7 @@ async def get_job_metrics_response(db: AsyncSession, job_id: str) -> JobMetricsR
     """Build metrics response payload for a job."""
     owner_user_name = get_viewing_user_name()
     job = await get_job_or_404(db, job_id, owner_user_name)
+    job = await _ensure_mlflow_results(db, job)
     return JobMetricsResponse(
         id=job.id,
         metrics=job.metrics,

@@ -525,3 +525,104 @@ async def test_create_duplicate_job_name_returns_409(app_client):
     assert resp2.status_code == 409
     body = resp2.json()
     assert "already exists" in body["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Lazy MLflow result fetching for completed jobs with missing results
+# ---------------------------------------------------------------------------
+
+_MLFLOW_RESULTS = {
+    "metrics": {"best_model": "LightGBM", "best_score": 0.92, "num_models": 3},
+    "leaderboard": [{"model": "LightGBM", "score": 0.92}],
+    "feature_importance": [{"feature": "age", "importance": 0.5}],
+    "model_path": "runs:/run-xyz/autogluon_model",
+    "experiment_run_id": "run-xyz",
+    "experiment_name": "my-experiment",
+}
+
+
+@pytest.mark.asyncio
+async def test_get_job_lazily_fetches_and_persists_mlflow_results(app_client, db_session, make_job):
+    """GET /jobs/{id} hydrates results from MLflow and persists them when a completed job has none."""
+    from app.db.models import JobStatus
+
+    job = make_job(status=JobStatus.COMPLETED, domino_job_id="domino-run-123", model_path=None)
+    db_session.add(job)
+    await db_session.commit()
+
+    with (
+        _mock_job_infra(),
+        patch(
+            "app.services.job_service._fetch_mlflow_results",
+            new_callable=AsyncMock,
+            return_value=_MLFLOW_RESULTS,
+        ),
+    ):
+        response = await app_client.get(f"/svc/v1/jobs/{job.id}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["model_path"] == "runs:/run-xyz/autogluon_model"
+    assert body["leaderboard"] == _MLFLOW_RESULTS["leaderboard"]
+
+    await db_session.refresh(job)
+    assert job.model_path == "runs:/run-xyz/autogluon_model"
+    assert job.leaderboard == _MLFLOW_RESULTS["leaderboard"]
+    assert job.feature_importance == _MLFLOW_RESULTS["feature_importance"]
+
+
+@pytest.mark.asyncio
+async def test_get_job_metrics_lazily_fetches_and_persists_mlflow_results(app_client, db_session, make_job):
+    """GET /jobs/{id}/metrics hydrates results from MLflow and persists them when a completed job has none."""
+    from app.db.models import JobStatus
+
+    job = make_job(status=JobStatus.COMPLETED, domino_job_id="domino-run-123", model_path=None)
+    db_session.add(job)
+    await db_session.commit()
+
+    with (
+        _mock_job_infra(),
+        patch(
+            "app.services.job_service._fetch_mlflow_results",
+            new_callable=AsyncMock,
+            return_value=_MLFLOW_RESULTS,
+        ),
+    ):
+        response = await app_client.get(f"/svc/v1/jobs/{job.id}/metrics")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["leaderboard"] == _MLFLOW_RESULTS["leaderboard"]
+    assert body["metrics"]["best_model"] == "LightGBM"
+
+    await db_session.refresh(job)
+    assert job.model_path == "runs:/run-xyz/autogluon_model"
+    assert job.leaderboard == _MLFLOW_RESULTS["leaderboard"]
+
+
+@pytest.mark.asyncio
+async def test_feature_importance_lazily_fetches_and_persists_mlflow_results(app_client, db_session, make_job):
+    """POST /predictions/model/feature-importance hydrates from MLflow and persists when results are missing."""
+    from app.db.models import JobStatus
+
+    job = make_job(status=JobStatus.COMPLETED, domino_job_id="domino-run-123", model_path=None)
+    db_session.add(job)
+    await db_session.commit()
+
+    with patch(
+        "app.services.job_service._fetch_mlflow_results",
+        new_callable=AsyncMock,
+        return_value=_MLFLOW_RESULTS,
+    ):
+        response = await app_client.post(
+            "/svc/v1/predictions/model/feature-importance",
+            json={"job_id": job.id},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["features"] == _MLFLOW_RESULTS["feature_importance"]
+
+    await db_session.refresh(job)
+    assert job.model_path == "runs:/run-xyz/autogluon_model"
+    assert job.feature_importance == _MLFLOW_RESULTS["feature_importance"]
