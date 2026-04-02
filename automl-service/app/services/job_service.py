@@ -1087,6 +1087,7 @@ async def get_job_metrics_response(db: AsyncSession, job_id: str) -> JobMetricsR
     """Build metrics response payload for a job."""
     owner_user_name = get_viewing_user_name()
     job = await get_job_or_404(db, job_id, owner_user_name)
+    job = await _sync_domino_job_state(db, job, sync_terminal_metadata=True)
     job = await _ensure_mlflow_results(db, job)
     return JobMetricsResponse(
         id=job.id,

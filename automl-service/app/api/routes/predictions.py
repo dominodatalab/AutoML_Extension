@@ -258,6 +258,8 @@ async def get_feature_importance(
     if not job:
         raise HTTPException(status_code=404, detail=f"Job not found: {request.job_id}")
 
+    # do not call _sync_domino_job_state here — only do that in job endpoints, not prediction endpoints. 
+    # _ensure_mlflow_results handles the case where the job is already COMPLETED in the DB but results were never fetched.
     job = await _ensure_mlflow_results(db, job)
     model_type = request.model_type or (job.model_type.value if job.model_type else "tabular")
 
