@@ -202,6 +202,7 @@ async def update_job_results(
     metrics: dict,
     leaderboard: dict,
     model_path: str,
+    feature_importance: Optional[list] = None,
     experiment_run_id: Optional[str] = None,
     experiment_name: Optional[str] = None,
 ) -> Optional[Job]:
@@ -209,6 +210,7 @@ async def update_job_results(
     update_data = {
         "metrics": metrics,
         "leaderboard": leaderboard,
+        "feature_importance": feature_importance,
         "model_path": model_path,
         "status": JobStatus.COMPLETED,
         "completed_at": utc_now(),

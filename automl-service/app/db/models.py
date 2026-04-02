@@ -85,6 +85,7 @@ class Job(Base):
     # Results
     metrics: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     leaderboard: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    feature_importance: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     model_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
     # Experiment tracking

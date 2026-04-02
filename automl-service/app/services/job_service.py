@@ -778,6 +778,14 @@ async def _fetch_mlflow_results(job_id: str) -> Optional[dict]:
         except Exception as e:
             logger.warning("Could not fetch leaderboard artifact for job %s: %s", job_id, e)
 
+        feature_importance = []
+        try:
+            fi_path = download_mlflow_artifact(f"runs:/{run_id}/feature_importance.json", job_id)
+            with open(fi_path) as f:
+                feature_importance = json.load(f).get("features", [])
+        except Exception as e:
+            logger.warning("Could not fetch feature_importance artifact for job %s: %s", job_id, e)
+
         return {
             "metrics": {
                 "best_model": row.get("params.best_model"),
@@ -787,6 +795,7 @@ async def _fetch_mlflow_results(job_id: str) -> Optional[dict]:
                 "problem_type": row.get("params.problem_type"),
             },
             "leaderboard": leaderboard,
+            "feature_importance": feature_importance,
             "experiment_run_id": run_id,
             "experiment_name": experiment_name,
             "model_path": f"runs:/{run_id}/autogluon_model",
@@ -913,6 +922,7 @@ async def _sync_domino_job_state(
                 job_id=job.id,
                 metrics=mlflow_results["metrics"],
                 leaderboard=mlflow_results["leaderboard"],
+                feature_importance=mlflow_results["feature_importance"],
                 model_path=mlflow_results["model_path"],
                 experiment_run_id=mlflow_results["experiment_run_id"],
                 experiment_name=mlflow_results["experiment_name"],
