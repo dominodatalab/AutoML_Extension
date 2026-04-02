@@ -20,7 +20,6 @@ Dockerfile               Container build for Domino deployment
 | Layer | Files | Purpose |
 |-------|-------|---------|
 | `app/api/routes/` | 8 routers | REST endpoints (107 routes) + WebSocket |
-| `app/api/compat/` | pattern-based | 66 single-segment `/svc*` Domino proxy routes |
 | `app/api/schemas/` | 3 files | Pydantic request/response models |
 | `app/core/` | 18 services | Predictions, diagnostics, export, profiling, MLflow, Domino integration |
 | `app/core/trainers/` | 4 trainers | Base, callbacks, tabular, and timeseries training |
@@ -43,10 +42,10 @@ Dockerfile               Container build for Domino deployment
 ## Features
 
 - **Training Wizard**: 4-step workflow (data source, model type, configuration, review) with advanced AutoGluon config (bagging, stacking, HPO, pseudo-labeling, distillation)
-- **Dual Training Execution**: Run training in the in-app queue (`local`) or as an external Domino Job (`domino_job`)
+- **Training Execution**: Run training as a Domino Job
 - **Model Diagnostics**: Feature importance, leaderboard, confusion matrix, ROC/PR curves, regression diagnostics, learning curves, model comparison
 - **Exploratory Data Analysis**: Interactive data profiling, column explorer, correlation matrix, data quality checks, time series profiling (ACF/PACF, stationarity, decomposition), notebook export, optional async Domino Job execution
-- **Dataset Management**: Upload CSV/Parquet or connect to Domino Datasets
+- **Dataset Usage**: Connect to Domino Datasets
 - **Model Registry**: MLflow integration for versioning, stage transitions, model cards, and downloads
 - **Model Export**: deployment bundle and notebook formats
 - **Deployment**: Deploy trained models to Domino Model APIs with full lifecycle management (create, start, stop, delete)
@@ -241,25 +240,6 @@ Async endpoints:
 | GET | `/svc/v1/deployments/deployments/{id}/credentials` | Get credentials |
 | POST | `/svc/v1/deployments/quick-deploy` | Create API + version + deployment in one call |
 | POST | `/svc/v1/deployments/deploy-from-job/{job_id}` | Deploy from completed AutoML job |
-
-### Domino Compatibility Routes
-
-For Domino proxy constraints, the backend also exposes 66 single-segment `/svc*` routes that mirror the RESTful API. Examples:
-
-- `POST /svcjobcreate` → create job
-- `POST /svcjobget` → get job details
-- `POST /svcjobprogress` → get training progress
-- `POST /svcprofile` → profile dataset
-- `POST /svcprofiletimeseries` → time series profiling
-- `POST /svcprofileasyncstart` → start async profiling
-- `POST /svcprofileasyncstatus` → poll async status
-- `POST /svcfeatureimportance` → feature importance
-- `POST /svcleaderboard` → model leaderboard
-- `POST /svcregistermodel` → register model to MLflow
-- `POST /svcquickdeploy` → quick deploy
-- `GET /svcdatasets` → list datasets
-- `GET /svcdeployments` → list deployments
-- `GET /svcmodelapis` → list model APIs
 
 ## Environment Variables
 
