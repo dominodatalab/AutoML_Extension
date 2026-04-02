@@ -6,6 +6,7 @@ from typing import Optional, Tuple
 from fastapi import HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.job_file_cache import download_mlflow_artifact
 from app.db import crud
 
 
@@ -33,8 +34,6 @@ async def get_job_paths(
     Raises HTTPException(400) if model_path not available.
     Raises HTTPException(500) if model_path is not an MLflow URI or download fails.
     """
-    from app.core.job_file_cache import download_mlflow_artifact
-
     job = await crud.get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")

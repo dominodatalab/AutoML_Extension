@@ -2,12 +2,14 @@
 
 import asyncio
 import logging
+import json
 import os
 from typing import Optional
 
 from app.core.utils import utc_now
 
 from fastapi import HTTPException
+import mlflow
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,6 +40,7 @@ from app.core.context.user import get_viewing_user
 from app.core.domino_http import get_domino_public_api_client_sync
 from app.core.domino_job_launcher import get_domino_job_launcher
 from app.core.dataset_mounts import resolve_dataset_mount_paths
+from app.core.job_file_cache import download_mlflow_artifact
 from app.db.models import Job, JobLog, JobStatus, ModelType, ProblemType
 from app.db import crud
 from app.services.job_links import attach_external_links
@@ -778,12 +781,6 @@ async def _ensure_mlflow_results(db: AsyncSession, job: Job) -> Job:
 async def _fetch_mlflow_results(job_id: str) -> Optional[dict]:
     """Fetch training results from MLflow for a completed Domino job."""
     def _sync_fetch():
-        import json
-
-        import mlflow
-
-        from app.core.job_file_cache import download_mlflow_artifact
-
         runs = mlflow.search_runs(
             filter_string=f"tags.job_id = '{job_id}' and tags.run_type = 'evaluation_summary'",
             search_all_experiments=True,
