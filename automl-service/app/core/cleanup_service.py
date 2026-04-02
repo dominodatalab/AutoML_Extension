@@ -13,6 +13,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.core.job_file_cache import cache_dir_for_job
 from app.db import crud
 from app.db.models import Job, JobStatus
 
@@ -40,7 +41,6 @@ class CleanupService:
 
         # 1. Job file cache (MLflow artifacts downloaded to app's temp_path)
         try:
-            from app.core.job_file_cache import cache_dir_for_job
             cache_dir = cache_dir_for_job(job.id)
             if os.path.isdir(cache_dir):
                 model_files_size_bytes = _dir_size(cache_dir)

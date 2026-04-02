@@ -6,13 +6,32 @@ Covers:
 - POST /svc/v1/profiling/profile/suggest-target — target column suggestions
 - GET  /svc/v1/profiling/profile/presets — training presets
 - GET  /svc/v1/profiling/profile/metrics — evaluation metrics
-
-.. note:: Requires the ``domino`` package (available in Domino runtime).
 """
 
 import pytest
 
-pytestmark = pytest.mark.domino
+
+def _patch_dataset_fetch(monkeypatch, file_path: str):
+    """Patch dataset_file_bytes.fetch to read a local file instead of calling Domino."""
+    async def fake_fetch(dataset_id: str, file_path: str) -> bytes:
+        with open(file_path, "rb") as f:
+            return f.read()
+
+    monkeypatch.setattr(
+        "app.core.data_profiler.dataset_file_bytes.fetch",
+        fake_fetch,
+    )
+
+
+def _patch_dataset_fetch_not_found(monkeypatch):
+    """Patch dataset_file_bytes.fetch to raise FileNotFoundError."""
+    async def fake_fetch(dataset_id: str, file_path: str) -> bytes:
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    monkeypatch.setattr(
+        "app.core.data_profiler.dataset_file_bytes.fetch",
+        fake_fetch,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -21,11 +40,13 @@ pytestmark = pytest.mark.domino
 
 
 @pytest.mark.asyncio
-async def test_profile_tabular_csv(app_client, tabular_csv):
+async def test_profile_tabular_csv(app_client, tabular_csv, monkeypatch):
     """POST /svc/v1/profiling/profile returns a full profile for a tabular CSV."""
+    _patch_dataset_fetch(monkeypatch, tabular_csv)
+
     response = await app_client.post(
         "/svc/v1/profiling/profile",
-        json={"file_path": tabular_csv},
+        json={"file_path": tabular_csv, "dataset_id": "test-dataset-id"},
     )
 
     assert response.status_code == 200
@@ -69,12 +90,15 @@ async def test_profile_tabular_csv(app_client, tabular_csv):
 
 
 @pytest.mark.asyncio
-async def test_profile_tabular_csv_with_sampling(app_client, tabular_csv):
+async def test_profile_tabular_csv_with_sampling(app_client, tabular_csv, monkeypatch):
     """POST /svc/v1/profiling/profile respects sample_size parameter."""
+    _patch_dataset_fetch(monkeypatch, tabular_csv)
+
     response = await app_client.post(
         "/svc/v1/profiling/profile",
         json={
             "file_path": tabular_csv,
+            "dataset_id": "test-dataset-id",
             "sample_size": 50,
             "sampling_strategy": "head",
         },
@@ -88,11 +112,13 @@ async def test_profile_tabular_csv_with_sampling(app_client, tabular_csv):
 
 
 @pytest.mark.asyncio
-async def test_profile_nonexistent_file(app_client):
+async def test_profile_nonexistent_file(app_client, monkeypatch):
     """POST /svc/v1/profiling/profile with nonexistent file returns 404."""
+    _patch_dataset_fetch_not_found(monkeypatch)
+
     response = await app_client.post(
         "/svc/v1/profiling/profile",
-        json={"file_path": "/nonexistent/path/to/data.csv"},
+        json={"file_path": "/nonexistent/path/to/data.csv", "dataset_id": "test-dataset-id"},
     )
 
     assert response.status_code == 404
@@ -195,11 +221,13 @@ async def test_profile_timeseries_nonexistent_file(app_client):
 
 
 @pytest.mark.asyncio
-async def test_suggest_target_columns(app_client, tabular_csv):
+async def test_suggest_target_columns(app_client, tabular_csv, monkeypatch):
     """POST /svc/v1/profiling/profile/suggest-target returns target suggestions."""
+    _patch_dataset_fetch(monkeypatch, tabular_csv)
+
     response = await app_client.post(
         "/svc/v1/profiling/profile/suggest-target",
-        json={"file_path": tabular_csv},
+        json={"file_path": tabular_csv, "dataset_id": "test-dataset-id"},
     )
 
     assert response.status_code == 200
@@ -218,11 +246,13 @@ async def test_suggest_target_columns(app_client, tabular_csv):
 
 
 @pytest.mark.asyncio
-async def test_suggest_target_nonexistent_file(app_client):
+async def test_suggest_target_nonexistent_file(app_client, monkeypatch):
     """POST /svc/v1/profiling/profile/suggest-target with nonexistent file returns 404."""
+    _patch_dataset_fetch_not_found(monkeypatch)
+
     response = await app_client.post(
         "/svc/v1/profiling/profile/suggest-target",
-        json={"file_path": "/nonexistent/path.csv"},
+        json={"file_path": "/nonexistent/path.csv", "dataset_id": "test-dataset-id"},
     )
 
     assert response.status_code == 404

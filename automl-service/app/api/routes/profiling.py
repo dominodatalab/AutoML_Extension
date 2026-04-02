@@ -122,7 +122,8 @@ async def suggest_target_column(request: ProfileRequest):
     profiler = get_data_profiler()
 
     try:
-        profile = profiler.profile_file(
+        profile = await profiler.profile_file(
+            dataset_id=request.dataset_id,
             file_path=request.file_path,
             sample_size=request.sample_size,
             sampling_strategy=request.sampling_strategy,

@@ -1,7 +1,6 @@
 """Helpers for building Domino and Experiment Manager links for jobs."""
 
 import os
-import asyncio
 from fastapi import HTTPException
 from typing import Optional
 from urllib.parse import quote, urlparse, urlunparse

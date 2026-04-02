@@ -9,11 +9,9 @@ import os
 import logging
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
-from datetime import datetime
 import httpx
 
 from app.config import get_settings
-from app.core.context.auth import get_request_auth_header
 
 logger = logging.getLogger(__name__)
 

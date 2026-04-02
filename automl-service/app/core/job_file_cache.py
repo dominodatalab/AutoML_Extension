@@ -15,6 +15,8 @@ files for that job in one operation.
 import logging
 import os
 
+from app.config import get_settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,8 +33,6 @@ def download_mlflow_artifact(uri: str, job_id: str) -> str:
     Returns:
         Absolute local path to the cached artifact (file or directory).
     """
-    from app.config import get_settings
-
     if not uri.startswith("runs:/"):
         raise ValueError(
             f"MLflow artifact URI must start with 'runs:/', got: {uri!r}"
@@ -70,6 +70,4 @@ def download_mlflow_artifact(uri: str, job_id: str) -> str:
 
 def cache_dir_for_job(job_id: str) -> str:
     """Return the cache directory for a given job_id."""
-    from app.config import get_settings
-
     return os.path.join(get_settings().temp_path, job_id)

@@ -14,8 +14,6 @@ from app.config import get_settings
 from app.db.models import ModelType, ProblemType
 from app.core.trainers import (
     AdvancedConfig,
-    HpoConfig,
-    ThresholdConfig,
     TrainingProgressCallback,
     TabularTrainer,
     TimeSeriesTrainer,

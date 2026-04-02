@@ -42,7 +42,6 @@ from app.db.models import Job, JobLog, JobStatus, ModelType, ProblemType
 from app.db import crud
 from app.services.job_links import attach_external_links
 from app.services.models import JobConfig
-from app.services.project_resolver import resolve_project
 from app.workers.training_worker import register_trained_model
 
 logger = logging.getLogger(__name__)

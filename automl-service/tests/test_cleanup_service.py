@@ -252,7 +252,7 @@ class TestDeleteJobArtifacts:
         svc = CleanupService()
         with patch("app.core.cleanup_service._delete_mlflow_runs", return_value=0), \
              patch.object(crud, "delete_job_logs", new_callable=AsyncMock, return_value=0), \
-             patch("app.core.job_file_cache.cache_dir_for_job", return_value=model_dir):
+             patch("app.core.cleanup_service.cache_dir_for_job", return_value=model_dir):
             result = await svc.delete_job_artifacts(job, db_session)
 
         assert result["model_files_deleted"] is True
@@ -333,7 +333,7 @@ class TestDeleteJobArtifacts:
         ), patch.object(
             crud, "delete_job_logs", new_callable=AsyncMock, return_value=3
         ), patch(
-            "app.core.job_file_cache.cache_dir_for_job", return_value=model_dir
+            "app.core.cleanup_service.cache_dir_for_job", return_value=model_dir
         ), patch(
             "shutil.rmtree", side_effect=PermissionError("denied")
         ):
@@ -450,7 +450,7 @@ class TestBulkCleanup:
         svc = CleanupService()
         with patch("app.core.cleanup_service._delete_mlflow_runs", return_value=0), \
              patch.object(crud, "delete_job_logs", new_callable=AsyncMock, return_value=0), \
-             patch("app.core.job_file_cache.cache_dir_for_job", side_effect=_cache_dir):
+             patch("app.core.cleanup_service.cache_dir_for_job", side_effect=_cache_dir):
             result = await svc.bulk_cleanup(
                 db_session,
                 statuses=[JobStatus.FAILED],
