@@ -1,5 +1,5 @@
 import api from './index'
-import { Dataset, DatasetPreview, DatasetSchema, FileUploadResponse } from '../types/dataset'
+import { Dataset, DatasetPreview, DatasetSchema } from '../types/dataset'
 
 interface DatasetListResponse {
   datasets: Dataset[]
@@ -47,9 +47,3 @@ export async function getDatasetSchema(filePath: string): Promise<DatasetSchema>
   }
 }
 
-export async function uploadFile(file: File): Promise<FileUploadResponse> {
-  const formData = new FormData()
-  formData.append('file', file)
-  const response = await api.post<FileUploadResponse>('datasets/upload', formData)
-  return response.data
-}

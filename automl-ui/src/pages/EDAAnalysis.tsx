@@ -1,6 +1,6 @@
-import { useCallback, useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { useDatasets, useUploadFile, useDatasetPreview } from '../hooks/useDatasets'
+import { useDatasets, useDatasetPreview } from '../hooks/useDatasets'
 import { useEdaAsyncProfiling } from '../hooks/useEdaAsyncProfiling'
 import { useProfiling } from '../hooks/useProfiling'
 import { useStore } from '../store'
@@ -20,7 +20,6 @@ function EDAAnalysis() {
   const { project_name: projectName } = useProjectUserSummary()
   const [searchParams] = useSearchParams()
   const { data: datasetsData, isLoading: loadingDatasets, error: datasetsError } = useDatasets()
-  const uploadMutation = useUploadFile()
   const addNotification = useStore((state) => state.addNotification)
   const {
     profile, loading: profilingLoading, error: profilingError, profileFile,
@@ -28,7 +27,6 @@ function EDAAnalysis() {
     startAsyncProfile, getAsyncProfileStatus, setProfileData, setTsProfileData,
   } = useProfiling()
 
-  const [sourceType, setSourceType] = useState<'upload' | 'dataset'>('upload')
   const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null)
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null)
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null)
@@ -62,17 +60,10 @@ function EDAAnalysis() {
 
     const queryFilePath = searchParams.get('file_path')
     const queryDatasetId = searchParams.get('dataset_id')
-    const querySourceType = searchParams.get('data_source')
 
-    if (!queryFilePath && !queryDatasetId && !querySourceType) {
+    if (!queryFilePath && !queryDatasetId) {
       setQuerySelectionApplied(true)
       return
-    }
-
-    if (querySourceType === 'domino_dataset' || querySourceType === 'mounted') {
-      setSourceType('dataset')
-    } else if (querySourceType === 'upload') {
-      setSourceType('upload')
     }
 
     if (queryFilePath) {
@@ -127,24 +118,6 @@ function EDAAnalysis() {
     }
     void startAsyncTabularProfiling(selectedFilePath, sampleSize, samplingStrategy, stratifyColumn || undefined)
   }, [selectedFilePath, edaExecutionTarget, profileFile, resetAsyncState, startAsyncTabularProfiling])
-
-  const onDrop = useCallback(
-    async (acceptedFiles: File[]) => {
-      if (acceptedFiles.length === 0) return
-      const file = acceptedFiles[0]
-      try {
-        const result = await uploadMutation.mutateAsync(file)
-        setSelectedFilePath(result.file_path)
-        setSelectedFileName(result.file_name)
-      } catch (error) {
-        addNotification(
-          error instanceof Error ? error.message : 'Upload failed',
-          'error'
-        )
-      }
-    },
-    [uploadMutation, addNotification]
-  )
 
   const handleSelectDataset = (dataset: Dataset) => {
     setSelectedDataset(selectedDataset?.id === dataset.id ? null : dataset)
@@ -289,14 +262,10 @@ function EDAAnalysis() {
         </div>
 
         <DataSourceSelector
-          sourceType={sourceType}
-          setSourceType={setSourceType}
           datasets={datasets}
           loadingDatasets={loadingDatasets}
           datasetsError={datasetLoadError}
           selectedDataset={selectedDataset}
-          uploadIsPending={uploadMutation.isPending}
-          onDrop={onDrop}
           onSelectDataset={handleSelectDataset}
           onSelectFile={handleSelectFile}
           formatSize={formatSize}

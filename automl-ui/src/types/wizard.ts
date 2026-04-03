@@ -1,7 +1,7 @@
 import { ModelType, ProblemType, Preset, AdvancedAutoGluonConfig, TimeSeriesAdvancedConfig } from './job'
 
 export interface DataSourceConfig {
-  type: 'upload' | 'domino_dataset'
+  type: 'domino_dataset'
   datasetId?: string
   filePath?: string
   fileName?: string

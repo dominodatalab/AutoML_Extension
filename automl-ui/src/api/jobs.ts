@@ -34,16 +34,13 @@ export interface OrphanArtifact {
 
 export interface OrphanPreviewResponse {
   orphaned_models: OrphanArtifact[]
-  orphaned_uploads: OrphanArtifact[]
   orphaned_mlflow_runs: OrphanArtifact[]
   total_orphaned_model_size_bytes: number
-  total_orphaned_upload_size_bytes: number
   total_orphaned_mlflow_run_size_bytes: number
 }
 
 export interface CleanupOrphansResponse {
   models_deleted: number
-  uploads_deleted: number
   mlflow_runs_deleted: number
   total_size_freed_bytes: number
   errors: string[]

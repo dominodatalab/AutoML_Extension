@@ -56,7 +56,7 @@ function Step4Review() {
           <div className="bg-domino-bg-tertiary p-4">
             <ReviewItem
               label="Type"
-              value={dataSource?.type === 'upload' ? 'Uploaded File' : 'Domino Dataset'}
+              value={dataSource?.type === 'domino_dataset' ? 'Domino Dataset' : 'Unknown'}
             />
             <ReviewItem label="File" value={dataSource?.fileName} />
             {dataSource?.columns && (

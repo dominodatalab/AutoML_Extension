@@ -115,21 +115,17 @@ export function StorageCleanupDialog({ isOpen, onClose }: StorageCleanupDialogPr
 
   const stats = useMemo(() => {
     const modelCount = preview?.orphaned_models.length ?? 0
-    const uploadCount = preview?.orphaned_uploads.length ?? 0
     const mlflowCount = preview?.orphaned_mlflow_runs.length ?? 0
     const totalModelSize = preview?.total_orphaned_model_size_bytes ?? 0
-    const totalUploadSize = preview?.total_orphaned_upload_size_bytes ?? 0
     const totalMlflowSize = preview?.total_orphaned_mlflow_run_size_bytes ?? 0
 
     return {
       modelCount,
-      uploadCount,
       mlflowCount,
-      totalCount: modelCount + uploadCount + mlflowCount,
+      totalCount: modelCount + mlflowCount,
       totalModelSize,
-      totalUploadSize,
       totalMlflowSize,
-      totalSize: totalModelSize + totalUploadSize + totalMlflowSize,
+      totalSize: totalModelSize + totalMlflowSize,
     }
   }, [preview])
 
@@ -137,7 +133,7 @@ export function StorageCleanupDialog({ isOpen, onClose }: StorageCleanupDialogPr
     try {
       const result = await cleanupMutation.mutateAsync()
       const deletedCount =
-        result.models_deleted + result.uploads_deleted + result.mlflow_runs_deleted
+        result.models_deleted + result.mlflow_runs_deleted
       const freedSize = formatFileSize(result.total_size_freed_bytes)
 
       if (deletedCount > 0) {
@@ -205,7 +201,7 @@ export function StorageCleanupDialog({ isOpen, onClose }: StorageCleanupDialogPr
           <div className="px-6 py-5 overflow-y-auto space-y-5">
             <div className="flex items-center justify-between">
               <p className="text-sm text-domino-text-secondary">
-                Orphan preview scans model folders, uploaded files, and local MLflow run artifacts.
+                Orphan preview scans model folders and local MLflow run artifacts.
               </p>
               <Button
                 variant="ghost"
@@ -231,12 +227,7 @@ export function StorageCleanupDialog({ isOpen, onClose }: StorageCleanupDialogPr
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                  <SummaryStat
-                    label="Orphan uploads"
-                    count={stats.uploadCount}
-                    sizeLabel={formatFileSize(stats.totalUploadSize)}
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <SummaryStat
                     label="Orphan models"
                     count={stats.modelCount}
@@ -255,11 +246,6 @@ export function StorageCleanupDialog({ isOpen, onClose }: StorageCleanupDialogPr
                 </div>
 
                 <div className="grid grid-cols-1 gap-4">
-                  <ArtifactSection
-                    title="Orphaned upload files"
-                    items={preview?.orphaned_uploads ?? []}
-                    emptyText="No orphaned upload files found."
-                  />
                   <ArtifactSection
                     title="Orphaned model directories"
                     items={preview?.orphaned_models ?? []}

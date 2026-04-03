@@ -27,11 +27,3 @@ export interface DatasetSchema {
   row_count: number
 }
 
-export interface FileUploadResponse {
-  success: boolean
-  file_path: string
-  file_name: string
-  file_size: number
-  columns: string[]
-  row_count: number
-}

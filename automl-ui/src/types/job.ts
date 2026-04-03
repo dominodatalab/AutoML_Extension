@@ -140,7 +140,7 @@ export interface Job {
   domino_job_status?: string
   progress?: number
   current_step?: string
-  data_source: 'upload' | 'domino_dataset' | 'mounted'
+  data_source: 'domino_dataset'
   dataset_id?: string
   file_path?: string
   target_column: string
@@ -177,7 +177,7 @@ export interface JobCreateRequest {
   problem_type?: ProblemType
   domino_hardware_tier_name?: string
   domino_environment_id?: string
-  data_source: 'upload' | 'domino_dataset' | 'mounted'
+  data_source: 'domino_dataset'
   dataset_id?: string
   file_path?: string
   target_column: string

@@ -1,5 +1,5 @@
-import { useQuery, useMutation } from '@tanstack/react-query'
-import { getDatasets, getDataset, getDatasetPreview, getDatasetSchema, uploadFile } from '../api/datasets'
+import { useQuery } from '@tanstack/react-query'
+import { getDatasets, getDataset, getDatasetPreview, getDatasetSchema } from '../api/datasets'
 
 export function useDatasets() {
   return useQuery({
@@ -29,11 +29,5 @@ export function useDatasetSchema(filePath: string) {
     queryKey: ['datasetSchema', filePath],
     queryFn: () => getDatasetSchema(filePath),
     enabled: !!filePath,
-  })
-}
-
-export function useUploadFile() {
-  return useMutation({
-    mutationFn: (file: File) => uploadFile(file),
   })
 }
