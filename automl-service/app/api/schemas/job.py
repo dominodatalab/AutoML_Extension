@@ -290,15 +290,15 @@ class JobCreateRequest(BaseModel):
         None, description="Problem type (auto-detected if not specified)"
     )
 
-    # Data source
-    data_source: Literal["domino_dataset", "mounted"] = Field(
+    # Data source -- for now, just domino_dataset. future: net app volumes, possibly others
+    data_source: Literal["domino_dataset"] = Field(
         ..., description="Data source type"
     )
     dataset_id: Optional[str] = Field(
         None, description="Domino dataset ID (if data_source is 'domino_dataset')"
     )
     file_path: Optional[str] = Field(
-        None, description="File path (if data_source is 'mounted')"
+        None, description="File path within the data source"
     )
 
     # Training configuration

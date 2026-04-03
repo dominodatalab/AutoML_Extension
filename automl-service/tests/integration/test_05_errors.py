@@ -17,7 +17,8 @@ class TestJobErrors:
                 "name": unique_name("bad_file"),
                 "model_type": "tabular",
                 "problem_type": "binary",
-                "data_source": "mounted",
+                "data_source": "domino_dataset",
+                "dataset_id": "ds-nonexistent-test",
                 "file_path": "/nonexistent/path/data.csv",
                 "target_column": "target",
                 "preset": "medium_quality_faster_train",
@@ -35,7 +36,8 @@ class TestJobErrors:
             json={
                 "name": "incomplete-job",
                 # model_type missing
-                "data_source": "mounted",
+                "data_source": "domino_dataset",
+                "dataset_id": "ds-nonexistent-test",
                 "file_path": "/some/path.csv",
                 # target_column missing
             },
@@ -49,7 +51,8 @@ class TestJobErrors:
             json={
                 "name": unique_name("ts_no_time"),
                 "model_type": "timeseries",
-                "data_source": "mounted",
+                "data_source": "domino_dataset",
+                "dataset_id": "ds-nonexistent-test",
                 "file_path": tabular_csv_path,
                 "target_column": "target",
                 # time_column missing
