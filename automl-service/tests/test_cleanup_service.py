@@ -91,15 +91,12 @@ class TestFindOrphans:
 
     def test_detects_orphaned_model_dirs(self, tmp_data_dir, monkeypatch):
         models_dir = str(tmp_data_dir["models"])
-        uploads_dir = str(tmp_data_dir["uploads"])
 
-        # Create two fake model dirs
-        model_dir_1 = _make_model_dir(models_dir, "aaa-111", [100])
-        model_dir_2 = _make_model_dir(models_dir, "bbb-222", [200, 300])
+        _make_model_dir(models_dir, "aaa-111", [100])
+        _make_model_dir(models_dir, "bbb-222", [200, 300])
 
         svc = CleanupService()
         monkeypatch.setattr(svc.settings, "models_path", models_dir)
-        monkeypatch.setattr(svc.settings, "uploads_path", uploads_dir)
 
         with patch(
             "app.core.cleanup_service._scan_mlruns_for_orphans", return_value=[]
@@ -112,36 +109,15 @@ class TestFindOrphans:
         assert "job_bbb-222" in names
         assert result["total_orphaned_model_size_bytes"] == 100 + 200 + 300
 
-    def test_detects_orphaned_upload_files(self, tmp_data_dir, monkeypatch):
-        models_dir = str(tmp_data_dir["models"])
-        uploads_dir = str(tmp_data_dir["uploads"])
-
-        _write_file(os.path.join(uploads_dir, "abcd1234_data.csv"), 500)
-        _write_file(os.path.join(uploads_dir, "efgh5678_data.parquet"), 750)
-
-        svc = CleanupService()
-        monkeypatch.setattr(svc.settings, "models_path", models_dir)
-        monkeypatch.setattr(svc.settings, "uploads_path", uploads_dir)
-
-        with patch(
-            "app.core.cleanup_service._scan_mlruns_for_orphans", return_value=[]
-        ):
-            result = svc.find_orphans()
-
-        assert len(result["orphaned_uploads"]) == 2
-        assert result["total_orphaned_upload_size_bytes"] == 500 + 750
-
     def test_ignores_non_job_dirs(self, tmp_data_dir, monkeypatch):
         """Directories not starting with 'job_' should not appear as orphans."""
         models_dir = str(tmp_data_dir["models"])
-        uploads_dir = str(tmp_data_dir["uploads"])
 
         os.makedirs(os.path.join(models_dir, "other_dir"))
         _make_model_dir(models_dir, "real-job", [50])
 
         svc = CleanupService()
         monkeypatch.setattr(svc.settings, "models_path", models_dir)
-        monkeypatch.setattr(svc.settings, "uploads_path", uploads_dir)
 
         with patch(
             "app.core.cleanup_service._scan_mlruns_for_orphans", return_value=[]
@@ -152,10 +128,9 @@ class TestFindOrphans:
         assert result["orphaned_models"][0]["name"] == "job_real-job"
 
     def test_empty_directories(self, tmp_data_dir, monkeypatch):
-        """No orphans when models and uploads dirs are empty."""
+        """No orphans when models dir is empty."""
         svc = CleanupService()
         monkeypatch.setattr(svc.settings, "models_path", str(tmp_data_dir["models"]))
-        monkeypatch.setattr(svc.settings, "uploads_path", str(tmp_data_dir["uploads"]))
 
         with patch(
             "app.core.cleanup_service._scan_mlruns_for_orphans", return_value=[]
@@ -163,7 +138,6 @@ class TestFindOrphans:
             result = svc.find_orphans()
 
         assert result["orphaned_models"] == []
-        assert result["orphaned_uploads"] == []
         assert result["total_orphaned_model_size_bytes"] == 0
 
 
@@ -180,7 +154,6 @@ class TestFindOrphansChecked:
         self, tmp_data_dir, db_session, make_job, monkeypatch
     ):
         models_dir = str(tmp_data_dir["models"])
-        uploads_dir = str(tmp_data_dir["uploads"])
 
         # Create a model dir on disk and a matching job in DB
         job = make_job(name="existing-job", status=JobStatus.COMPLETED)
@@ -194,7 +167,6 @@ class TestFindOrphansChecked:
 
         svc = CleanupService()
         monkeypatch.setattr(svc.settings, "models_path", models_dir)
-        monkeypatch.setattr(svc.settings, "uploads_path", uploads_dir)
 
         with patch(
             "app.core.cleanup_service._scan_mlruns_for_orphans", return_value=[]
@@ -204,35 +176,6 @@ class TestFindOrphansChecked:
         # Only the unmatched dir should appear
         assert len(result["orphaned_models"]) == 1
         assert result["orphaned_models"][0]["name"] == "job_no-match-id"
-
-    @pytest.mark.asyncio
-    async def test_filters_out_uploads_referenced_by_jobs(
-        self, tmp_data_dir, db_session, make_job, monkeypatch
-    ):
-        models_dir = str(tmp_data_dir["models"])
-        uploads_dir = str(tmp_data_dir["uploads"])
-
-        referenced_file = os.path.join(uploads_dir, "referenced.csv")
-        orphaned_file = os.path.join(uploads_dir, "orphaned.csv")
-        _write_file(referenced_file, 100)
-        _write_file(orphaned_file, 200)
-
-        job = make_job(name="upload-job", file_path=referenced_file)
-        db_session.add(job)
-        await db_session.commit()
-
-        svc = CleanupService()
-        monkeypatch.setattr(svc.settings, "models_path", models_dir)
-        monkeypatch.setattr(svc.settings, "uploads_path", uploads_dir)
-
-        with patch(
-            "app.core.cleanup_service._scan_mlruns_for_orphans", return_value=[]
-        ):
-            result = await svc.find_orphans_checked(db_session)
-
-        orphan_paths = {u["path"] for u in result["orphaned_uploads"]}
-        assert orphaned_file in orphan_paths
-        assert referenced_file not in orphan_paths
 
 
 # ---------------------------------------------------------------------------
@@ -258,52 +201,6 @@ class TestDeleteJobArtifacts:
         assert result["model_files_deleted"] is True
         assert result["model_files_size_bytes"] == 300
         assert not os.path.exists(model_dir)
-
-    @pytest.mark.asyncio
-    async def test_deletes_upload_file_when_sole_reference(
-        self, tmp_data_dir, db_session, make_job
-    ):
-        uploads_dir = str(tmp_data_dir["uploads"])
-        upload_path = os.path.join(uploads_dir, "solo.csv")
-        _write_file(upload_path, 500)
-
-        job = make_job(
-            name="del-upload",
-            data_source="upload",
-            file_path=upload_path,
-            status=JobStatus.FAILED,
-        )
-        db_session.add(job)
-        await db_session.commit()
-
-        svc = CleanupService()
-        with patch("app.core.cleanup_service._delete_mlflow_runs", return_value=0), \
-             patch.object(crud, "delete_job_logs", new_callable=AsyncMock, return_value=0):
-            result = await svc.delete_job_artifacts(job, db_session)
-
-        assert result["upload_file_deleted"] is True
-        assert not os.path.exists(upload_path)
-
-    @pytest.mark.asyncio
-    async def test_skips_upload_when_shared(self, tmp_data_dir, db_session, make_job):
-        """When multiple jobs share the same upload file, it should not be deleted."""
-        uploads_dir = str(tmp_data_dir["uploads"])
-        shared_path = os.path.join(uploads_dir, "shared.csv")
-        _write_file(shared_path, 400)
-
-        job1 = make_job(name="job1", data_source="upload", file_path=shared_path)
-        job2 = make_job(name="job2", data_source="upload", file_path=shared_path)
-        db_session.add_all([job1, job2])
-        await db_session.commit()
-
-        svc = CleanupService()
-        with patch("app.core.cleanup_service._delete_mlflow_runs", return_value=0), \
-             patch.object(crud, "delete_job_logs", new_callable=AsyncMock, return_value=0):
-            result = await svc.delete_job_artifacts(job1, db_session)
-
-        # File should still exist because job2 also references it
-        assert result["upload_file_deleted"] is False
-        assert os.path.exists(shared_path)
 
     @pytest.mark.asyncio
     async def test_handles_missing_model_path(self, db_session, make_job):
@@ -372,19 +269,10 @@ class TestPreviewCleanup:
         self, tmp_data_dir, db_session, make_job, monkeypatch
     ):
         models_dir = str(tmp_data_dir["models"])
-        uploads_dir = str(tmp_data_dir["uploads"])
 
-        # Create a completed job with model dir and upload
-        job = make_job(
-            name="preview-job",
-            status=JobStatus.COMPLETED,
-            data_source="upload",
-        )
+        job = make_job(name="preview-job", status=JobStatus.COMPLETED)
         model_dir = _make_model_dir(models_dir, job.id, [100, 200])
         job.model_path = model_dir
-        upload_path = os.path.join(uploads_dir, "preview.csv")
-        _write_file(upload_path, 400)
-        job.file_path = upload_path
 
         db_session.add(job)
         await db_session.commit()
@@ -399,14 +287,12 @@ class TestPreviewCleanup:
 
         assert result["job_count"] == 1
         assert result["total_model_size_bytes"] == 300
-        assert result["total_upload_size_bytes"] == 400
         assert result["total_mlflow_runs"] == 2
         assert result["total_logs"] == 5
         assert len(result["jobs"]) == 1
 
         # Verify nothing was actually deleted
         assert os.path.exists(model_dir)
-        assert os.path.exists(upload_path)
 
     @pytest.mark.asyncio
     async def test_no_matching_jobs(self, db_session):

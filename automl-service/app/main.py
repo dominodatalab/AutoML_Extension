@@ -39,10 +39,8 @@ async def lifespan(app: FastAPI):
     os.makedirs(settings.models_path, exist_ok=True)
     os.makedirs(settings.temp_path, exist_ok=True)
     os.makedirs(settings.datasets_path, exist_ok=True)
-    os.makedirs(settings.uploads_path, exist_ok=True)
     os.makedirs(settings.eda_results_path, exist_ok=True)
-    os.makedirs(os.path.join(settings.datasets_path, "uploads"), exist_ok=True)
-    logger.info(f"Required directories created (uploads: {settings.uploads_path})")
+    logger.info("Required directories created")
 
     yield
 

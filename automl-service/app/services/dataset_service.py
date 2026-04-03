@@ -3,14 +3,12 @@
 import logging
 import os
 from io import BytesIO
-import shutil
-import uuid
 from functools import lru_cache
 from typing import Any, Optional, Sequence
 
 import numpy as np
 import pandas as pd
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException
 
 import app.core.domino_http as domino_http
 from app.api.generated.domino_public_api_client.api.dataset_rw import get_dataset, get_datasets_v2
@@ -28,7 +26,6 @@ from app.api.schemas.dataset import (
     DatasetPreviewResponse,
     DatasetResponse,
     DatasetSchemaResponse,
-    FileUploadResponse,
 )
 from app.config import get_settings
 from app.core.dataset_mounts import resolve_dataset_mount_paths
@@ -37,7 +34,6 @@ from app.core.dataset_manager import DominoDatasetManager
 from app.services import dataset_file_bytes
 from app.services.dataset_file_bytes import _is_unset
 
-ALLOWED_UPLOAD_EXTENSIONS = (".csv", ".parquet", ".pq")
 DEFAULT_PREVIEW_LIMIT = 100
 MAX_PREVIEW_LIMIT = 1000
 
@@ -420,54 +416,4 @@ async def preview_file_path_response(
         offset=offset,
         include_dtypes=True,
         file_bytes=file_bytes
-    )
-
-
-async def save_uploaded_file(file: UploadFile) -> FileUploadResponse:
-    """Save an uploaded dataset file and return metadata."""
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="No file provided")
-
-    file_ext = os.path.splitext(file.filename)[1].lower()
-    if file_ext not in ALLOWED_UPLOAD_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File type not supported. Allowed: {list(ALLOWED_UPLOAD_EXTENSIONS)}",
-        )
-
-    upload_dir = get_settings().uploads_path
-    os.makedirs(upload_dir, exist_ok=True)
-
-    unique_id = str(uuid.uuid4())[:8]
-    safe_filename = f"{unique_id}_{file.filename}"
-    file_path = os.path.join(upload_dir, safe_filename)
-
-    try:
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to save file: {exc}") from exc
-
-    try:
-        if file_ext == ".csv":
-            header_df = pd.read_csv(file_path, nrows=0)
-            with open(file_path, "r") as f:
-                row_count = max(sum(1 for _ in f) - 1, 0)
-        else:
-            header_df = pd.read_parquet(file_path)
-            row_count = len(header_df)
-
-        columns = list(header_df.columns)
-        file_size = os.path.getsize(file_path)
-    except Exception as exc:
-        os.remove(file_path)
-        raise HTTPException(status_code=400, detail=f"Failed to read file: {exc}") from exc
-
-    return FileUploadResponse(
-        success=True,
-        file_path=file_path,
-        file_name=file.filename,
-        file_size=file_size,
-        columns=columns,
-        row_count=row_count,
     )

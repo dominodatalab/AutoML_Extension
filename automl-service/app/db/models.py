@@ -66,7 +66,7 @@ class Job(Base):
     problem_type: Mapped[Optional[ProblemType]] = mapped_column(SQLEnum(ProblemType), nullable=True)
 
     # Data source
-    data_source: Mapped[str] = mapped_column(String(50), nullable=False)  # "upload" or "domino_dataset"
+    data_source: Mapped[str] = mapped_column(String(50), nullable=False)  # "domino_dataset" or "mounted"
     dataset_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 

@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.error_handler import handle_errors
 
@@ -12,7 +12,6 @@ from app.api.schemas.dataset import (
     DatasetListResponse,
     DatasetPreviewResponse,
     DatasetSchemaResponse,
-    FileUploadResponse,
 )
 from app.services.dataset_service import (
     get_dataset_manager,
@@ -23,7 +22,6 @@ from app.services.dataset_service import (
     preview_dataset_response,
     preview_file_path_response,
     preview_file_response,
-    save_uploaded_file,
 )
 
 router = APIRouter()
@@ -100,9 +98,3 @@ async def preview_dataset_file(
     return await preview_file_path_response(body=body)
 
 
-@router.post("/upload", response_model=FileUploadResponse)
-async def upload_file(
-    file: UploadFile = File(..., description="CSV or Parquet file to upload"),
-):
-    """Upload a file for training."""
-    return await save_uploaded_file(file)

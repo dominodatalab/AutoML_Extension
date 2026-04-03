@@ -56,7 +56,8 @@ def _make_create_request(**overrides) -> JobCreateRequest:
     defaults = {
         "name": "test-job",
         "model_type": "tabular",
-        "data_source": "upload",
+        "data_source": "domino_dataset",
+        "dataset_id": "ds-test",
         "target_column": "target",
         "file_path": "/tmp/data.csv",
     }
@@ -95,16 +96,12 @@ class TestValidateJobCreateRequest:
         req = _make_create_request(data_source="domino_dataset", dataset_id="ds-123")
         validate_job_create_request(req)  # should not raise
 
-    def test_upload_requires_file_path(self):
-        req = _make_create_request(data_source="upload", file_path=None)
+    def test_domino_dataset_requires_file_path(self):
+        req = _make_create_request(data_source="domino_dataset", dataset_id="ds-123", file_path=None)
         with pytest.raises(HTTPException) as exc_info:
             validate_job_create_request(req)
         assert exc_info.value.status_code == 400
         assert "file_path" in exc_info.value.detail
-
-    def test_upload_ok_with_file_path(self):
-        req = _make_create_request(data_source="upload", file_path="/data/test.csv")
-        validate_job_create_request(req)  # should not raise
 
     def test_timeseries_requires_time_column(self):
         req = _make_create_request(
@@ -136,7 +133,7 @@ class TestValidateJobCreateRequest:
         )
         validate_job_create_request(req)  # should not raise
 
-    def test_tabular_upload_ok(self):
+    def test_tabular_domino_dataset_ok(self):
         req = _make_create_request()
         validate_job_create_request(req)  # should not raise
 
@@ -291,7 +288,8 @@ class TestBuildJobModel:
         req = _make_create_request(
             name="my-job",
             description="a training run",
-            data_source="upload",
+            data_source="domino_dataset",
+            dataset_id="ds-123",
             file_path="/tmp/data.csv",
             target_column="target",
             preset="best_quality",
@@ -313,7 +311,7 @@ class TestBuildJobModel:
         assert job.project_id == "pid-1"
         assert job.project_name == "my-proj"
         assert job.model_type == ModelType.TABULAR
-        assert job.data_source == "upload"
+        assert job.data_source == "domino_dataset"
         assert job.file_path == "/tmp/data.csv"
         assert job.target_column == "target"
         assert job.preset == "best_quality"

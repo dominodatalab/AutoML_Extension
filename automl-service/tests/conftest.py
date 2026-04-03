@@ -317,11 +317,10 @@ async def db_session(async_engine) -> AsyncGenerator[AsyncSession, None]:
 
 @pytest.fixture
 def tmp_data_dir(tmp_path):
-    """Create a temporary directory tree for test data/models/uploads."""
+    """Create a temporary directory tree for test data/models."""
     dirs = {
         "root": tmp_path,
         "models": tmp_path / "models",
-        "uploads": tmp_path / "uploads",
         "datasets": tmp_path / "datasets",
         "temp": tmp_path / "temp",
         "eda_results": tmp_path / "eda_results",
@@ -473,7 +472,7 @@ def make_job():
         status: JobStatus = JobStatus.PENDING,
         model_type: ModelType = ModelType.TABULAR,
         problem_type: ProblemType = None,
-        data_source: str = "upload",
+        data_source: str = "domino_dataset",
         target_column: str = "target",
         file_path: str = "/tmp/test.csv",
         owner: str = "test-user",
@@ -519,7 +518,6 @@ async def app_client(async_engine, tmp_data_dir, monkeypatch, mock_viewing_user)
     # Override settings before importing the app
     monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
     monkeypatch.setenv("MODELS_PATH", str(tmp_data_dir["models"]))
-    monkeypatch.setenv("UPLOADS_PATH", str(tmp_data_dir["uploads"]))
     monkeypatch.setenv("DATASETS_PATH", str(tmp_data_dir["datasets"]))
     monkeypatch.setenv("TEMP_PATH", str(tmp_data_dir["temp"]))
     monkeypatch.setenv("EDA_RESULTS_PATH", str(tmp_data_dir["eda_results"]))

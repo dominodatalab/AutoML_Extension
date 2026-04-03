@@ -32,7 +32,6 @@ class Settings(BaseSettings):
     models_path: str = ""
     temp_path: str = ""
     datasets_path: str = ""
-    uploads_path: str = ""
     eda_results_path: str = ""
 
     def _is_domino_runtime(self) -> bool:
@@ -64,7 +63,6 @@ class Settings(BaseSettings):
             "models_path": f"{project_root}/models" if is_domino else "./local_data/models",
             "temp_path": f"{project_root}/temp" if is_domino else "./local_data/temp",
             "datasets_path": f"{project_root}/datasets" if is_domino else "./local_data/datasets",
-            "uploads_path": f"{project_root}/uploads" if is_domino else "./local_data/uploads",
             "eda_results_path": f"{project_root}/eda_results" if is_domino else "./local_data/eda_results",
         }
         domino_local_placeholders = {
@@ -72,7 +70,6 @@ class Settings(BaseSettings):
             "models_path": {"./local_data/models"},
             "temp_path": {"./local_data/temp"},
             "datasets_path": {"./local_data/datasets"},
-            "uploads_path": {"./local_data/uploads"},
             "eda_results_path": {"./local_data/eda_results"},
         }
         for field, default in defaults.items():

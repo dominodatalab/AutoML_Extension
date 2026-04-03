@@ -1,7 +1,7 @@
 """Artifact cleanup service for jobs.
 
-Handles deletion of model files, MLflow runs, upload files, logs,
-and registered model records. Also detects and cleans orphaned artifacts.
+Handles deletion of model files, MLflow runs, logs, and registered model records.
+Also detects and cleans orphaned artifacts.
 """
 
 import logging
@@ -34,7 +34,6 @@ class CleanupService:
         errors = []
         model_files_deleted = False
         model_files_size_bytes = 0
-        upload_file_deleted = False
         mlflow_runs_deleted = 0
         job_logs_deleted = 0
         registered_model_deleted = False
@@ -51,29 +50,7 @@ class CleanupService:
             errors.append(f"model_files: {e}")
             logger.warning(f"Failed to delete job file cache for job {job.id}: {e}")
 
-        # 2. Upload file (only if data_source == "upload" and no other job shares it)
-        if (
-            job.data_source == "upload"
-            and job.file_path
-            and os.path.exists(job.file_path)
-        ):
-            try:
-                ref_count = await crud.count_jobs_with_file_path(db, job.file_path)
-                # ref_count includes the current job (not yet deleted from DB)
-                if ref_count <= 1:
-                    os.remove(job.file_path)
-                    upload_file_deleted = True
-                    logger.info(f"Deleted upload file {job.file_path}")
-                else:
-                    logger.info(
-                        f"Skipped upload file {job.file_path} — "
-                        f"shared by {ref_count} jobs"
-                    )
-            except Exception as e:
-                errors.append(f"upload_file: {e}")
-                logger.warning(f"Failed to delete upload file {job.file_path}: {e}")
-
-        # 3. MLflow runs (tagged with job_id)
+        # 2. MLflow runs (tagged with job_id)
         try:
             mlflow_runs_deleted = _delete_mlflow_runs(job.id)
         except Exception as e:
@@ -107,7 +84,6 @@ class CleanupService:
         return {
             "model_files_deleted": model_files_deleted,
             "model_files_size_bytes": model_files_size_bytes,
-            "upload_file_deleted": upload_file_deleted,
             "mlflow_runs_deleted": mlflow_runs_deleted,
             "job_logs_deleted": job_logs_deleted,
             "registered_model_deleted": registered_model_deleted,
@@ -125,7 +101,6 @@ class CleanupService:
         jobs = await crud.get_jobs_for_cleanup(db, statuses, older_than_days, project_id=project_id)
 
         total_model_size = 0
-        total_upload_size = 0
         total_mlflow_runs = 0
         total_logs = 0
         job_summaries = []
@@ -135,17 +110,6 @@ class CleanupService:
             if job.model_path and os.path.exists(job.model_path):
                 model_size = _dir_size(job.model_path)
             total_model_size += model_size
-
-            upload_size = 0
-            if (
-                job.data_source == "upload"
-                and job.file_path
-                and os.path.exists(job.file_path)
-            ):
-                ref_count = await crud.count_jobs_with_file_path(db, job.file_path)
-                if ref_count <= 1:
-                    upload_size = os.path.getsize(job.file_path)
-            total_upload_size += upload_size
 
             mlflow_count = _count_mlflow_runs(job.id)
             total_mlflow_runs += mlflow_count
@@ -159,7 +123,6 @@ class CleanupService:
                 "status": job.status.value,
                 "created_at": job.created_at.isoformat(),
                 "model_size_bytes": model_size,
-                "upload_size_bytes": upload_size,
                 "mlflow_runs": mlflow_count,
                 "log_count": log_count,
             })
@@ -167,7 +130,6 @@ class CleanupService:
         return {
             "job_count": len(jobs),
             "total_model_size_bytes": total_model_size,
-            "total_upload_size_bytes": total_upload_size,
             "total_mlflow_runs": total_mlflow_runs,
             "total_logs": total_logs,
             "jobs": job_summaries,
@@ -184,7 +146,6 @@ class CleanupService:
         jobs = await crud.get_jobs_for_cleanup(db, statuses, older_than_days, project_id=project_id)
 
         total_model_size = 0
-        total_upload_files = 0
         total_mlflow_runs = 0
         total_logs = 0
         all_errors = []
@@ -193,8 +154,6 @@ class CleanupService:
         for job in jobs:
             result = await self.delete_job_artifacts(job, db)
             total_model_size += result["model_files_size_bytes"]
-            if result["upload_file_deleted"]:
-                total_upload_files += 1
             total_mlflow_runs += result["mlflow_runs_deleted"]
             total_logs += result["job_logs_deleted"]
             all_errors.extend(result["errors"])
@@ -206,21 +165,19 @@ class CleanupService:
             "jobs_deleted": len(deleted_job_ids),
             "deleted_job_ids": deleted_job_ids,
             "total_model_size_bytes": total_model_size,
-            "total_upload_files_deleted": total_upload_files,
             "total_mlflow_runs_deleted": total_mlflow_runs,
             "total_logs_deleted": total_logs,
             "errors": all_errors,
         }
 
     def find_orphans(self) -> dict:
-        """Scan model, upload, and mlruns directories for orphaned artifacts.
+        """Scan model and mlruns directories for orphaned artifacts.
 
         Orphans are dirs/files on disk with no matching job in the DB.
         Note: This is a sync method since it only reads the filesystem.
         The caller should pass DB-checked results for job existence.
         """
         orphaned_models = []
-        orphaned_uploads = []
 
         # Scan models directory for job_* dirs
         models_path = self.settings.models_path
@@ -234,29 +191,14 @@ class CleanupService:
                         "name": entry.name,
                     })
 
-        # Scan uploads directory
-        uploads_path = self.settings.uploads_path
-        if os.path.isdir(uploads_path):
-            for entry in os.scandir(uploads_path):
-                if entry.is_file():
-                    orphaned_uploads.append({
-                        "path": entry.path,
-                        "size_bytes": entry.stat().st_size,
-                        "name": entry.name,
-                    })
-
         # Scan mlruns directory for run folders
         orphaned_mlflow_runs = _scan_mlruns_for_orphans()
 
         return {
             "orphaned_models": orphaned_models,
-            "orphaned_uploads": orphaned_uploads,
             "orphaned_mlflow_runs": orphaned_mlflow_runs,
             "total_orphaned_model_size_bytes": sum(
                 m["size_bytes"] for m in orphaned_models
-            ),
-            "total_orphaned_upload_size_bytes": sum(
-                u["size_bytes"] for u in orphaned_uploads
             ),
             "total_orphaned_mlflow_run_size_bytes": sum(
                 r["size_bytes"] for r in orphaned_mlflow_runs
@@ -281,13 +223,6 @@ class CleanupService:
                 if job is None:
                     checked_models.append(entry)
 
-        # Filter uploads: only keep files not referenced by any job
-        checked_uploads = []
-        for entry in raw["orphaned_uploads"]:
-            ref_count = await crud.count_jobs_with_file_path(db, entry["path"])
-            if ref_count == 0:
-                checked_uploads.append(entry)
-
         # Filter mlflow runs: only keep runs whose job_id tag doesn't match any DB job
         checked_mlflow_runs = []
         for entry in raw["orphaned_mlflow_runs"]:
@@ -302,13 +237,9 @@ class CleanupService:
 
         return {
             "orphaned_models": checked_models,
-            "orphaned_uploads": checked_uploads,
             "orphaned_mlflow_runs": checked_mlflow_runs,
             "total_orphaned_model_size_bytes": sum(
                 m["size_bytes"] for m in checked_models
-            ),
-            "total_orphaned_upload_size_bytes": sum(
-                u["size_bytes"] for u in checked_uploads
             ),
             "total_orphaned_mlflow_run_size_bytes": sum(
                 r["size_bytes"] for r in checked_mlflow_runs
@@ -316,10 +247,9 @@ class CleanupService:
         }
 
     async def delete_orphans(self, db: AsyncSession) -> dict:
-        """Delete orphaned model dirs, upload files, and MLflow run folders."""
+        """Delete orphaned model dirs and MLflow run folders."""
         orphans = await self.find_orphans_checked(db)
         deleted_models = []
-        deleted_uploads = []
         deleted_mlflow_runs = []
         errors = []
 
@@ -330,14 +260,6 @@ class CleanupService:
                 logger.info(f"Deleted orphaned model dir: {entry['path']}")
             except Exception as e:
                 errors.append(f"model {entry['path']}: {e}")
-
-        for entry in orphans["orphaned_uploads"]:
-            try:
-                os.remove(entry["path"])
-                deleted_uploads.append(entry)
-                logger.info(f"Deleted orphaned upload: {entry['path']}")
-            except Exception as e:
-                errors.append(f"upload {entry['path']}: {e}")
 
         for entry in orphans["orphaned_mlflow_runs"]:
             try:
@@ -357,11 +279,9 @@ class CleanupService:
 
         return {
             "models_deleted": len(deleted_models),
-            "uploads_deleted": len(deleted_uploads),
             "mlflow_runs_deleted": len(deleted_mlflow_runs),
             "total_size_freed_bytes": (
                 sum(m["size_bytes"] for m in deleted_models)
-                + sum(u["size_bytes"] for u in deleted_uploads)
                 + sum(r["size_bytes"] for r in deleted_mlflow_runs)
             ),
             "errors": errors,

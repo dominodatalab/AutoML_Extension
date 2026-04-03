@@ -55,17 +55,6 @@ class DatasetSchemaResponse(BaseModel):
     row_count: int
 
 
-class FileUploadResponse(BaseModel):
-    """Response schema for file upload."""
-
-    success: bool
-    file_path: str
-    file_name: str
-    file_size: int
-    columns: list[str]
-    row_count: int
-
-
 class DatasetFilePreviewRequest(BaseModel):
     """Request schema for dataset file preview."""
 

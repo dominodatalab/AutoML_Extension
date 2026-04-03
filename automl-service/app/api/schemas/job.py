@@ -291,14 +291,14 @@ class JobCreateRequest(BaseModel):
     )
 
     # Data source
-    data_source: Literal["upload", "domino_dataset", "mounted"] = Field(
+    data_source: Literal["domino_dataset", "mounted"] = Field(
         ..., description="Data source type"
     )
     dataset_id: Optional[str] = Field(
         None, description="Domino dataset ID (if data_source is 'domino_dataset')"
     )
     file_path: Optional[str] = Field(
-        None, description="File path (if data_source is 'upload' or 'mounted')"
+        None, description="File path (if data_source is 'mounted')"
     )
 
     # Training configuration

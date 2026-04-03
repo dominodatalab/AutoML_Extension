@@ -11,7 +11,6 @@ from app.api.schemas.dataset import (
     DatasetResponse,
     DatasetPreviewResponse,
     DatasetSchemaResponse,
-    FileUploadResponse,
 )
 from app.api.schemas.model import (
     RegisteredModelResponse,
@@ -27,7 +26,6 @@ __all__ = [
     "DatasetResponse",
     "DatasetPreviewResponse",
     "DatasetSchemaResponse",
-    "FileUploadResponse",
     "RegisteredModelResponse",
     "ModelVersionResponse",
 ]

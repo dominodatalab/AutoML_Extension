@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 
 @pytest.fixture()
@@ -144,6 +144,10 @@ async def test_per_request_user_context_isolation_via_api(app_client, monkeypatc
     monkeypatch.setattr(project_resolver, "resolve_project", fake_resolve_project, raising=True)
     monkeypatch.setattr(job_service, "get_domino_job_launcher", lambda: FakeLauncher(), raising=True)
     monkeypatch.setattr(job_service, "_attach_external_links", lambda job: job, raising=True)
+    monkeypatch.setattr(
+        "app.services.dataset_service.get_dataset_manager",
+        lambda: MagicMock(get_dataset_path=AsyncMock(return_value="/domino/datasets/ds-test-123")),
+    )
 
     # First request has owner alice
     r1 = await app_client.post(
@@ -152,7 +156,8 @@ async def test_per_request_user_context_isolation_via_api(app_client, monkeypatc
         json={
             "name": "req1",
             "model_type": "tabular",
-            "data_source": "upload",
+            "data_source": "domino_dataset",
+            "dataset_id": "ds-test-123",
             "file_path": "/tmp/dummy.csv",
             "target_column": "target",
         },
@@ -168,7 +173,8 @@ async def test_per_request_user_context_isolation_via_api(app_client, monkeypatc
         json={
             "name": "req2",
             "model_type": "tabular",
-            "data_source": "upload",
+            "data_source": "domino_dataset",
+            "dataset_id": "ds-test-123",
             "file_path": "/tmp/dummy.csv",
             "target_column": "target",
         },

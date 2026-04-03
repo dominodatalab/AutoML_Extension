@@ -124,10 +124,10 @@ def validate_job_create_request(job_request: JobCreateRequest) -> None:
             detail="dataset_id is required when data_source is 'domino_dataset'",
         )
 
-    if job_request.data_source in ("upload", "domino_dataset") and not job_request.file_path:
+    if job_request.data_source == "domino_dataset" and not job_request.file_path:
         raise HTTPException(
             status_code=400,
-            detail="file_path is required when data_source is 'upload' or 'domino_dataset'",
+            detail="file_path is required when data_source is 'domino_dataset'",
         )
 
     if job_request.model_type == "timeseries":
@@ -695,9 +695,6 @@ def _first_dataset_file(path: str) -> Optional[str]:
 
 async def _resolve_job_data_path(job: Job) -> Optional[str]:
     """Resolve a job's current data path for stale-reference checks."""
-    if job.data_source == "upload":
-        return job.file_path
-
     if job.data_source != "domino_dataset" or not job.dataset_id:
         return None
 
@@ -726,7 +723,7 @@ async def _mark_pending_job_failed_for_missing_data(
     """Fail pending jobs when their referenced source data was deleted."""
     if job.status != JobStatus.PENDING:
         return None
-    if job.data_source not in {"upload", "domino_dataset"}:
+    if job.data_source != "domino_dataset":
         return None
     if (
         job.data_source == "domino_dataset"
@@ -1016,7 +1013,7 @@ async def reconcile_jobs_for_storage_cleanup(db: AsyncSession) -> dict:
         ):
             missing_domino_jobs_finalized += 1
 
-        if job.status == JobStatus.PENDING and job.data_source in {"upload", "domino_dataset"}:
+        if job.status == JobStatus.PENDING and job.data_source == "domino_dataset":
             updated_job = await _mark_pending_job_failed_for_missing_data(
                 db,
                 job,

@@ -34,7 +34,8 @@ JOB_CREATE_URL = f"/svc/v1/jobs?projectId={TEST_PROJECT_ID}"
 VALID_TABULAR_JOB = {
     "name": "test-tabular-job",
     "model_type": "tabular",
-    "data_source": "upload",
+    "data_source": "domino_dataset",
+    "dataset_id": "ds-test-123",
     "file_path": "/tmp/test.csv",
     "target_column": "target",
     "preset": "medium_quality_faster_train",
@@ -83,7 +84,10 @@ def _mock_job_infra():
             patch("app.services.job_service.require_domino_job_list"), \
             patch("app.core.authorization.current_user_can_start_job", return_value=True), \
             patch("app.core.authorization.current_user_can_stop_job", return_value=True), \
-            patch("app.core.authorization.current_user_can_list_jobs", return_value=True):
+            patch("app.core.authorization.current_user_can_list_jobs", return_value=True), \
+            patch("app.services.dataset_service.get_dataset_manager", return_value=MagicMock(
+                get_dataset_path=AsyncMock(return_value="/domino/datasets/ds-test-123")
+            )):
             yield
     finally:
         set_request_auth_header(None)
@@ -105,7 +109,7 @@ async def test_create_tabular_job(app_client):
     assert body["model_type"] == "tabular"
     assert body["status"] == "pending"
     assert body["target_column"] == "target"
-    assert body["data_source"] == "upload"
+    assert body["data_source"] == "domino_dataset"
     assert "id" in body
     assert "created_at" in body
 
@@ -116,7 +120,7 @@ async def test_create_job_missing_target_column(app_client):
     payload = {
         "name": "bad-job",
         "model_type": "tabular",
-        "data_source": "upload",
+        "data_source": "domino_dataset",
         "file_path": "/tmp/test.csv",
         # target_column is missing
     }
@@ -133,7 +137,7 @@ async def test_create_job_missing_name(app_client):
     """POST /svc/v1/jobs without name returns 422 validation error."""
     payload = {
         "model_type": "tabular",
-        "data_source": "upload",
+        "data_source": "domino_dataset",
         "file_path": "/tmp/test.csv",
         "target_column": "target",
     }
@@ -149,7 +153,7 @@ async def test_create_timeseries_job_missing_time_column(app_client):
     payload = {
         "name": "ts-job",
         "model_type": "timeseries",
-        "data_source": "upload",
+        "data_source": "domino_dataset",
         "file_path": "/tmp/test.csv",
         "target_column": "value",
         "prediction_length": 10,
