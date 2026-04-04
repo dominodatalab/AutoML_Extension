@@ -64,8 +64,6 @@ async def run_migrations():
         ("jobs", "domino_job_status", "VARCHAR(100)"),
         ("jobs", "project_owner", "VARCHAR(255)"),
         ("jobs", "enable_mlflow", "BOOLEAN DEFAULT 0"),
-        ("jobs", "auto_register", "BOOLEAN DEFAULT 0"),
-        ("jobs", "register_name", "VARCHAR(255)"),
         ("jobs", "feature_importance", "JSON"),
         ("eda_jobs", "job_id", "VARCHAR(255)"),
     ]

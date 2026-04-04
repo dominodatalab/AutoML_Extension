@@ -22,12 +22,9 @@ interface UseRegistryResult {
   fetchRegisteredModels: () => Promise<RegisteredModel[]>
   fetchModelVersions: (modelName: string) => Promise<ModelVersion[]>
   registerModel: (
-    modelPath: string,
+    jobId: string,
     modelName: string,
-    modelType: string,
-    description?: string,
-    metrics?: Record<string, number>,
-    jobId?: string
+    description?: string
   ) => Promise<RegisterModelResult | null>
   transitionStage: (
     modelName: string,
@@ -74,20 +71,14 @@ export function useRegistry(): UseRegistryResult {
 
   const registerModelOp = useAsyncOperation(
     async (
-      modelPath: string,
+      jobId: string,
       modelName: string,
-      modelType: string,
       description?: string,
-      metrics?: Record<string, number>,
-      jobId?: string
     ) => {
       const { data } = await api.post<RegisterModelResult>('registry/register', {
-        model_path: modelPath,
+        job_id: jobId,
         model_name: modelName,
-        model_type: modelType,
         description,
-        metrics,
-        job_id: jobId
       })
       return data
     },
@@ -187,14 +178,11 @@ export function useRegistry(): UseRegistryResult {
   }, [fetchModelVersionsOp.execute])
 
   const registerModel = useCallback(async (
-    modelPath: string,
+    jobId: string,
     modelName: string,
-    modelType: string,
     description?: string,
-    metrics?: Record<string, number>,
-    jobId?: string
   ) => {
-    return orNull(registerModelOp.execute(modelPath, modelName, modelType, description, metrics, jobId))
+    return orNull(registerModelOp.execute(jobId, modelName, description))
   }, [registerModelOp.execute])
 
   const transitionStage = useCallback(async (

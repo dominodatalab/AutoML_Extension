@@ -182,7 +182,7 @@ function JobDetail() {
       )}
 
       {activeTab === 'domino' && currentStatus === 'completed' && job && (
-        <DominoIntegrationsTab job={job} />
+        <DominoIntegrationsTab job={job} onRefresh={refetch} />
       )}
 
       {activeTab === 'logs' && (

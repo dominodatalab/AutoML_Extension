@@ -20,11 +20,9 @@ router = APIRouter()
 
 class RegisterModelRequest(BaseModel):
     """Request to register a model."""
-    model_path: str = Field(..., description="Path to the trained model")
+    job_id: str = Field(..., description="Job ID that created this model")
     model_name: str = Field(..., description="Name for the registered model")
-    model_type: str = Field(..., description="Type: tabular, timeseries")
     description: str = Field("", description="Model description")
-    job_id: Optional[str] = Field(None, description="Job ID that created this model")
     tags: Optional[Dict[str, str]] = Field(None, description="Custom tags")
     metrics: Optional[Dict[str, float]] = Field(None, description="Model metrics")
     params: Optional[Dict[str, Any]] = Field(None, description="Training parameters")
@@ -112,67 +110,60 @@ class ModelCardRequest(BaseModel):
 @router.post("/register", response_model=RegisterModelResponse)
 @handle_errors("Error registering model")
 async def register_model(request: RegisterModelRequest, db: AsyncSession = Depends(get_db)):
-    """Register a trained model to the Domino Model Registry and local database."""
+    """Register a trained model to the Domino Model Registry."""
     registry = get_domino_registry()
 
-    # Build tags and metrics from job info if job_id provided
+    job = await crud.get_job(db, request.job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job not found: {request.job_id}")
+    if not job.model_path:
+        raise HTTPException(status_code=400, detail="Job has no trained model to register")
+
+    model_type = job.model_type.value if hasattr(job.model_type, 'value') else str(job.model_type)
+
     tags = request.tags or {}
     metrics = request.metrics or {}
     params = request.params or {}
 
-    if request.job_id:
-        job = await crud.get_job(db, request.job_id)
-        if job:
-            # Add default tags
-            tags["source"] = "automl"
-            tags["model_type"] = request.model_type
-            if job.problem_type:
-                tags["problem_type"] = job.problem_type.value if hasattr(job.problem_type, 'value') else str(job.problem_type)
-            if job.target_column:
-                tags["target_column"] = job.target_column
-            if job.preset:
-                tags["preset"] = job.preset.value if hasattr(job.preset, 'value') else str(job.preset)
+    tags["source"] = "automl"
+    tags["model_type"] = model_type
+    if job.problem_type:
+        tags["problem_type"] = job.problem_type.value if hasattr(job.problem_type, 'value') else str(job.problem_type)
+    if job.target_column:
+        tags["target_column"] = job.target_column
+    if job.preset:
+        tags["preset"] = job.preset.value if hasattr(job.preset, 'value') else str(job.preset)
 
-            # Add params from job config
-            params["model_type"] = request.model_type
-            if job.time_limit:
-                params["time_limit"] = job.time_limit
-            if job.eval_metric:
-                params["eval_metric"] = job.eval_metric
+    params["model_type"] = model_type
+    if job.time_limit:
+        params["time_limit"] = job.time_limit
+    if job.eval_metric:
+        params["eval_metric"] = job.eval_metric
 
-            # Extract numeric metrics from job.metrics
-            if job.metrics:
-                for key, value in job.metrics.items():
-                    if isinstance(value, (int, float)) and not isinstance(value, bool):
-                        metrics[key] = float(value)
-
-            logger.info(f"Built tags={tags}, metrics={metrics} from job {request.job_id}")
-
-    experiment_name = request.experiment_name
+    if job.metrics:
+        for key, value in job.metrics.items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                metrics[key] = float(value)
 
     result = registry.register_model(
-        model_path=request.model_path,
+        model_path=job.model_path,
         model_name=request.model_name,
-        model_type=request.model_type,
+        model_type=model_type,
         description=request.description,
         tags=tags if tags else None,
         metrics=metrics if metrics else None,
         params=params if params else None,
-        experiment_name=experiment_name,
+        experiment_name=request.experiment_name or job.experiment_name,
     )
 
-    # Also save to local database for persistence
     if result.get("success"):
         try:
-            # Check if model already exists
             existing = await crud.get_registered_model(db, request.model_name)
             if existing:
-                # Update version
                 existing.version += 1
                 existing.mlflow_model_uri = result.get("artifact_uri")
                 await db.commit()
             else:
-                # Create new entry
                 local_model = DBRegisteredModel(
                     name=request.model_name,
                     description=request.description,
@@ -180,17 +171,11 @@ async def register_model(request: RegisterModelRequest, db: AsyncSession = Depen
                     mlflow_model_uri=result.get("artifact_uri"),
                 )
                 await crud.create_registered_model(db, local_model)
-            logger.info(f"Saved model {request.model_name} to local database")
 
-            # Update job's registration status
-            if request.job_id:
-                job = await crud.get_job(db, request.job_id)
-                if job:
-                    job.is_registered = True
-                    job.registered_model_name = request.model_name
-                    job.registered_model_version = result.get("model_version")
-                    await db.commit()
-                    logger.info(f"Updated job {request.job_id} with registration status")
+            job.is_registered = True
+            job.registered_model_name = request.model_name
+            job.registered_model_version = result.get("model_version")
+            await db.commit()
         except Exception as db_error:
             logger.warning(f"Could not save to local DB: {db_error}")
 

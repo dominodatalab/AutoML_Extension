@@ -457,49 +457,6 @@ async def run_training_job(
             job_id, JobStatus.COMPLETED, db, completed_at=utc_now()
         )
 
-        # Auto-register to Domino Model Registry if configured
-        if job_config.auto_register and model_path and not settings.standalone_mode:
-            reg_model_name = job_config.register_name or f"{job_config.name}-{job_id[:8]}"
-            await add_job_log(
-                job_id,
-                f"Auto-registering model as '{reg_model_name}' in project {job_config.project_name or job_config.project_id}",
-                db,
-            )
-            try:
-                registry = get_domino_registry()
-                reg_result = registry.register_model(
-                    model_path=model_path,
-                    model_name=reg_model_name,
-                    model_type=job_config.model_type.value,
-                    description=f"AutoML model from job {job_config.name}",
-                    metrics=result.get("metrics", {}),
-                    params=training_params,
-                    experiment_name=experiment_name,  # Use same experiment as training
-                    project_id=job_config.project_id,
-                    project_name=job_config.project_name,
-                )
-                if reg_result.get("success"):
-                    await add_job_log(
-                        job_id,
-                        f"Model registered: {reg_result.get('model_name')} v{reg_result.get('model_version')}",
-                        db,
-                    )
-                else:
-                    await add_job_log(
-                        job_id,
-                        f"Model registration returned failure: {reg_result.get('error', 'unknown')}",
-                        db,
-                        "WARNING",
-                    )
-            except Exception as e:
-                logger.warning(f"Auto-registration failed: {e}")
-                await add_job_log(
-                    job_id,
-                    f"Auto-registration failed: {e}",
-                    db,
-                    "ERROR",
-                )
-
         await add_job_log(
             job_id,
             f"Job completed. Best model: {result['metrics'].get('best_model')}",

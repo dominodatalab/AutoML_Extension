@@ -117,12 +117,6 @@ function Step4Review() {
             {training?.experimentName && (
               <ReviewItem label="Experiment" value={training.experimentName} />
             )}
-            {training?.autoRegister && (
-              <ReviewItem label="Auto-Register" value="Yes" />
-            )}
-            {training?.registerName && (
-              <ReviewItem label="Registry Name" value={training.registerName} />
-            )}
           </div>
         </div>
       </div>

@@ -205,8 +205,6 @@ def build_job_model(
         eval_metric=job_request.eval_metric,
         experiment_name=job_request.experiment_name,
         enable_mlflow=job_request.enable_mlflow,
-        auto_register=job_request.auto_register,
-        register_name=job_request.register_name,
         status=JobStatus.PENDING,
         autogluon_config=build_autogluon_config(job_request),
     )

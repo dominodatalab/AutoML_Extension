@@ -352,14 +352,6 @@ class JobCreateRequest(BaseModel):
         None, description="MLflow experiment name"
     )
 
-    # Model registration
-    auto_register: bool = Field(
-        False, description="Automatically register model to Domino registry"
-    )
-    register_name: Optional[str] = Field(
-        None, description="Name for registered model"
-    )
-
     domino_hardware_tier_name: Optional[str] = Field(
         None,
         description="Optional Domino hardware tier name for external training jobs",

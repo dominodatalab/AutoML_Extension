@@ -43,8 +43,6 @@ class JobConfig(BaseModel):
     experiment_name: Optional[str] = None
     experiment_run_id: Optional[str] = None
     enable_mlflow: bool = False
-    auto_register: bool = False
-    register_name: Optional[str] = None
     registered_model_name: Optional[str] = None
     registered_model_version: Optional[str] = None
     created_at: datetime

@@ -36,7 +36,6 @@ class TestJobCreateRequest:
         assert req.target_column == "target"
         assert req.preset == "medium_quality_faster_train"  # default
         assert req.time_limit == 3600  # default
-        assert req.auto_register is False
 
     def test_valid_tabular_full(self):
         """Tabular request with all common fields populated."""
@@ -54,8 +53,6 @@ class TestJobCreateRequest:
             time_limit=7200,
             eval_metric="f1",
             experiment_name="exp-1",
-            auto_register=True,
-            register_name="my-model",
         )
         assert req.description == "A full test"
         assert req.problem_type == "binary"

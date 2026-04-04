@@ -191,8 +191,6 @@ export interface JobCreateRequest {
   experiment_name?: string
   advanced_config?: AdvancedAutoGluonConfig
   timeseries_config?: TimeSeriesAdvancedConfig
-  auto_register?: boolean
-  register_name?: string
   enable_mlflow?: boolean
 }
 

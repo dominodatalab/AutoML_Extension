@@ -1,11 +1,13 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { Job } from '../../types/job'
 import type { ModelApi, Deployment } from '../../types/deployment'
 import { useDeployments } from '../../hooks/useDeployments'
 import { toDominoTenantUrl } from '../../utils/dominoLinks'
+import { RegisterModelDialog } from '../registry/ModelRegistryPanel'
 
 interface DominoIntegrationsTabProps {
   job: Job
+  onRefresh: () => void
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -27,8 +29,9 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
-export function DominoIntegrationsTab({ job }: DominoIntegrationsTabProps) {
+export function DominoIntegrationsTab({ job, onRefresh }: DominoIntegrationsTabProps) {
   const { modelApis, deployments, loading, fetchModelApis, fetchDeployments } = useDeployments()
+  const [showRegisterDialog, setShowRegisterDialog] = useState(false)
   const experimentUrl = toDominoTenantUrl(job.experiment_run_url)
   const modelRegistryUrl = toDominoTenantUrl(job.model_registry_url)
 
@@ -46,6 +49,7 @@ export function DominoIntegrationsTab({ job }: DominoIntegrationsTabProps) {
   }
 
   return (
+    <>
     <div className="space-y-6">
       {/* Model Registry */}
       <SectionCard
@@ -79,10 +83,17 @@ export function DominoIntegrationsTab({ job }: DominoIntegrationsTabProps) {
             </dl>
           </div>
         ) : (
-          <EmptyState
-            message="No model registered in Domino yet."
-            action="Register via the Deploy menu in the header."
-          />
+          <div className="text-center py-4 space-y-3">
+            <p className="text-sm text-domino-text-muted">No model registered in Domino yet.</p>
+            {job.status === 'completed' && job.model_path && (
+              <button
+                onClick={() => setShowRegisterDialog(true)}
+                className="text-sm text-[#3B3BD3] hover:underline"
+              >
+                Register Model
+              </button>
+            )}
+          </div>
         )}
       </SectionCard>
 
@@ -153,6 +164,15 @@ export function DominoIntegrationsTab({ job }: DominoIntegrationsTabProps) {
         )}
       </SectionCard>
     </div>
+
+    {showRegisterDialog && (
+      <RegisterModelDialog
+        jobId={job.id}
+        onClose={() => setShowRegisterDialog(false)}
+        onSuccess={() => { setShowRegisterDialog(false); onRefresh() }}
+      />
+    )}
+    </>
   )
 }
 

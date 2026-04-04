@@ -14,7 +14,6 @@ import Button from '../common/Button'
 import Badge from '../common/Badge'
 import Spinner from '../common/Spinner'
 import Input from '../common/Input'
-import Select from '../common/Select'
 import type { ModelVersion, ModelStage } from '../../types/registry'
 
 interface ModelRegistryPanelProps {
@@ -360,16 +359,14 @@ function DeleteConfirmModal({ item, onConfirm, onCancel }: DeleteConfirmModalPro
 // Register Model Dialog
 interface RegisterModelDialogProps {
   jobId: string
-  modelPath: string
   onClose: () => void
   onSuccess: () => void
 }
 
-export function RegisterModelDialog({ jobId, modelPath, onClose, onSuccess }: RegisterModelDialogProps) {
+export function RegisterModelDialog({ jobId, onClose, onSuccess }: RegisterModelDialogProps) {
   const { registerModel, loading, error } = useRegistry()
   const [modelName, setModelName] = useState('')
   const [description, setDescription] = useState('')
-  const [modelType, setModelType] = useState('tabular')
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
 
@@ -386,7 +383,7 @@ export function RegisterModelDialog({ jobId, modelPath, onClose, onSuccess }: Re
     setSubmitError(null)
 
     try {
-      const result = await registerModel(modelPath, modelName, modelType, description, undefined, jobId)
+      const result = await registerModel(jobId, modelName, description)
       if (result?.success) {
         setSuccess(true)
         // Show success for a moment before closing
@@ -439,18 +436,6 @@ export function RegisterModelDialog({ jobId, modelPath, onClose, onSuccess }: Re
                   onChange={(e) => setModelName(e.target.value)}
                   placeholder="my-model"
                   required
-                />
-              </div>
-
-              <div>
-                <label className="label">Model Type</label>
-                <Select
-                  value={modelType}
-                  onChange={(e) => setModelType(e.target.value)}
-                  options={[
-                    { value: 'tabular', label: 'Tabular' },
-                    { value: 'timeseries', label: 'Time Series' },
-                  ]}
                 />
               </div>
 
