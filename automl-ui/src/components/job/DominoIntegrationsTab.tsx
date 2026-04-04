@@ -54,7 +54,7 @@ export function DominoIntegrationsTab({ job, onRefresh }: DominoIntegrationsTabP
       {/* Model Registry */}
       <SectionCard
         title="Model Registry"
-        description="Registered model versions tracked in Domino."
+        description="Domino Model Registry entry for this training job's model."
       >
         {job.is_registered && job.registered_model_name ? (
           <div className="space-y-3">
