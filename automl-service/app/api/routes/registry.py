@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.domino_registry import get_domino_registry
+from app.core.domino_http import domino_request
 from app.db import crud
-from app.db.models import RegisteredModel as DBRegisteredModel
 from app.dependencies import get_db
 from app.api.error_handler import handle_errors
 
@@ -23,10 +23,6 @@ class RegisterModelRequest(BaseModel):
     job_id: str = Field(..., description="Job ID that created this model")
     model_name: str = Field(..., description="Name for the registered model")
     description: str = Field("", description="Model description")
-    tags: Optional[Dict[str, str]] = Field(None, description="Custom tags")
-    metrics: Optional[Dict[str, float]] = Field(None, description="Model metrics")
-    params: Optional[Dict[str, Any]] = Field(None, description="Training parameters")
-    experiment_name: Optional[str] = Field(None, description="MLflow experiment name from training")
 
 
 class RegisterModelResponse(BaseModel):
@@ -110,76 +106,50 @@ class ModelCardRequest(BaseModel):
 @router.post("/register", response_model=RegisterModelResponse)
 @handle_errors("Error registering model")
 async def register_model(request: RegisterModelRequest, db: AsyncSession = Depends(get_db)):
-    """Register a trained model to the Domino Model Registry."""
-    registry = get_domino_registry()
-
+    """Register a trained model to the Domino Model Registry via the Domino REST API."""
     job = await crud.get_job(db, request.job_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job not found: {request.job_id}")
     if not job.model_path:
         raise HTTPException(status_code=400, detail="Job has no trained model to register")
 
-    model_type = job.model_type.value if hasattr(job.model_type, 'value') else str(job.model_type)
+    # model_path is "runs:/{run_id}/{artifact_path}"
+    if not job.model_path.startswith("runs:/"):
+        raise HTTPException(status_code=400, detail=f"Unsupported model_path format: {job.model_path}")
+    parts = job.model_path[len("runs:/"):].split("/", 1)
+    run_id = parts[0]
+    artifact_path = parts[1] if len(parts) > 1 else "model"
 
-    tags = request.tags or {}
-    metrics = request.metrics or {}
-    params = request.params or {}
+    resp = await domino_request("POST", "/api/registeredmodels/v2", json={
+        "modelName": request.model_name,
+        "description": request.description,
+        "modelSource": {
+            "sourceType": "mlflow",
+            "mlflowSource": {
+                "experimentRunId": run_id,
+                "artifactPath": artifact_path,
+            },
+        },
+        "create": True,
+        "discoverable": False,
+    })
 
-    tags["source"] = "automl"
-    tags["model_type"] = model_type
-    if job.problem_type:
-        tags["problem_type"] = job.problem_type.value if hasattr(job.problem_type, 'value') else str(job.problem_type)
-    if job.target_column:
-        tags["target_column"] = job.target_column
-    if job.preset:
-        tags["preset"] = job.preset.value if hasattr(job.preset, 'value') else str(job.preset)
+    data = resp.json()
+    model_version = str(data["modelVersion"]["modelVersion"])
 
-    params["model_type"] = model_type
-    if job.time_limit:
-        params["time_limit"] = job.time_limit
-    if job.eval_metric:
-        params["eval_metric"] = job.eval_metric
+    try:
+        job.is_registered = True
+        job.registered_model_name = request.model_name
+        job.registered_model_version = model_version
+        await db.commit()
+    except Exception as db_error:
+        logger.warning(f"Could not update job registration status: {db_error}")
 
-    if job.metrics:
-        for key, value in job.metrics.items():
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
-                metrics[key] = float(value)
-
-    result = registry.register_model(
-        model_path=job.model_path,
+    return RegisterModelResponse(
+        success=True,
         model_name=request.model_name,
-        model_type=model_type,
-        description=request.description,
-        tags=tags if tags else None,
-        metrics=metrics if metrics else None,
-        params=params if params else None,
-        experiment_name=request.experiment_name or job.experiment_name,
+        model_version=model_version,
     )
-
-    if result.get("success"):
-        try:
-            existing = await crud.get_registered_model(db, request.model_name)
-            if existing:
-                existing.version += 1
-                existing.mlflow_model_uri = result.get("artifact_uri")
-                await db.commit()
-            else:
-                local_model = DBRegisteredModel(
-                    name=request.model_name,
-                    description=request.description,
-                    job_id=request.job_id,
-                    mlflow_model_uri=result.get("artifact_uri"),
-                )
-                await crud.create_registered_model(db, local_model)
-
-            job.is_registered = True
-            job.registered_model_name = request.model_name
-            job.registered_model_version = result.get("model_version")
-            await db.commit()
-        except Exception as db_error:
-            logger.warning(f"Could not save to local DB: {db_error}")
-
-    return RegisterModelResponse(**result)
 
 
 @router.get("/models", response_model=List[LocalModelInfo])
