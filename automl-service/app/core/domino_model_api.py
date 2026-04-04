@@ -423,6 +423,69 @@ class ModelAPIManager:
             ),
         }
 
+    async def create_model_api_from_registry(
+        self,
+        name: str,
+        registered_model_name: str,
+        registered_model_version: int,
+        description: str = "",
+        project_id: Optional[str] = None,
+        environment_id: Optional[str] = None,
+        replicas: int = 1,
+    ) -> Dict[str, Any]:
+        """Create a Model API sourced from a registered model version.
+
+        POST /api/modelServing/v1/modelApis
+
+        NOTE: The API accepts environmentId but not environmentRevisionId. Domino
+        resolves the revision server-side using the environment's active revision at
+        the time of creation. If the active revision has changed since training, the
+        Model API may run on a different revision than the training job did.
+        """
+        resolved_project_id = self._resolve_project_id(project_id)
+        if not resolved_project_id:
+            return {
+                "success": False,
+                "error": (
+                    "Missing project id for Model API creation. "
+                    "Set DOMINO_PROJECT_ID or provide project_id."
+                ),
+            }
+
+        if not environment_id:
+            return {
+                "success": False,
+                "error": (
+                    "Missing environment id for Model API creation. "
+                    "DOMINO_ENVIRONMENT_ID must be set."
+                ),
+            }
+
+        payload = {
+            "name": name,
+            "description": description,
+            "environmentId": environment_id,
+            "replicas": replicas,
+            "strictNodeAntiAffinity": False,
+            "isAsync": False,
+            "environmentVariables": [],
+            "version": {
+                "projectId": resolved_project_id,
+                "source": {
+                    "type": "Registry",
+                    "registeredModelName": registered_model_name,
+                    "registeredModelVersion": registered_model_version,
+                },
+                "logHttpRequestResponse": False,
+                "monitoringEnabled": False,
+                "shouldDeploy": True,
+            },
+        }
+
+        return await self.client._make_request(
+            "POST", "/api/modelServing/v1/modelApis", json_data=payload
+        )
+
     async def get_model_api(self, model_api_id: str) -> Dict[str, Any]:
         """Get a specific Model API.
 
@@ -853,6 +916,27 @@ class DominoModelAPI:
             include_version,
             should_deploy,
             environment_variables,
+        )
+
+    async def create_model_api_from_registry(
+        self,
+        name: str,
+        registered_model_name: str,
+        registered_model_version: int,
+        description: str = "",
+        project_id: Optional[str] = None,
+        environment_id: Optional[str] = None,
+        replicas: int = 1,
+    ) -> Dict[str, Any]:
+        """Create a Model API sourced from a registered model version."""
+        return await self.model_apis.create_model_api_from_registry(
+            name,
+            registered_model_name,
+            registered_model_version,
+            description,
+            project_id,
+            environment_id,
+            replicas,
         )
 
     async def get_model_api(self, model_api_id: str) -> Dict[str, Any]:

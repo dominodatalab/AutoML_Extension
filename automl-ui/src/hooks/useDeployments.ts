@@ -123,9 +123,7 @@ export function useDeployments(): UseDeploymentsResult {
     async (request: DeployFromJobRequest, refreshFn: () => Promise<Deployment[]>) => {
       const { data } = await api.post<DeploymentResponse>(`deployments/deploy-from-job/${request.job_id}`, {
         model_name: request.model_name,
-        function_name: request.function_name,
-        min_replicas: request.min_replicas,
-        max_replicas: request.max_replicas,
+        replicas: request.replicas,
       })
       try {
         await refreshFn()

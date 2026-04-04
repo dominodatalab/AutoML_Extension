@@ -83,9 +83,7 @@ export interface QuickDeployRequest {
 export interface DeployFromJobRequest {
   job_id: string
   model_name?: string
-  function_name?: string
-  min_replicas?: number
-  max_replicas?: number
+  replicas?: number
 }
 
 export interface DeploymentLogs {

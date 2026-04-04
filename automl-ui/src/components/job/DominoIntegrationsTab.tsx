@@ -4,6 +4,7 @@ import type { ModelApi, Deployment } from '../../types/deployment'
 import { useDeployments } from '../../hooks/useDeployments'
 import { toDominoTenantUrl } from '../../utils/dominoLinks'
 import { RegisterModelDialog } from '../registry/ModelRegistryPanel'
+import { DeployModelApiDialog } from '../deployment/DeployModelApiDialog'
 
 interface DominoIntegrationsTabProps {
   job: Job
@@ -32,6 +33,7 @@ function StatusBadge({ status }: { status: string }) {
 export function DominoIntegrationsTab({ job, onRefresh }: DominoIntegrationsTabProps) {
   const { modelApis, deployments, loading, fetchModelApis, fetchDeployments } = useDeployments()
   const [showRegisterDialog, setShowRegisterDialog] = useState(false)
+  const [showDeployDialog, setShowDeployDialog] = useState(false)
   const experimentUrl = toDominoTenantUrl(job.experiment_run_url)
   const modelRegistryUrl = toDominoTenantUrl(job.model_registry_url)
 
@@ -81,6 +83,14 @@ export function DominoIntegrationsTab({ job, onRefresh }: DominoIntegrationsTabP
               <dt className="text-domino-text-secondary">Version</dt>
               <dd className="text-domino-text-primary">{job.registered_model_version || '\u2014'}</dd>
             </dl>
+            <div className="pt-1">
+              <button
+                onClick={() => setShowDeployDialog(true)}
+                className="text-sm text-[#3B3BD3] hover:underline"
+              >
+                Deploy as Model API
+              </button>
+            </div>
           </div>
         ) : (
           <div className="text-center py-4 space-y-3">
@@ -119,7 +129,7 @@ export function DominoIntegrationsTab({ job, onRefresh }: DominoIntegrationsTabP
         ) : (
           <EmptyState
             message="No Model APIs in this project yet."
-            action="Publish via the Deploy menu in the header."
+            action={job.is_registered ? undefined : "Register the model before deploying as a Model API."}
           />
         )}
       </SectionCard>
@@ -170,6 +180,14 @@ export function DominoIntegrationsTab({ job, onRefresh }: DominoIntegrationsTabP
         jobId={job.id}
         onClose={() => setShowRegisterDialog(false)}
         onSuccess={() => { setShowRegisterDialog(false); onRefresh() }}
+      />
+    )}
+    {showDeployDialog && (
+      <DeployModelApiDialog
+        jobId={job.id}
+        defaultModelName={job.name}
+        onClose={() => setShowDeployDialog(false)}
+        onSuccess={() => setShowDeployDialog(false)}
       />
     )}
     </>

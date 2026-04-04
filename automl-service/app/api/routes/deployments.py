@@ -13,7 +13,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.domino_model_api import get_domino_model_api
-from app.dependencies import get_request_project_id
 from app.services.deployment_service import (
     list_deployments_safe,
     list_model_apis_safe,
@@ -405,29 +404,17 @@ async def quick_deploy(request: QuickDeployRequest):
 
 class DeployFromJobBody(BaseModel):
     """Request body for deploying a model from a job."""
-    model_name: Optional[str] = Field(None, description="Name for the deployed model")
-    function_name: str = Field("predict", description="Name of the predict function")
-    min_replicas: int = Field(1, ge=0, description="Minimum replicas")
-    max_replicas: int = Field(1, ge=1, description="Maximum replicas")
+    model_name: Optional[str] = Field(None, description="Name for the Model API")
+    replicas: int = Field(1, ge=1, description="Number of replicas")
 
 
 @router.post("/deploy-from-job/{job_id}")
-async def deploy_from_job(
-    job_id: str,
-    body: DeployFromJobBody,
-    project_id: str = Depends(get_request_project_id),
-):
-    """Deploy a trained model from an AutoML job.
-
-    This creates the deployment files and deploys the model.
-    """
+async def deploy_from_job(job_id: str, body: DeployFromJobBody):
+    """Create a Domino Model API from a job's registered model."""
     from app.services.deployment_service import deploy_from_job as deploy_from_job_service
 
     return await deploy_from_job_service(
         job_id=job_id,
         model_name=body.model_name,
-        function_name=body.function_name,
-        min_replicas=body.min_replicas,
-        max_replicas=body.max_replicas,
-        project_id=project_id,
+        replicas=body.replicas,
     )

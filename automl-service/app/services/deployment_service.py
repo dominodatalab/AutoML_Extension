@@ -1,28 +1,17 @@
 """Service helpers for deployment route orchestration."""
 
-import asyncio
 import logging
-import keyword
 import os
-import re
 from typing import Optional
 
 from fastapi import HTTPException
 
 from app.core.domino_model_api import get_domino_model_api
-from app.core.job_file_cache import download_mlflow_artifact
 from app.db import crud
 from app.db.models import JobStatus
 from app.dependencies import get_db_session
 
 logger = logging.getLogger(__name__)
-
-STATIC_MODEL_API_SOURCE_FILE = "automl-service/app/serving/model_api_entrypoint.py"
-
-
-def _is_valid_python_identifier(name: str) -> bool:
-    """Check that the requested prediction function name is a valid identifier."""
-    return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name)) and not keyword.iskeyword(name)
 
 
 def _safe_deployment_result(result, invalid_message: str) -> dict:
@@ -66,12 +55,9 @@ async def list_model_apis_safe(project_id: Optional[str] = None) -> dict:
 async def deploy_from_job(
     job_id: str,
     model_name: Optional[str] = None,
-    function_name: str = "predict",
-    min_replicas: int = 1,
-    max_replicas: int = 1,
-    project_id: Optional[str] = None,
+    replicas: int = 1,
 ) -> dict:
-    """Deploy a trained model from a completed AutoML job."""
+    """Create a Domino Model API from a job's registered model."""
     async with get_db_session() as db:
         job = await crud.get_job(db, job_id)
         if not job:
@@ -83,47 +69,32 @@ async def deploy_from_job(
             detail=f"Job must be completed to deploy. Current status: {job.status.value}",
         )
 
-    deploy_name = model_name or job.name or f"automl-model-{job_id[:8]}"
-    if not job.model_path:
-        raise HTTPException(status_code=400, detail="Model path not found for this job")
-    loop = asyncio.get_event_loop()
-    try:
-        model_path = await loop.run_in_executor(None, download_mlflow_artifact, job.model_path, job_id)
-    except (ValueError, FileNotFoundError) as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-    resolved_function_name = (function_name or "predict").strip() or "predict"
-    if not _is_valid_python_identifier(resolved_function_name):
+    if not job.is_registered or not job.registered_model_name or not job.registered_model_version:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid prediction function '{resolved_function_name}'. Use a valid Python identifier.",
+            detail="Model must be registered in the Domino Model Registry before deploying as a Model API.",
         )
 
-    # Use a committed source entrypoint so Domino can resolve it from project code.
-    model_file = STATIC_MODEL_API_SOURCE_FILE
+    deploy_name = model_name or job.name or f"automl-model-{job_id[:8]}"
+    environment_id = os.environ.get("DOMINO_ENVIRONMENT_ID")
+
     api = get_domino_model_api()
-    result = await api.deploy_model(
-        model_name=deploy_name,
-        model_file=model_file,
-        function_name=resolved_function_name,
-        model_artifact_dir=model_path,
-        description=f"AutoML model from job {job_id}. Type: {job.model_type}",
-        min_replicas=min_replicas,
-        max_replicas=max_replicas,
-        auto_start=True,
-        project_id=project_id,
+    result = await api.create_model_api_from_registry(
+        name=deploy_name,
+        registered_model_name=job.registered_model_name,
+        registered_model_version=int(job.registered_model_version),
+        description=f"AutoML model from job {job_id}",
+        environment_id=environment_id,
+        replicas=replicas,
     )
 
     if not result["success"]:
         raise HTTPException(status_code=400, detail=result.get("error"))
 
-    model_api_id = result.get("model_api_id")
-
+    api_data = result.get("data") or {}
     return {
         "success": True,
         "job_id": job_id,
-        "deployment_id": result.get("deployment_id"),
-        "model_api_id": model_api_id,
-        "endpoint_url": result.get("endpoint_url"),
-        "message": f"Model '{deploy_name}' deployed from job {job_id}",
+        "model_api_id": api_data.get("id"),
+        "message": f"Model API '{deploy_name}' created from registered model {job.registered_model_name} v{job.registered_model_version}",
     }
