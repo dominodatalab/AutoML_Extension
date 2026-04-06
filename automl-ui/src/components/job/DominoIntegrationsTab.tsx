@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import type { Job } from '../../types/job'
-import type { ModelApi, Deployment } from '../../types/deployment'
 import { useDeployments } from '../../hooks/useDeployments'
 import { toDominoTenantUrl } from '../../utils/dominoLinks'
 import { RegisterModelDialog } from '../registry/ModelRegistryPanel'
@@ -31,24 +30,17 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export function DominoIntegrationsTab({ job, onRefresh }: DominoIntegrationsTabProps) {
-  const { modelApis, deployments, loading, fetchModelApis, fetchDeployments } = useDeployments()
+  const { deployments, loading, fetchDeploymentsByModelApi } = useDeployments()
   const [showRegisterDialog, setShowRegisterDialog] = useState(false)
   const [showDeployDialog, setShowDeployDialog] = useState(false)
   const experimentUrl = toDominoTenantUrl(job.experiment_run_url)
   const modelRegistryUrl = toDominoTenantUrl(job.model_registry_url)
 
   useEffect(() => {
-    fetchModelApis()
-    fetchDeployments()
-  }, [fetchModelApis, fetchDeployments])
-
-  // Build a map of modelApiId → deployments for that API
-  const deploymentsByApi = new Map<string, Deployment[]>()
-  for (const d of deployments) {
-    const list = deploymentsByApi.get(d.modelApiId) || []
-    list.push(d)
-    deploymentsByApi.set(d.modelApiId, list)
-  }
+    if (job.model_api_id) {
+      fetchDeploymentsByModelApi(job.model_api_id)
+    }
+  }, [job.model_api_id, fetchDeploymentsByModelApi])
 
   return (
     <>
@@ -101,21 +93,32 @@ export function DominoIntegrationsTab({ job, onRefresh }: DominoIntegrationsTabP
 
       {/* Model APIs & Deployments */}
       <SectionCard
-        title="Model APIs"
+        title="Model API"
         description="Model API deployed from this training job's registered model."
       >
         {loading ? (
           <div className="text-center py-4">
-            <p className="text-sm text-domino-text-muted">Loading model APIs...</p>
+            <p className="text-sm text-domino-text-muted">Loading...</p>
           </div>
-        ) : modelApis.length > 0 ? (
-          <div className="space-y-4">
-            {modelApis.map((api) => (
-              <ModelApiRow
-                key={api.id}
-                api={api}
-                deployments={deploymentsByApi.get(api.id) || []}
-              />
+        ) : deployments.length > 0 ? (
+          <div className="space-y-1.5">
+            {deployments.map((d) => (
+              <div key={d.id} className="flex items-center gap-3 text-xs">
+                <StatusBadge status={d.status} />
+                {d.url ? (
+                  <a
+                    href={toDominoTenantUrl(d.url) || d.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[#3B3BD3] hover:underline truncate"
+                  >
+                    {d.url}
+                    <ExternalLinkIcon className="inline ml-1 -mt-0.5" />
+                  </a>
+                ) : (
+                  <span className="text-domino-text-muted">No endpoint URL yet</span>
+                )}
+              </div>
             ))}
           </div>
         ) : job.is_registered ? (
@@ -193,47 +196,6 @@ export function DominoIntegrationsTab({ job, onRefresh }: DominoIntegrationsTabP
   )
 }
 
-function ModelApiRow({ api, deployments }: { api: ModelApi; deployments: Deployment[] }) {
-  return (
-    <div className="border border-domino-border rounded p-3 space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-domino-text-primary">{api.name}</span>
-        {api.createdAt && (
-          <span className="text-xs text-domino-text-muted">
-            {new Date(api.createdAt).toLocaleDateString()}
-          </span>
-        )}
-      </div>
-      {api.description && (
-        <p className="text-xs text-domino-text-secondary">{api.description}</p>
-      )}
-      {deployments.length > 0 ? (
-        <div className="space-y-1.5 pt-1">
-          {deployments.map((d) => (
-            <div key={d.id} className="flex items-center gap-3 text-xs">
-              <StatusBadge status={d.status} />
-              {d.url ? (
-                <a
-                  href={toDominoTenantUrl(d.url) || d.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-[#3B3BD3] hover:underline truncate"
-                >
-                  {d.url}
-                  <ExternalLinkIcon className="inline ml-1 -mt-0.5" />
-                </a>
-              ) : (
-                <span className="text-domino-text-muted">No endpoint URL</span>
-              )}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="text-xs text-domino-text-muted pt-1">No active deployments</p>
-      )}
-    </div>
-  )
-}
 
 function SectionCard({
   title,

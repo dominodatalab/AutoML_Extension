@@ -164,6 +164,7 @@ export interface Job {
   is_registered?: boolean
   registered_model_name?: string
   registered_model_version?: string
+  model_api_id?: string
   model_registry_url?: string
   created_at: string
   started_at?: string

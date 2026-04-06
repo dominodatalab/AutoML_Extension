@@ -99,6 +99,7 @@ class Job(Base):
     is_registered: Mapped[bool] = mapped_column(default=False)
     registered_model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     registered_model_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    model_api_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)

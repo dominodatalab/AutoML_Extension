@@ -201,26 +201,12 @@ Apps run inside Domino behind an nginx proxy that modifies the root URL. Do not 
 
 ## Authentication
 
-```python
-import requests
-import os
-
-def get_auth_headers():
-    # Local development override
-    api_key = os.environ.get('API_KEY_OVERRIDE')
-    if api_key:
-        return {'X-Domino-Api-Key': api_key}
-    
-    # Get ephemeral token from Domino (expires quickly!)
-    response = requests.get('http://localhost:8899/access-token')
-    token = response.text.strip()
-    
-    if token.startswith('Bearer '):
-        return {'Authorization': token}
-    return {'Authorization': f'Bearer {token}'}
+Use the JWT from extended identity propagation. Example:
+``` python
+auth_header = flask.request.headers.get('Authorization', '')
+url = f'{DOMINO_HOST}/api/datasetrw/v1/datasets/{dataset_id}'
+response = requests.get(url, headers={'Authorization': auth_header})
 ```
-
-**Important**: Re-acquire the access token on EVERY API call because it expires very quickly.
 
 ## API Documentation & Base Paths
 

@@ -6,9 +6,11 @@ from typing import Optional
 
 from fastapi import HTTPException
 
+from sqlalchemy import update as sa_update
+
 from app.core.domino_model_api import get_domino_model_api
 from app.db import crud
-from app.db.models import JobStatus
+from app.db.models import Job as JobModel, JobStatus
 from app.dependencies import get_db_session
 
 logger = logging.getLogger(__name__)
@@ -24,32 +26,16 @@ def _safe_deployment_result(result, invalid_message: str) -> dict:
     return {"success": False, "data": [], "error": invalid_message}
 
 
-async def list_deployments_safe(
-    project_id: Optional[str] = None,
-    model_api_id: Optional[str] = None,
-) -> dict:
-    """List deployments and gracefully handle errors."""
+async def list_deployments_safe(model_api_id: str) -> dict:
+    """List deployments for a Model API."""
     try:
         api = get_domino_model_api()
-        result = await api.list_deployments(
-            project_id=project_id,
-            model_api_id=model_api_id,
-        )
+        result = await api.list_deployments(model_api_id=model_api_id)
         return _safe_deployment_result(result, "Invalid response")
     except Exception as exc:
         logger.error(f"Error listing deployments: {exc}")
         return {"success": False, "data": [], "error": str(exc)}
 
-
-async def list_model_apis_safe(project_id: Optional[str] = None) -> dict:
-    """List model APIs and gracefully handle errors."""
-    try:
-        api = get_domino_model_api()
-        result = await api.list_model_apis(project_id=project_id)
-        return _safe_deployment_result(result, "Invalid response")
-    except Exception as exc:
-        logger.error(f"Error listing model APIs: {exc}")
-        return {"success": False, "data": [], "error": str(exc)}
 
 
 async def deploy_from_job(
@@ -92,9 +78,16 @@ async def deploy_from_job(
         raise HTTPException(status_code=400, detail=result.get("error"))
 
     api_data = result.get("data") or {}
+    model_api_id = api_data.get("id")
+
+    if model_api_id:
+        async with get_db_session() as db:
+            await db.execute(sa_update(JobModel).where(JobModel.id == job_id).values(model_api_id=model_api_id))
+            await db.commit()
+
     return {
         "success": True,
         "job_id": job_id,
-        "model_api_id": api_data.get("id"),
+        "model_api_id": model_api_id,
         "message": f"Model API '{deploy_name}' created from registered model {job.registered_model_name} v{job.registered_model_version}",
     }
