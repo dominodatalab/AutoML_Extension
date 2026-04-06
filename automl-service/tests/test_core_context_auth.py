@@ -3,18 +3,21 @@ import pytest
 
 
 def test_set_get_and_clear_auth_header():
-    from app.core.context.auth import set_request_auth_header, get_request_auth_header
+    from app.core.context.auth import set_request_auth_header, get_request_auth_header, get_request_auth_token
 
     # assert initial state is empty
     assert get_request_auth_header() is None
+    assert get_request_auth_token() is None
 
     # set a value and read it back
     set_request_auth_header("Bearer root-token")
     assert get_request_auth_header() == "Bearer root-token"
+    assert get_request_auth_token() == "root-token"
 
     # clear back to None
     set_request_auth_header(None)
     assert get_request_auth_header() is None
+    assert get_request_auth_token() is None
 
 
 @pytest.mark.asyncio

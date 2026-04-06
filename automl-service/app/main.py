@@ -1,5 +1,7 @@
 """FastAPI application factory and configuration."""
 
+import app.run_monkey_patching  # noqa: F401
+
 import logging
 import os
 from contextlib import asynccontextmanager

@@ -1,6 +1,7 @@
 """Tests for async EDA result resolution via MLflow."""
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
@@ -17,6 +18,7 @@ from app.api.routes.profiling import (
     start_profile_async,
 )
 from app.core.eda_job_metadata import EDA_JOB_REQUEST_ID_TAG, EDA_JOB_RESULT_ARTIFACT_PATH
+from app.run_monkey_patching import MLFLOW_TRACKING_TOKEN_KEY
 
 
 class DummyStore:
@@ -343,6 +345,61 @@ async def test_build_async_status_response_marks_eda_job_completed_for_successfu
     assert response.status == "completed"
     assert response.result == resolved_result
     assert response.domino_job_status == "Succeeded"
+
+
+@pytest.mark.asyncio
+async def test_async_status_completion_route_resolves_result_with_request_tracking_token(
+    app_client,
+    monkeypatch,
+):
+    request_id = "req-completed-auth"
+    resolved_result = {"summary": {"total_rows": 7}}
+    store = DummyStore(
+        initial_state={
+            "request_id": request_id,
+            "status": "running",
+            "mode": "tabular",
+            "domino_job_id": "domino-job-auth",
+            "domino_job_status": "Running",
+            "experiment_name": "eda-exp-auth",
+            "error": None,
+        },
+    )
+    launcher = DummyLauncher(
+        job_status_result={
+            "success": True,
+            "domino_job_status": "Succeeded",
+        },
+        expected_domino_job_id="domino-job-auth",
+    )
+
+    # set a token, which shouldn't be returned, instead the value should resulv to
+    # the request-token provided in the authorization request header
+    monkeypatch.setenv(MLFLOW_TRACKING_TOKEN_KEY, "fallback-env-token")
+    monkeypatch.setattr("app.api.routes.profiling.get_eda_job_store", lambda: store)
+    monkeypatch.setattr("app.api.routes.profiling.get_domino_job_launcher", lambda: launcher)
+
+    # verifies that the requesting user's token is set as the mlflow_tracking_token
+    def assert_tracking_token(incoming_request_id: str, experiment_name: str) -> dict[str, Any]:
+        assert os.environ[MLFLOW_TRACKING_TOKEN_KEY] == "request-token"
+        return resolved_result
+    monkeypatch.setattr(
+        "app.api.routes.profiling._resolve_eda_job_result",
+        assert_tracking_token,
+    )
+
+    # send request to async status endpoint
+    response = await app_client.post(
+        "/svc/v1/profiling/profile/async/status",
+        json={"request_id": request_id},
+        headers={"authorization": "Bearer request-token"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["domino_job_status"] == "Succeeded"
+    assert body["result"] == resolved_result
 
 
 @pytest.mark.asyncio
