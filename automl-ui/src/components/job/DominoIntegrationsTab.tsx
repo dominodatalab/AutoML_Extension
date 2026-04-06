@@ -83,14 +83,6 @@ export function DominoIntegrationsTab({ job, onRefresh }: DominoIntegrationsTabP
               <dt className="text-domino-text-secondary">Version</dt>
               <dd className="text-domino-text-primary">{job.registered_model_version || '\u2014'}</dd>
             </dl>
-            <div className="pt-1">
-              <button
-                onClick={() => setShowDeployDialog(true)}
-                className="text-sm text-[#3B3BD3] hover:underline"
-              >
-                Deploy as Model API
-              </button>
-            </div>
           </div>
         ) : (
           <div className="text-center py-4 space-y-3">
@@ -110,7 +102,7 @@ export function DominoIntegrationsTab({ job, onRefresh }: DominoIntegrationsTabP
       {/* Model APIs & Deployments */}
       <SectionCard
         title="Model APIs"
-        description="Domino Model API endpoints available in this project."
+        description="Model API deployed from this training job's registered model."
       >
         {loading ? (
           <div className="text-center py-4">
@@ -126,11 +118,18 @@ export function DominoIntegrationsTab({ job, onRefresh }: DominoIntegrationsTabP
               />
             ))}
           </div>
+        ) : job.is_registered ? (
+          <div className="text-center py-4 space-y-3">
+            <p className="text-sm text-domino-text-muted">No Model API deployed yet.</p>
+            <button
+              onClick={() => setShowDeployDialog(true)}
+              className="text-sm text-[#3B3BD3] hover:underline"
+            >
+              Deploy the registered Model as a Model API
+            </button>
+          </div>
         ) : (
-          <EmptyState
-            message="No Model APIs in this project yet."
-            action={job.is_registered ? undefined : "Register the model before deploying as a Model API."}
-          />
+          <EmptyState message="Register this training job's model first to deploy a Model API." />
         )}
       </SectionCard>
 
