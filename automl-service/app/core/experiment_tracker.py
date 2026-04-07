@@ -150,30 +150,6 @@ class ExperimentTracker:
         except Exception as e:
             logger.warning(f"Failed to log text {filename}: {e}")
 
-    def log_model(
-        self,
-        model_path: str,
-        artifact_path: str = "model",
-        registered_model_name: Optional[str] = None,
-    ):
-        """Log a model directory to MLflow."""
-        import mlflow
-
-        # Log the model directory as artifacts
-        mlflow.log_artifacts(model_path, artifact_path)
-        logger.info(f"Logged model artifacts from: {model_path}")
-
-        if registered_model_name:
-            # Register the model
-            run_id = mlflow.active_run().info.run_id
-            model_uri = f"runs:/{run_id}/{artifact_path}"
-
-            try:
-                mlflow.register_model(model_uri, registered_model_name)
-                logger.info(f"Registered model: {registered_model_name}")
-            except Exception as e:
-                logger.warning(f"Failed to register model: {e}")
-
     def log_individual_model_run(
         self,
         model_name: str,
@@ -713,10 +689,36 @@ class ExperimentTracker:
                         "feature_importance.json"
                     )
 
-                # Log model artifacts
+                # Log model as a proper MLflow pyfunc model so Domino can infer
+                # model category and build the serving image correctly.
+                # mlflow.log_artifacts produces no MLmodel file, causing Domino
+                # to default to ML category with shouldBuildImage=false and then
+                # fail to pre-create the /mnt/... artifact directory at serve time.
                 if model_path:
-                    mlflow.log_artifacts(model_path, artifact_path="autogluon_model")
-                    logger.info(f"Logged model artifacts from: {model_path}")
+                    model_type = job_config.get("model_type", "tabular")
+
+                    class _AutoGluonWrapper(mlflow.pyfunc.PythonModel):
+                        def __init__(self, mt: str) -> None:
+                            self._model_type = mt
+
+                        def load_context(self, context: mlflow.pyfunc.PythonModelContext) -> None:
+                            model_dir = context.artifacts["model"]
+                            if self._model_type == "timeseries":
+                                from autogluon.timeseries import TimeSeriesPredictor
+                                self._predictor = TimeSeriesPredictor.load(model_dir)
+                            else:
+                                from autogluon.tabular import TabularPredictor
+                                self._predictor = TabularPredictor.load(model_dir)
+
+                        def predict(self, context: mlflow.pyfunc.PythonModelContext, model_input):
+                            return self._predictor.predict(model_input)
+
+                    mlflow.pyfunc.log_model(
+                        artifact_path="autogluon_model",
+                        python_model=_AutoGluonWrapper(model_type),
+                        artifacts={"model": model_path},
+                    )
+                    logger.info(f"Logged model as pyfunc from: {model_path}")
 
             logger.info(f"Training results logged: {len(models)} model runs + final summary run {run_id}")
 
