@@ -16,6 +16,6 @@ jobs:
     - name: Build the Docker image
       run: |
         echo "FROM python:3.10-slim-bullseye" | cat - Dockerfile | docker build \
-            --build-arg EXTENSION_VERSION=$GITHUB_HEAD_REF \
+            --build-arg EXTENSION_VERSION=${{ github.head_ref }} \
             --build-arg GITHUB_ORG=${{ github.repository_owner }} \
             -
