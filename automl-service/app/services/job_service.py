@@ -794,7 +794,7 @@ async def _fetch_mlflow_results(job_id: str) -> Optional[dict]:
             "feature_importance": feature_importance,
             "experiment_run_id": run_id,
             "experiment_name": experiment_name,
-            "model_path": f"runs:/{run_id}/autogluon_model/artifacts/model",
+            "model_path": f"runs:/{run_id}/autogluon_model_raw",
         }
 
     loop = asyncio.get_event_loop()

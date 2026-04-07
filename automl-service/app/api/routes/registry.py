@@ -38,15 +38,8 @@ async def register_model(request: RegisterModelRequest, db: AsyncSession = Depen
     job = await crud.get_job(db, request.job_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job not found: {request.job_id}")
-    if not job.model_path:
-        raise HTTPException(status_code=400, detail="Job has no trained model to register")
-
-    # model_path is "runs:/{run_id}/{artifact_path}"
-    if not job.model_path.startswith("runs:/"):
-        raise HTTPException(status_code=400, detail=f"Unsupported model_path format: {job.model_path}")
-    parts = job.model_path[len("runs:/"):].split("/", 1)
-    run_id = parts[0]
-    artifact_path = parts[1] if len(parts) > 1 else "model"
+    if not job.experiment_run_id:
+        raise HTTPException(status_code=400, detail="Job has no MLflow experiment run to register from")
 
     resp = await domino_request("POST", "/api/registeredmodels/v2", json={
         "modelName": request.model_name,
@@ -54,8 +47,8 @@ async def register_model(request: RegisterModelRequest, db: AsyncSession = Depen
         "modelSource": {
             "sourceType": "mlflow",
             "mlflowSource": {
-                "experimentRunId": run_id,
-                "artifactPath": artifact_path,
+                "experimentRunId": job.experiment_run_id,
+                "artifactPath": "autogluon_model",
             },
         },
         "create": True,

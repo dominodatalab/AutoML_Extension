@@ -733,6 +733,11 @@ class ExperimentTracker:
                             artifacts={"model": model_path},
                         )
                         mlflow.log_artifacts(local_model_dir, artifact_path="autogluon_model")
+                    # Log raw AutoGluon model files separately for diagnostic
+                    # loading by the app service. pyfunc.save_model stores
+                    # artifacts by reference only — autogluon_model/artifacts/model
+                    # does not exist in the MLflow store.
+                    mlflow.log_artifacts(model_path, artifact_path="autogluon_model_raw")
                     logger.info(f"Logged model artifacts from: {model_path}")
 
             logger.info(f"Training results logged: {len(models)} model runs + final summary run {run_id}")

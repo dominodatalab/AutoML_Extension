@@ -1,7 +1,6 @@
 """Shared utilities for API route handlers."""
 
 import asyncio
-import os
 from typing import Optional, Tuple
 
 from fastapi import HTTPException, Request
@@ -52,13 +51,6 @@ async def get_job_paths(
         )
     except ValueError as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-    # If the downloaded artifact is a pyfunc model directory (has MLmodel), the
-    # actual AutoGluon model lives at artifacts/model/ inside it. This happened
-    # when the training worker started wrapping models with mlflow.pyfunc.save_model.
-    pyfunc_inner = os.path.join(local_model_path, "artifacts", "model")
-    if os.path.isfile(os.path.join(local_model_path, "MLmodel")) and os.path.isdir(pyfunc_inner):
-        local_model_path = pyfunc_inner
 
     # TODO: file_path refers to a dataset path in the training job's project, which is
     # inaccessible to this app (different project, no cross-project dataset mounting).
