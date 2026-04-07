@@ -242,5 +242,8 @@ RUN pip install \
     "feedparser>=6.0.10" \
     "pdfplumber>=0.10.0"
 
+# allow model endpoint builds to succeed
+RUN chmod 777 /mnt
+
 # Cleanup after apt package installs
 RUN rm -rf /var/lib/apt/lists/*
