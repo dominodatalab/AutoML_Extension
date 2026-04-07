@@ -715,6 +715,9 @@ class ExperimentTracker:
                                 self._predictor = TabularPredictor.load(model_dir)
 
                         def predict(self, context: mlflow.pyfunc.PythonModelContext, model_input):
+                            import pandas as pd
+                            if not isinstance(model_input, pd.DataFrame):
+                                model_input = pd.DataFrame(model_input)
                             return self._predictor.predict(model_input)
 
                     with tempfile.TemporaryDirectory() as tmp_dir:

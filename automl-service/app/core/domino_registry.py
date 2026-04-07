@@ -7,6 +7,7 @@ from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
 import mlflow
+import pandas as pd
 from mlflow import MlflowClient
 
 from app.config import get_settings
@@ -34,6 +35,8 @@ def _build_pyfunc_wrapper(model_type: str) -> mlflow.pyfunc.PythonModel:
 
             def predict(self, context, model_input):
                 """Make predictions using the loaded model."""
+                if not isinstance(model_input, pd.DataFrame):
+                    model_input = pd.DataFrame(model_input)
                 predictions = self.predictor.predict(model_input)
                 return {"predictions": predictions.to_dict('records')}
 
@@ -49,6 +52,8 @@ def _build_pyfunc_wrapper(model_type: str) -> mlflow.pyfunc.PythonModel:
 
         def predict(self, context, model_input):
             """Make predictions using the loaded model."""
+            if not isinstance(model_input, pd.DataFrame):
+                model_input = pd.DataFrame(model_input)
             predictions = self.predictor.predict(model_input)
             try:
                 probabilities = self.predictor.predict_proba(model_input)

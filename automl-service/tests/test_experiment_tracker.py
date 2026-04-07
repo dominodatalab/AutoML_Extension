@@ -3,6 +3,8 @@
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
+
 from app.core.experiment_tracker import ExperimentTracker
 
 
@@ -59,6 +61,48 @@ class TestLogTrainingResults:
         assert mock_save_model.call_args.kwargs["artifacts"] == {"model": model_dir}
         mock_log_artifacts.assert_called_once()
         assert mock_log_artifacts.call_args.kwargs["artifact_path"] == "autogluon_model"
+
+    def test_predict_coerces_non_dataframe_to_dataframe(self, tmp_path):
+        """predict must convert dict/non-DataFrame input to DataFrame before passing to
+        AutoGluon. Domino's model-manager passes the raw request body, not a DataFrame."""
+        model_dir = str(tmp_path / "model")
+        tracker = _make_tracker()
+
+        with _patch_mlflow() as (mock_save_model, _):
+            tracker.log_training_results(
+                job_config={"model_type": "tabular", "name": "test"},
+                metrics={},
+                leaderboard=[],
+                model_path=model_dir,
+            )
+
+        wrapper = mock_save_model.call_args.kwargs["python_model"]
+        wrapper._predictor = MagicMock()
+
+        wrapper.predict(None, {"age": [25], "income": [45000]})
+        call_arg = wrapper._predictor.predict.call_args[0][0]
+        assert isinstance(call_arg, pd.DataFrame)
+
+    def test_predict_passes_dataframe_through_unchanged(self, tmp_path):
+        """predict must not re-wrap input that is already a DataFrame."""
+        model_dir = str(tmp_path / "model")
+        tracker = _make_tracker()
+
+        with _patch_mlflow() as (mock_save_model, _):
+            tracker.log_training_results(
+                job_config={"model_type": "tabular", "name": "test"},
+                metrics={},
+                leaderboard=[],
+                model_path=model_dir,
+            )
+
+        wrapper = mock_save_model.call_args.kwargs["python_model"]
+        wrapper._predictor = MagicMock()
+
+        df = pd.DataFrame({"age": [25], "income": [45000]})
+        wrapper.predict(None, df)
+        call_arg = wrapper._predictor.predict.call_args[0][0]
+        assert call_arg is df
 
     def test_skips_model_logging_when_no_model_path(self):
         tracker = _make_tracker()
