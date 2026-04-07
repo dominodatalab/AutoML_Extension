@@ -66,6 +66,7 @@ async def run_migrations():
         ("jobs", "enable_mlflow", "BOOLEAN DEFAULT 0"),
         ("jobs", "feature_importance", "JSON"),
         ("eda_jobs", "job_id", "VARCHAR(255)"),
+        ("jobs", "model_api_id", "VARCHAR(255)"),
     ]
 
     async with engine.begin() as conn:
