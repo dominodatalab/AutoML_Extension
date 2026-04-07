@@ -689,12 +689,16 @@ class ExperimentTracker:
                         "feature_importance.json"
                     )
 
-                # Log model as a proper MLflow pyfunc model so Domino can infer
-                # model category and build the serving image correctly.
-                # mlflow.log_artifacts produces no MLmodel file, causing Domino
-                # to default to ML category with shouldBuildImage=false and then
-                # fail to pre-create the /mnt/... artifact directory at serve time.
+                # Save model as pyfunc (creates MLmodel so Domino can infer model
+                # category) then upload via log_artifacts so files land at the
+                # run-based artifact path.  Using log_model directly in MLflow 3.x
+                # creates a Logged Model entity whose artifacts live at
+                # mlflow-artifacts:/mlflow/models/<id>/artifacts — a different path
+                # than what Domino registers as the model version source, causing
+                # the endpoint build's `mlflow artifacts download` to 500.
                 if model_path:
+                    import tempfile
+
                     model_type = job_config.get("model_type", "tabular")
 
                     class _AutoGluonWrapper(mlflow.pyfunc.PythonModel):
@@ -713,12 +717,15 @@ class ExperimentTracker:
                         def predict(self, context: mlflow.pyfunc.PythonModelContext, model_input):
                             return self._predictor.predict(model_input)
 
-                    mlflow.pyfunc.log_model(
-                        artifact_path="autogluon_model",
-                        python_model=_AutoGluonWrapper(model_type),
-                        artifacts={"model": model_path},
-                    )
-                    logger.info(f"Logged model as pyfunc from: {model_path}")
+                    with tempfile.TemporaryDirectory() as tmp_dir:
+                        local_model_dir = os.path.join(tmp_dir, "autogluon_model")
+                        mlflow.pyfunc.save_model(
+                            path=local_model_dir,
+                            python_model=_AutoGluonWrapper(model_type),
+                            artifacts={"model": model_path},
+                        )
+                        mlflow.log_artifacts(local_model_dir, artifact_path="autogluon_model")
+                    logger.info(f"Logged model artifacts from: {model_path}")
 
             logger.info(f"Training results logged: {len(models)} model runs + final summary run {run_id}")
 

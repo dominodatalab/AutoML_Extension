@@ -31,21 +31,23 @@ def _patch_mlflow():
         patch("mlflow.set_tags"),
         patch("mlflow.log_artifact"),
         patch("mlflow.log_artifacts") as mock_log_artifacts,
-        patch("mlflow.pyfunc.log_model") as mock_pyfunc_log_model,
+        patch("mlflow.pyfunc.save_model") as mock_pyfunc_save_model,
     ):
-        yield mock_pyfunc_log_model, mock_log_artifacts
+        yield mock_pyfunc_save_model, mock_log_artifacts
 
 
 class TestLogTrainingResults:
 
-    def test_pyfunc_log_model_call_contract(self, tmp_path):
-        """pyfunc.log_model must be used (not log_artifacts) with the correct artifact_path
-        and artifacts dict so Domino can find MLmodel for model category inference and
-        the registration route can parse the artifact URI correctly."""
+    def test_model_logging_contract(self, tmp_path):
+        """save_model must be called to produce an MLmodel file (so Domino can infer
+        model category), and log_artifacts must upload files to the run-based artifact
+        path so the endpoint build's `mlflow artifacts download` can find them.
+        Using log_model in MLflow 3.x stores files at the logged-model path instead,
+        breaking the download."""
         model_dir = str(tmp_path / "model")
         tracker = _make_tracker()
 
-        with _patch_mlflow() as (mock_pyfunc, mock_log_artifacts):
+        with _patch_mlflow() as (mock_save_model, mock_log_artifacts):
             tracker.log_training_results(
                 job_config={"model_type": "tabular", "name": "test"},
                 metrics={},
@@ -53,15 +55,15 @@ class TestLogTrainingResults:
                 model_path=model_dir,
             )
 
-        mock_pyfunc.assert_called_once()
-        assert mock_pyfunc.call_args.kwargs["artifact_path"] == "autogluon_model"
-        assert mock_pyfunc.call_args.kwargs["artifacts"] == {"model": model_dir}
-        mock_log_artifacts.assert_not_called()
+        mock_save_model.assert_called_once()
+        assert mock_save_model.call_args.kwargs["artifacts"] == {"model": model_dir}
+        mock_log_artifacts.assert_called_once()
+        assert mock_log_artifacts.call_args.kwargs["artifact_path"] == "autogluon_model"
 
-    def test_skips_pyfunc_when_no_model_path(self):
+    def test_skips_model_logging_when_no_model_path(self):
         tracker = _make_tracker()
 
-        with _patch_mlflow() as (mock_pyfunc, _):
+        with _patch_mlflow() as (mock_save_model, _):
             tracker.log_training_results(
                 job_config={"model_type": "tabular", "name": "test"},
                 metrics={},
@@ -69,4 +71,4 @@ class TestLogTrainingResults:
                 model_path=None,
             )
 
-        mock_pyfunc.assert_not_called()
+        mock_save_model.assert_not_called()
