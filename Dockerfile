@@ -128,7 +128,11 @@ RUN pip install \
     "ConfigSpace>=0.7.1" \
     "boto3>=1.28.0" \
     "psutil>=5.9.0" \
-    "networkx>=3.1"
+    "networkx>=3.1" \
+    # workaround for broken fastai dependency: https://github.com/autogluon/autogluon/issues/5521#issuecomment-3836174413
+    # should be fixed in autogluon's 2.0 release
+    "fastprogress==1.0.5"
+
 
 # ============================================
 # AutoGluon TimeSeries Dependencies
@@ -175,7 +179,7 @@ RUN pip install \
     "autogluon>=1.1.0" \
     "autogluon.core>=1.1.0" \
     "autogluon.features>=1.1.0" \
-    "autogluon.tabular>=1.1.0" \
+    "autogluon.tabular[all]>=1.1.0" \
     "autogluon.timeseries>=1.1.0" \
     "autogluon.multimodal>=1.1.0"
 
