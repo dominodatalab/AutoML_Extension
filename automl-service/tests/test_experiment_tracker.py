@@ -85,7 +85,7 @@ class TestLogTrainingResults:
                 "columns": ["age", "income"],
                 "data": [[25, 45000]],
             }
-        })
+        }, params=None)
         call_arg = wrapper._predictor.predict.call_args[0][0]
         assert isinstance(call_arg, pd.DataFrame)
         assert list(call_arg.columns) == ["age", "income"]
@@ -107,7 +107,7 @@ class TestLogTrainingResults:
         wrapper = mock_save_model.call_args.kwargs["python_model"]
         wrapper._predictor = MagicMock()
 
-        wrapper.predict(None, {"age": [25], "income": [45000]})
+        wrapper.predict(None, {"age": [25], "income": [45000]}, params=None)
         call_arg = wrapper._predictor.predict.call_args[0][0]
         assert isinstance(call_arg, pd.DataFrame)
 
@@ -128,7 +128,7 @@ class TestLogTrainingResults:
         wrapper._predictor = MagicMock()
 
         df = pd.DataFrame({"age": [25], "income": [45000]})
-        wrapper.predict(None, df)
+        wrapper.predict(None, df, params=None)
         call_arg = wrapper._predictor.predict.call_args[0][0]
         assert call_arg is df
 

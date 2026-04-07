@@ -724,21 +724,25 @@ class ExperimentTracker:
                                 print(traceback.format_exc(), flush=True)
                                 raise
 
-                        def predict(self, context: mlflow.pyfunc.PythonModelContext, model_input):
+                        def predict(self, context: mlflow.pyfunc.PythonModelContext, model_input, params=None):
+                            import sys
                             import traceback
                             import pandas as pd
                             try:
-                                print(f"[AutoGluonWrapper] predict: input type={type(model_input)}, value={model_input!r}", flush=True)
+                                sys.stderr.write(f"[AutoGluonWrapper] predict: input type={type(model_input)}, value={model_input!r}\n")
+                                sys.stderr.flush()
                                 if isinstance(model_input, dict) and "dataframe_split" in model_input:
                                     split = model_input["dataframe_split"]
                                     model_input = pd.DataFrame(split["data"], columns=split["columns"])
                                 elif not isinstance(model_input, pd.DataFrame):
                                     model_input = pd.DataFrame(model_input)
-                                print(f"[AutoGluonWrapper] predict: DataFrame shape={model_input.shape}, columns={list(model_input.columns)}", flush=True)
+                                sys.stderr.write(f"[AutoGluonWrapper] predict: DataFrame shape={model_input.shape}, columns={list(model_input.columns)}\n")
+                                sys.stderr.flush()
                                 return self._predictor.predict(model_input)
                             except Exception as e:
-                                print(f"[AutoGluonWrapper] predict ERROR: {type(e).__name__}: {e}", flush=True)
-                                print(traceback.format_exc(), flush=True)
+                                sys.stderr.write(f"[AutoGluonWrapper] predict ERROR: {type(e).__name__}: {e}\n")
+                                sys.stderr.write(traceback.format_exc())
+                                sys.stderr.flush()
                                 raise
 
                     with tempfile.TemporaryDirectory() as tmp_dir:

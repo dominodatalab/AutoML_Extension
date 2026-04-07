@@ -33,7 +33,7 @@ def _build_pyfunc_wrapper(model_type: str) -> mlflow.pyfunc.PythonModel:
                 from autogluon.timeseries import TimeSeriesPredictor
                 self.predictor = TimeSeriesPredictor.load(context.artifacts["model_path"])
 
-            def predict(self, context, model_input):
+            def predict(self, context, model_input, params=None):
                 """Make predictions using the loaded model."""
                 if isinstance(model_input, dict) and "dataframe_split" in model_input:
                     split = model_input["dataframe_split"]
@@ -53,7 +53,7 @@ def _build_pyfunc_wrapper(model_type: str) -> mlflow.pyfunc.PythonModel:
             from autogluon.tabular import TabularPredictor
             self.predictor = TabularPredictor.load(context.artifacts["model_path"])
 
-        def predict(self, context, model_input):
+        def predict(self, context, model_input, params=None):
             """Make predictions using the loaded model."""
             if isinstance(model_input, dict) and "dataframe_split" in model_input:
                 split = model_input["dataframe_split"]
