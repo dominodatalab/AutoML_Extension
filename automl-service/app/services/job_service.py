@@ -31,8 +31,6 @@ from app.api.schemas.job import (
     JobMetricsResponse,
     JobProgressResponse,
     JobStatusResponse,
-    RegisterModelRequest,
-    RegisterModelResponse,
 )
 from app.config import get_settings
 from app.core.authorization import require_storage_modify, require_domino_job_start, require_domino_job_list, current_user_can_modify_storage, require_domino_job_stop
@@ -45,7 +43,6 @@ from app.db.models import Job, JobLog, JobStatus, ModelType, ProblemType
 from app.db import crud
 from app.services.job_links import attach_external_links
 from app.services.models import JobConfig
-from app.workers.training_worker import register_trained_model
 
 logger = logging.getLogger(__name__)
 
@@ -1168,40 +1165,3 @@ async def bulk_delete_jobs(db: AsyncSession, job_ids: list[str]) -> dict:
             failed.append({"job_id": job_id, "error": str(exc)})
 
     return {"deleted_job_ids": deleted_job_ids, "failed": failed}
-
-
-async def register_model_for_job(
-    db: AsyncSession,
-    job_id: str,
-    request: RegisterModelRequest,
-) -> RegisterModelResponse:
-    """Register a completed job's trained model in Domino registry."""
-    owner_user_name = get_viewing_user_name()
-    job = await get_job_or_404(db, job_id, owner_user_name)
-    if job.status != JobStatus.COMPLETED:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot register model from job with status: {job.status.value}",
-        )
-
-    try:
-        prefixed_model_name = request.model_name
-        if not prefixed_model_name.startswith("automlapp-"):
-            prefixed_model_name = f"automlapp-{prefixed_model_name}"
-
-        result = await register_trained_model(
-            job_id=job_id,
-            model_name=prefixed_model_name,
-            description=request.description,
-            stage=request.stage,
-        )
-        return RegisterModelResponse(
-            success=True,
-            model_name=result.get("model_name"),
-            version=result.get("version"),
-            run_id=result.get("run_id"),
-            artifact_uri=result.get("artifact_uri"),
-            stage=result.get("stage"),
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to register model: {exc}") from exc

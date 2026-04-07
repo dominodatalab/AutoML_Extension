@@ -19,8 +19,6 @@ from app.api.schemas.job import (
     JobListRequest,
     JobProgressResponse,
     CleanupRequest,
-    RegisterModelRequest,
-    RegisterModelResponse,
 )
 from app.services.job_service import (
     bulk_cleanup as bulk_cleanup_service,
@@ -37,7 +35,6 @@ from app.services.job_service import (
     get_job_status_response,
     list_jobs_filtered,
     preview_cleanup as preview_cleanup_service,
-    register_model_for_job,
 )
 
 router = APIRouter()
@@ -198,15 +195,5 @@ async def list_jobs(
 async def get_job_progress(job_id: str, db: AsyncSession = Depends(get_db)):
     """Get detailed job progress."""
     return await get_job_progress_response(db, job_id)
-
-
-@router.post("/{job_id}/register", response_model=RegisterModelResponse)
-async def register_job_model(
-    job_id: str,
-    request: RegisterModelRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    """Register a trained model from a completed job to Domino registry."""
-    return await register_model_for_job(db, job_id, request)
 
 

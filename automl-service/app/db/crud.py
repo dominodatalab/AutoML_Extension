@@ -13,7 +13,6 @@ from app.db.models import (
     JobLog,
     JobStatus,
     ModelType,
-    RegisteredModel,
 )
 
 
@@ -272,45 +271,6 @@ async def get_job_logs(
     return result.scalars().all()
 
 
-# Registered Model operations
-
-async def create_registered_model(
-    db: AsyncSession,
-    model: RegisteredModel,
-) -> RegisteredModel:
-    """Register a new model."""
-    db.add(model)
-    await db.commit()
-    await db.refresh(model)
-    return model
-
-
-async def get_registered_model(
-    db: AsyncSession,
-    name: str,
-) -> Optional[RegisteredModel]:
-    """Get a registered model by name."""
-    result = await db.execute(
-        select(RegisteredModel).where(RegisteredModel.name == name)
-    )
-    return result.scalar_one_or_none()
-
-
-async def get_registered_models(
-    db: AsyncSession,
-    project_id: Optional[str] = None,
-) -> Sequence[RegisteredModel]:
-    """Get all registered models, optionally filtered by project via job FK."""
-    query = select(RegisteredModel)
-    if project_id:
-        query = query.join(Job, RegisteredModel.job_id == Job.id).where(
-            Job.project_id == project_id
-        )
-    query = query.order_by(desc(RegisteredModel.created_at))
-    result = await db.execute(query)
-    return result.scalars().all()
-
-
 # Cleanup helpers
 
 async def delete_job_logs(db: AsyncSession, job_id: str) -> int:
@@ -318,21 +278,6 @@ async def delete_job_logs(db: AsyncSession, job_id: str) -> int:
     result = await db.execute(delete(JobLog).where(JobLog.job_id == job_id))
     await db.commit()
     return result.rowcount
-
-
-async def delete_registered_models_for_job(db: AsyncSession, job_id: str) -> int:
-    """Delete registered model records for a job. Returns number of rows deleted."""
-    result = await db.execute(delete(RegisteredModel).where(RegisteredModel.job_id == job_id))
-    await db.commit()
-    return result.rowcount
-
-
-async def count_jobs_with_file_path(db: AsyncSession, file_path: str) -> int:
-    """Count how many jobs reference a given file_path."""
-    result = await db.execute(
-        select(func.count()).select_from(Job).where(Job.file_path == file_path)
-    )
-    return result.scalar()
 
 
 async def get_jobs_for_cleanup(

@@ -1,7 +1,6 @@
 """Artifact cleanup service for jobs.
 
-Handles deletion of model files, MLflow runs, logs, and registered model records.
-Also detects and cleans orphaned artifacts.
+Handles deletion of model files, MLflow runs, logs, and orphaned artifacts.
 """
 
 import logging
@@ -36,7 +35,6 @@ class CleanupService:
         model_files_size_bytes = 0
         mlflow_runs_deleted = 0
         job_logs_deleted = 0
-        registered_model_deleted = False
 
         # 1. Job file cache (MLflow artifacts downloaded to app's temp_path)
         try:
@@ -64,29 +62,11 @@ class CleanupService:
             errors.append(f"job_logs: {e}")
             logger.warning(f"Failed to delete logs for job {job.id}: {e}")
 
-        # 5. Registered model
-        if job.is_registered and job.registered_model_name:
-            try:
-                _delete_mlflow_registered_model(job.registered_model_name)
-                registered_model_deleted = True
-            except Exception as e:
-                errors.append(f"mlflow_registered_model: {e}")
-                logger.warning(
-                    f"Failed to delete MLflow registered model "
-                    f"{job.registered_model_name}: {e}"
-                )
-            try:
-                await crud.delete_registered_models_for_job(db, job.id)
-            except Exception as e:
-                errors.append(f"db_registered_model: {e}")
-                logger.warning(f"Failed to delete DB registered model for job {job.id}: {e}")
-
         return {
             "model_files_deleted": model_files_deleted,
             "model_files_size_bytes": model_files_size_bytes,
             "mlflow_runs_deleted": mlflow_runs_deleted,
             "job_logs_deleted": job_logs_deleted,
-            "registered_model_deleted": registered_model_deleted,
             "errors": errors,
         }
 
@@ -483,19 +463,6 @@ def _count_mlflow_runs(job_id: str) -> int:
     except Exception:
         return 0
 
-
-def _delete_mlflow_registered_model(model_name: str):
-    """Delete an MLflow registered model."""
-    try:
-        from mlflow import MlflowClient
-        client = MlflowClient()
-        client.delete_registered_model(model_name)
-        logger.info(f"Deleted MLflow registered model: {model_name}")
-    except ImportError:
-        logger.debug("MLflow not available, skipping registered model cleanup")
-    except Exception as e:
-        logger.warning(f"Failed to delete MLflow registered model {model_name}: {e}")
-        raise
 
 
 def _scan_mlruns_for_orphans() -> list[dict]:

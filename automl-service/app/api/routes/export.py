@@ -56,21 +56,6 @@ class LearningCurvesResponse(BaseModel):
     error: Optional[str] = None
 
 
-class ModelComparisonRequest(BaseModel):
-    """Request for model comparison."""
-    model_paths: list = Field(..., description="List of model paths to compare")
-    model_type: str = Field(..., description="Type: tabular, timeseries")
-    data_path: Optional[str] = Field(None, description="Path to test data")
-
-
-class ModelComparisonResponse(BaseModel):
-    """Response with model comparison."""
-    models: list = []
-    metrics_comparison: Optional[Dict[str, Any]] = None
-    chart: Optional[str] = None  # base64 encoded
-    best_model: Optional[str] = None
-    error: Optional[str] = None
-
 
 def _normalize_model_type(raw_model_type: Any) -> Optional[str]:
     """Normalize enum/legacy model_type values to canonical API keys."""
@@ -187,22 +172,6 @@ async def get_learning_curves(
         logger.error(f"Error getting learning curves: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate learning curves: {e}")
 
-
-@router.post("/compare-models", response_model=ModelComparisonResponse)
-async def compare_models(request: ModelComparisonRequest):
-    """Compare multiple trained models."""
-    diagnostics = get_model_diagnostics()
-
-    try:
-        result = diagnostics.compare_models(
-            model_paths=request.model_paths,
-            model_type=request.model_type,
-            data_path=request.data_path
-        )
-        return ModelComparisonResponse(**result)
-    except Exception as e:
-        logger.error(f"Error comparing models: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to compare models: {e}")
 
 
 @router.get("/formats")

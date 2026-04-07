@@ -122,28 +122,3 @@ class TestProfilingErrors:
             json={"file_path": path},
         )
         assert resp.status_code in (400, 404, 422, 500)
-
-
-class TestRegistryErrors:
-    """Error handling for registry endpoints."""
-
-    def test_delete_nonexistent_model(self, client):
-        resp = client.delete("/svc/v1/registry/models/nonexistent_model_xyz")
-        # Should fail gracefully
-        assert resp.status_code in (400, 404, 500)
-
-    def test_get_versions_nonexistent_model(self, client):
-        resp = client.get("/svc/v1/registry/models/nonexistent_model_xyz/versions")
-        assert resp.status_code in (404, 500)
-
-    def test_register_from_noncompleted_job(self, client, unique_name):
-        """Register model from a job that doesn't exist should fail."""
-        fake_job_id = str(uuid.uuid4())
-        resp = client.post(
-            f"/svc/v1/jobs/{fake_job_id}/register",
-            json={
-                "job_id": fake_job_id,
-                "model_name": unique_name("ghost_register"),
-            },
-        )
-        assert resp.status_code in (400, 404, 500)

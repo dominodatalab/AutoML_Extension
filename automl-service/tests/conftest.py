@@ -39,7 +39,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.db.database import Base
-from app.db.models import Job, JobLog, JobStatus, ModelType, ProblemType, RegisteredModel
+from app.db.models import Job, JobLog, JobStatus, ModelType, ProblemType
 from app.core.utils import utc_now
 from app.core.context.auth import set_request_auth_header
 
