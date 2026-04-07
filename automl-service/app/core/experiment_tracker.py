@@ -706,22 +706,40 @@ class ExperimentTracker:
                             self._model_type = mt
 
                         def load_context(self, context: mlflow.pyfunc.PythonModelContext) -> None:
-                            model_dir = context.artifacts["model"]
-                            if self._model_type == "timeseries":
-                                from autogluon.timeseries import TimeSeriesPredictor
-                                self._predictor = TimeSeriesPredictor.load(model_dir)
-                            else:
-                                from autogluon.tabular import TabularPredictor
-                                self._predictor = TabularPredictor.load(model_dir)
+                            import os
+                            import traceback
+                            try:
+                                print(f"[AutoGluonWrapper] load_context: artifacts={dict(context.artifacts)}, type={self._model_type}", flush=True)
+                                model_dir = context.artifacts["model"]
+                                print(f"[AutoGluonWrapper] load_context: model_dir={model_dir}, exists={os.path.exists(model_dir)}, contents={os.listdir(model_dir) if os.path.exists(model_dir) else 'N/A'}", flush=True)
+                                if self._model_type == "timeseries":
+                                    from autogluon.timeseries import TimeSeriesPredictor
+                                    self._predictor = TimeSeriesPredictor.load(model_dir)
+                                else:
+                                    from autogluon.tabular import TabularPredictor
+                                    self._predictor = TabularPredictor.load(model_dir)
+                                print(f"[AutoGluonWrapper] load_context: predictor loaded successfully", flush=True)
+                            except Exception as e:
+                                print(f"[AutoGluonWrapper] load_context ERROR: {type(e).__name__}: {e}", flush=True)
+                                print(traceback.format_exc(), flush=True)
+                                raise
 
                         def predict(self, context: mlflow.pyfunc.PythonModelContext, model_input):
+                            import traceback
                             import pandas as pd
-                            if isinstance(model_input, dict) and "dataframe_split" in model_input:
-                                split = model_input["dataframe_split"]
-                                model_input = pd.DataFrame(split["data"], columns=split["columns"])
-                            elif not isinstance(model_input, pd.DataFrame):
-                                model_input = pd.DataFrame(model_input)
-                            return self._predictor.predict(model_input)
+                            try:
+                                print(f"[AutoGluonWrapper] predict: input type={type(model_input)}, value={model_input!r}", flush=True)
+                                if isinstance(model_input, dict) and "dataframe_split" in model_input:
+                                    split = model_input["dataframe_split"]
+                                    model_input = pd.DataFrame(split["data"], columns=split["columns"])
+                                elif not isinstance(model_input, pd.DataFrame):
+                                    model_input = pd.DataFrame(model_input)
+                                print(f"[AutoGluonWrapper] predict: DataFrame shape={model_input.shape}, columns={list(model_input.columns)}", flush=True)
+                                return self._predictor.predict(model_input)
+                            except Exception as e:
+                                print(f"[AutoGluonWrapper] predict ERROR: {type(e).__name__}: {e}", flush=True)
+                                print(traceback.format_exc(), flush=True)
+                                raise
 
                     with tempfile.TemporaryDirectory() as tmp_dir:
                         local_model_dir = os.path.join(tmp_dir, "autogluon_model")
