@@ -96,6 +96,7 @@ def _make_job(**overrides) -> Job:
     job.registered_model_name = "automlapp-my-model"
     job.registered_model_version = "1"
     job.name = "my-job"
+    job.project_id = "proj-abc"
     job.model_type = ModelType.TABULAR
     for k, v in overrides.items():
         setattr(job, k, v)
@@ -205,6 +206,7 @@ class TestDeployFromJob:
             description="AutoML model from job job-id",
             environment_id="env-123",
             replicas=2,
+            project_id="proj-abc",
         )
 
     @pytest.mark.asyncio

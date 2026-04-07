@@ -72,6 +72,7 @@ async def deploy_from_job(
         description=f"AutoML model from job {job_id}",
         environment_id=environment_id,
         replicas=replicas,
+        project_id=job.project_id,
     )
 
     if not result["success"]:
