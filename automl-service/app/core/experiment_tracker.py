@@ -706,44 +706,24 @@ class ExperimentTracker:
                             self._model_type = mt
 
                         def load_context(self, context: mlflow.pyfunc.PythonModelContext) -> None:
-                            import os
-                            import traceback
-                            try:
-                                print(f"[AutoGluonWrapper] load_context: artifacts={dict(context.artifacts)}, type={self._model_type}", flush=True)
-                                model_dir = context.artifacts["model"]
-                                print(f"[AutoGluonWrapper] load_context: model_dir={model_dir}, exists={os.path.exists(model_dir)}, contents={os.listdir(model_dir) if os.path.exists(model_dir) else 'N/A'}", flush=True)
-                                if self._model_type == "timeseries":
-                                    from autogluon.timeseries import TimeSeriesPredictor
-                                    self._predictor = TimeSeriesPredictor.load(model_dir)
-                                else:
-                                    from autogluon.tabular import TabularPredictor
-                                    self._predictor = TabularPredictor.load(model_dir)
-                                print(f"[AutoGluonWrapper] load_context: predictor loaded successfully", flush=True)
-                            except Exception as e:
-                                print(f"[AutoGluonWrapper] load_context ERROR: {type(e).__name__}: {e}", flush=True)
-                                print(traceback.format_exc(), flush=True)
-                                raise
+                            model_dir = context.artifacts["model"]
+                            print(f"[AutoGluonWrapper] loading model from {model_dir} (type={self._model_type})", flush=True)
+                            if self._model_type == "timeseries":
+                                from autogluon.timeseries import TimeSeriesPredictor
+                                self._predictor = TimeSeriesPredictor.load(model_dir)
+                            else:
+                                from autogluon.tabular import TabularPredictor
+                                self._predictor = TabularPredictor.load(model_dir)
+                            print("[AutoGluonWrapper] model loaded successfully", flush=True)
 
                         def predict(self, context: mlflow.pyfunc.PythonModelContext, model_input, params=None):
-                            import sys
-                            import traceback
                             import pandas as pd
-                            try:
-                                sys.stderr.write(f"[AutoGluonWrapper] predict: input type={type(model_input)}, value={model_input!r}\n")
-                                sys.stderr.flush()
-                                if isinstance(model_input, dict) and "dataframe_split" in model_input:
-                                    split = model_input["dataframe_split"]
-                                    model_input = pd.DataFrame(split["data"], columns=split["columns"])
-                                elif not isinstance(model_input, pd.DataFrame):
-                                    model_input = pd.DataFrame(model_input)
-                                sys.stderr.write(f"[AutoGluonWrapper] predict: DataFrame shape={model_input.shape}, columns={list(model_input.columns)}\n")
-                                sys.stderr.flush()
-                                return self._predictor.predict(model_input)
-                            except Exception as e:
-                                sys.stderr.write(f"[AutoGluonWrapper] predict ERROR: {type(e).__name__}: {e}\n")
-                                sys.stderr.write(traceback.format_exc())
-                                sys.stderr.flush()
-                                raise
+                            if isinstance(model_input, dict) and "dataframe_split" in model_input:
+                                split = model_input["dataframe_split"]
+                                model_input = pd.DataFrame(split["data"], columns=split["columns"])
+                            elif not isinstance(model_input, pd.DataFrame):
+                                model_input = pd.DataFrame(model_input)
+                            return self._predictor.predict(model_input)
 
                     with tempfile.TemporaryDirectory() as tmp_dir:
                         local_model_dir = os.path.join(tmp_dir, "autogluon_model")
