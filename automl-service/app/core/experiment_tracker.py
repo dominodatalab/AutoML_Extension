@@ -716,7 +716,10 @@ class ExperimentTracker:
 
                         def predict(self, context: mlflow.pyfunc.PythonModelContext, model_input):
                             import pandas as pd
-                            if not isinstance(model_input, pd.DataFrame):
+                            if isinstance(model_input, dict) and "dataframe_split" in model_input:
+                                split = model_input["dataframe_split"]
+                                model_input = pd.DataFrame(split["data"], columns=split["columns"])
+                            elif not isinstance(model_input, pd.DataFrame):
                                 model_input = pd.DataFrame(model_input)
                             return self._predictor.predict(model_input)
 

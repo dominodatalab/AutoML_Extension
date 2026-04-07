@@ -62,9 +62,37 @@ class TestLogTrainingResults:
         mock_log_artifacts.assert_called_once()
         assert mock_log_artifacts.call_args.kwargs["artifact_path"] == "autogluon_model"
 
-    def test_predict_coerces_non_dataframe_to_dataframe(self, tmp_path):
-        """predict must convert dict/non-DataFrame input to DataFrame before passing to
-        AutoGluon. Domino's model-manager passes the raw request body, not a DataFrame."""
+    def test_predict_parses_dataframe_split_format(self, tmp_path):
+        """predict must parse MLflow's dataframe_split format into a DataFrame.
+        Domino's MlflowWrapper passes the raw request body dict to LOADED_MODEL.predict(),
+        which MLflow forwards unchanged (no signature = no schema enforcement)."""
+        model_dir = str(tmp_path / "model")
+        tracker = _make_tracker()
+
+        with _patch_mlflow() as (mock_save_model, _):
+            tracker.log_training_results(
+                job_config={"model_type": "tabular", "name": "test"},
+                metrics={},
+                leaderboard=[],
+                model_path=model_dir,
+            )
+
+        wrapper = mock_save_model.call_args.kwargs["python_model"]
+        wrapper._predictor = MagicMock()
+
+        wrapper.predict(None, {
+            "dataframe_split": {
+                "columns": ["age", "income"],
+                "data": [[25, 45000]],
+            }
+        })
+        call_arg = wrapper._predictor.predict.call_args[0][0]
+        assert isinstance(call_arg, pd.DataFrame)
+        assert list(call_arg.columns) == ["age", "income"]
+        assert call_arg.iloc[0]["age"] == 25
+
+    def test_predict_coerces_plain_dict_to_dataframe(self, tmp_path):
+        """predict must convert a plain dict to DataFrame as a fallback."""
         model_dir = str(tmp_path / "model")
         tracker = _make_tracker()
 

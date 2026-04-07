@@ -35,7 +35,10 @@ def _build_pyfunc_wrapper(model_type: str) -> mlflow.pyfunc.PythonModel:
 
             def predict(self, context, model_input):
                 """Make predictions using the loaded model."""
-                if not isinstance(model_input, pd.DataFrame):
+                if isinstance(model_input, dict) and "dataframe_split" in model_input:
+                    split = model_input["dataframe_split"]
+                    model_input = pd.DataFrame(split["data"], columns=split["columns"])
+                elif not isinstance(model_input, pd.DataFrame):
                     model_input = pd.DataFrame(model_input)
                 predictions = self.predictor.predict(model_input)
                 return {"predictions": predictions.to_dict('records')}
@@ -52,7 +55,10 @@ def _build_pyfunc_wrapper(model_type: str) -> mlflow.pyfunc.PythonModel:
 
         def predict(self, context, model_input):
             """Make predictions using the loaded model."""
-            if not isinstance(model_input, pd.DataFrame):
+            if isinstance(model_input, dict) and "dataframe_split" in model_input:
+                split = model_input["dataframe_split"]
+                model_input = pd.DataFrame(split["data"], columns=split["columns"])
+            elif not isinstance(model_input, pd.DataFrame):
                 model_input = pd.DataFrame(model_input)
             predictions = self.predictor.predict(model_input)
             try:
