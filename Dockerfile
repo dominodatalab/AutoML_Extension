@@ -247,3 +247,5 @@ RUN chmod 777 /mnt
 
 # Cleanup after apt package installs
 RUN rm -rf /var/lib/apt/lists/*
+
+USER 12574
