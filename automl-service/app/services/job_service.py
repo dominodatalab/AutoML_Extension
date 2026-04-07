@@ -898,7 +898,7 @@ async def _sync_domino_job_state(
 
     terminal_status = _terminal_status_from_domino(latest_domino_status)
     if not terminal_status:
-        if normalized:
+        if latest_domino_status:
             logger.warning(
                 "Unrecognized Domino terminal status '%s' for job %s (domino id %s)",
                 latest_domino_status,
