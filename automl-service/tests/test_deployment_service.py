@@ -151,7 +151,7 @@ class TestDeployFromJob:
         job = _make_job()
         session_cm, _ = _make_db_session(job)
         mock_api = AsyncMock()
-        mock_api.create_model_api_from_registry = AsyncMock(
+        mock_api.create_model_api_from_registry = MagicMock(
             return_value={"success": False, "error": "environment not found"}
         )
 
@@ -169,7 +169,7 @@ class TestDeployFromJob:
         job = _make_job()
         session_cm, _ = _make_db_session(job)
         mock_api = AsyncMock()
-        mock_api.create_model_api_from_registry = AsyncMock(
+        mock_api.create_model_api_from_registry = MagicMock(
             return_value={"success": True, "data": {"id": "api-abc123"}}
         )
 
@@ -181,7 +181,7 @@ class TestDeployFromJob:
 
         assert result["success"] is True
         assert result["model_api_id"] == "api-abc123"
-        mock_api.create_model_api_from_registry.assert_awaited_once_with(
+        mock_api.create_model_api_from_registry.assert_called_once_with(
             name="my-api",
             registered_model_name="automlapp-my-model",
             registered_model_version=1,
@@ -196,7 +196,7 @@ class TestDeployFromJob:
         job = _make_job()
         session_cm, _ = _make_db_session(job)
         mock_api = AsyncMock()
-        mock_api.create_model_api_from_registry = AsyncMock(
+        mock_api.create_model_api_from_registry = MagicMock(
             return_value={"success": True, "data": {"id": "api-xyz"}}
         )
 
@@ -214,7 +214,7 @@ class TestDeployFromJob:
         job = _make_job()
         session_cm, _ = _make_db_session(job)
         mock_api = AsyncMock()
-        mock_api.create_model_api_from_registry = AsyncMock(
+        mock_api.create_model_api_from_registry = MagicMock(
             return_value={"success": True, "data": {"id": "api-xyz"}}
         )
 

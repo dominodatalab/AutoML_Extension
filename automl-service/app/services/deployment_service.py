@@ -62,7 +62,7 @@ async def deploy_from_job(
     environment_id = os.environ.get("DOMINO_ENVIRONMENT_ID")
 
     api = get_domino_model_api()
-    result = await api.create_model_api_from_registry(
+    result = api.create_model_api_from_registry(
         name=deploy_name,
         registered_model_name=job.registered_model_name,
         registered_model_version=int(job.registered_model_version),
