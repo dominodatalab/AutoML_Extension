@@ -689,18 +689,12 @@ class ExperimentTracker:
                         "feature_importance.json"
                     )
 
-                # Save model as pyfunc (creates MLmodel so Domino can infer model
-                # category) then upload via log_artifacts so files land at the
-                # run-based artifact path.  Using log_model directly in MLflow 3.x
-                # creates a Logged Model entity whose artifacts live at
-                # mlflow-artifacts:/mlflow/models/<id>/artifacts — a different path
-                # than what Domino registers as the model version source, causing
-                # the endpoint build's `mlflow artifacts download` to 500.
                 if model_path:
                     import tempfile
 
                     model_type = job_config.get("model_type", "tabular")
 
+                    # Save model as pyfunc so it's deployable as a model API endpoint with no further modification
                     class _AutoGluonWrapper(mlflow.pyfunc.PythonModel):
                         def __init__(self, mt: str) -> None:
                             self._model_type = mt
