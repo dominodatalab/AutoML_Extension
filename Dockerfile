@@ -250,4 +250,4 @@ RUN chmod 777 /mnt
 RUN rm -rf /var/lib/apt/lists/*
 
 # allow model endpoint builds to succeed -- permission errors with certain directory operations without this
-USER 12574
+USER ${DOMINO_USER}
