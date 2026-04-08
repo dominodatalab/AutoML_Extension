@@ -5,8 +5,6 @@ import { useJob, useJobStatus, useJobLogs, useCancelJob, useDeleteJob } from '..
 import { SimpleProgressBar } from '../components/training/SimpleProgressBar'
 import { ModelDiagnosticsPanel } from '../components/diagnostics/ModelDiagnosticsPanel'
 import { LearningCurvesPanel } from '../components/diagnostics/LearningCurvesPanel'
-import { DeployModelApiDialog } from '../components/deployment/DeployModelApiDialog'
-import { ExportDockerDialog } from '../components/export/ExportDockerDialog'
 import { ModelExportPanel } from '../components/export/ModelExportPanel'
 import { InteractiveLeaderboard } from '../components/leaderboard/InteractiveLeaderboard'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
@@ -31,9 +29,6 @@ function JobDetail() {
   const { polledProgress, progressJobId, simulatedProgress } = useJobProgress(jobId, job, isTraining, refetch)
 
   const [activeTab, setActiveTab] = useState<DetailTab>('overview')
-  const [showDeployApiDialog, setShowDeployApiDialog] = useState(false)
-  const [showDockerExportDialog, setShowDockerExportDialog] = useState(false)
-  const [showDeployDropdown, setShowDeployDropdown] = useState(false)
   const [showActionsDropdown, setShowActionsDropdown] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
@@ -109,21 +104,9 @@ function JobDetail() {
       <JobHeader
         job={job}
         currentStatus={currentStatus}
-        standaloneMode={!dominoEnabled}
         cancelIsPending={cancelMutation.isPending}
-        showDeployDropdown={showDeployDropdown}
         showActionsDropdown={showActionsDropdown}
         onCancel={handleCancel}
-        onToggleDeployDropdown={() => setShowDeployDropdown(!showDeployDropdown)}
-        onCloseDeployDropdown={() => setShowDeployDropdown(false)}
-        onOpenDeployApiDialog={() => {
-          setShowDeployDropdown(false)
-          setShowDeployApiDialog(true)
-        }}
-        onOpenDockerExportDialog={() => {
-          setShowDeployDropdown(false)
-          setShowDockerExportDialog(true)
-        }}
         onToggleActionsDropdown={() => setShowActionsDropdown(!showActionsDropdown)}
         onCloseActionsDropdown={() => setShowActionsDropdown(false)}
         onOpenDeleteConfirm={() => {
@@ -212,28 +195,6 @@ function JobDetail() {
             )}
           </div>
         </div>
-      )}
-
-      {/* Deploy Model API Dialog */}
-      {showDeployApiDialog && job?.model_path && (
-        <DeployModelApiDialog
-          jobId={job.id}
-          defaultModelName={job.name}
-          onClose={() => setShowDeployApiDialog(false)}
-          onSuccess={() => setShowDeployApiDialog(false)}
-        />
-      )}
-
-      {/* Export Docker Container Dialog */}
-      {showDockerExportDialog && job && (
-        <ExportDockerDialog
-          jobId={job.id}
-          jobName={job.name}
-          projectName={job.project_name}
-          modelType={job.model_type}
-          onClose={() => setShowDockerExportDialog(false)}
-          onSuccess={() => setShowDockerExportDialog(false)}
-        />
       )}
 
       {/* Delete Confirmation Modal */}
