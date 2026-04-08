@@ -18,7 +18,7 @@ automl-service/
 │   │   │   ├── jobs.py          # /svc/v1/jobs — training job CRUD, progress, logs
 │   │   │   ├── datasets.py      # /svc/v1/datasets — dataset management, uploads
 │   │   │   ├── profiling.py     # /svc/v1/profiling — data profiling, target suggestions
-│   │   │   ├── predictions.py   # /svc/v1/predictions — model inference
+│   │   │   ├── predictions.py   # /svc/v1/predictions — model diagnostics
 │   │   │   ├── registry.py      # /svc/v1/registry — Domino Model Registry
 │   │   │   ├── export.py        # /svc/v1/export — model/notebook export
 │   │   │   └── deployments.py   # /svc/v1/deployments — Model API deployments
@@ -37,7 +37,6 @@ automl-service/
 │   │   ├── domino_job_launcher.py # Launch training as Domino Jobs
 │   │   ├── domino_model_api.py  # Domino Model API deployment
 │   │   ├── domino_registry.py   # Domino Model Registry API
-│   │   ├── prediction_service.py # Load and run inference
 │   │   ├── model_diagnostics.py # SHAP, feature importance
 │   │   ├── model_export.py      # Export trained models
 │   │   ├── model_loader.py      # Model deserialization
@@ -46,7 +45,7 @@ automl-service/
 │   │   │   └── timeseries.py    # AutoGluon TimeSeriesPredictor training
 │   │   └── websocket_manager.py # Real-time job progress via WebSocket
 │   ├── db/
-│   │   ├── models.py            # SQLAlchemy ORM (Job, JobLog, RegisteredModel)
+│   │   ├── models.py            # SQLAlchemy ORM (Job, JobLog)
 │   │   ├── database.py          # Async engine, session factory, migrations
 │   │   └── crud.py              # Data access layer
 │   ├── services/
@@ -59,7 +58,7 @@ automl-service/
 │       ├── training_worker.py   # Async training execution loop
 │       ├── domino_training_runner.py
 │       └── domino_eda_runner.py
-├── tests/                       # 654 unit + 44 integration tests (see Testing section)
+├── tests/                       # 663 unit + 35 integration tests (see Testing section)
 │   ├── integration/             # End-to-end tests against live service
 │   │   ├── conftest.py          # Service startup, HTTP client, test data, cleanup
 │   │   ├── helpers.py           # Polling utilities (wait for job, deployment)
@@ -185,7 +184,7 @@ This creates 10 datasets under `local_data/datasets/synthetic_generated_suite/` 
 
 ## Testing
 
-The test suite covers the entire backend with **654 unit tests** and **44 integration tests** across 24 test files.
+The test suite covers the entire backend with **663 unit tests** and **35 integration tests**.
 
 ### Test dependencies
 
@@ -217,7 +216,7 @@ python -m pytest tests/ --ignore=tests/integration/ -k "profiler"
 
 ### Running tests in Domino
 
-When running as a Domino Job, all environment variables and the `domino` package are available, so all 654 unit tests will execute. The HTML report is written to `/mnt/artifacts/results/test_report_xxx.html` and visible in the Domino Job results tab.
+When running as a Domino Job, all environment variables and the `domino` package are available, so all 663 unit tests will execute. The HTML report is written to `/mnt/artifacts/results/test_report_xxx.html` and visible in the Domino Job results tab.
 
 ```bash
 # Run unit tests as a Domino Job command (uses pytest.ini defaults)
@@ -252,12 +251,12 @@ Tests marked `@pytest.mark.domino` are automatically skipped when the `domino` p
 | `test_data_profiler.py` | 44 | Column profiling, sampling strategies, semantic type inference |
 | `test_ts_profiler.py` | 43 | Gap analysis, ADF stationarity, STL decomposition, ACF/PACF |
 | `test_dataset_service.py` | 42 | Preview pagination, file handling, NaN/Inf coercion |
-| `test_crud.py` | 34 | All DB CRUD operations (Job, JobLog, RegisteredModel) |
+| `test_crud.py` | 30 | All DB CRUD operations (Job, JobLog) |
 | `test_job_links.py` | 32 | Domino URL building, host normalization, experiment/registry links |
 | `test_notebook_generator.py` | 27 | Tabular/timeseries/binary notebooks, preset normalization |
 | `test_dataset_mounts.py` | 24 | Mount path parsing, deduplication, env var resolution |
 | `test_error_handler.py` | 21 | `@handle_errors` decorator (HTTPException, 404, 400, 500 mapping) |
-| `test_cleanup_service.py` | 21 | Orphan detection, artifact deletion, bulk cleanup |
+| `test_cleanup_service.py` | 17 | Orphan detection, artifact deletion, bulk cleanup |
 | `test_api_jobs.py` | 21 | Job CRUD API endpoints (requires `domino`) |
 | `test_api_profiling.py` | 12 | Profiling API endpoints (requires `domino`) |
 | `test_api_health.py` | 9 | Health/readiness/user endpoints (requires `domino`) |
@@ -286,7 +285,7 @@ When all tests pass, the report is a single screen: summary table + "0 Failed" b
 
 ### Integration tests
 
-The integration test suite (**44 tests**) runs against a live FastAPI service to validate the full lifecycle: profiling, training, metrics, model registration, and deployment. Tests run as a Domino Job; fixtures start the service as a subprocess and hit it over HTTP.
+The integration test suite (**35 tests**) runs against a live FastAPI service to validate the full lifecycle: profiling, training, metrics, and deployment. Tests run as a Domino Job; fixtures start the service as a subprocess and hit it over HTTP.
 
 #### Running integration tests
 
@@ -311,9 +310,8 @@ python -m pytest tests/integration/test_05_errors.py -v
 | `test_00_health.py` | 4 | Health, readiness, user context, root endpoint |
 | `test_01_profiling.py` | 8 | Tabular + TS profiling, suggest-target, presets, metrics, error paths |
 | `test_02_training.py` | 10 | Local tabular + TS training, Domino Job training, metrics, leaderboard |
-| `test_03_registry.py` | 6 | Register from job, list models, versions, stage transitions, direct register |
 | `test_04_deployment.py` | 4 | List Model APIs, list deployments, deploy-from-job, deployment details |
-| `test_05_errors.py` | 12 | Bad files, missing fields, 404s, cancel completed, invalid formats, duplicates |
+| `test_05_errors.py` | 9 | Bad files, missing fields, 404s, cancel completed, invalid formats, duplicates |
 
 Numeric prefixes enforce collection order — later tests depend on earlier ones via a session-scoped `shared_state` dict.
 

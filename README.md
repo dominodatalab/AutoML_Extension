@@ -15,20 +15,20 @@ Dockerfile               Container build for Domino deployment
 
 ### Backend (`automl-service/`)
 
-**~16,600 LOC** across 73 Python files. Async FastAPI with SQLAlchemy ORM, AutoGluon ML, and MLflow tracking.
+**~14,400 LOC** across 70 Python files. Async FastAPI with SQLAlchemy ORM, AutoGluon ML, and MLflow tracking.
 
 | Layer | Files | Purpose |
 |-------|-------|---------|
 | `app/api/routes/` | 8 routers | REST endpoints (107 routes) + WebSocket |
 | `app/api/schemas/` | 3 files | Pydantic request/response models |
-| `app/core/` | 18 services | Predictions, diagnostics, export, profiling, MLflow, Domino integration |
+| `app/core/` | 17 services | Diagnostics, export, profiling, MLflow, Domino integration |
 | `app/core/trainers/` | 4 trainers | Base, callbacks, tabular, and timeseries training |
 | `app/db/` | 3 files | SQLAlchemy models, async CRUD, migrations |
 | `app/workers/` | 3 files | Background training and EDA orchestration |
 
 ### Frontend (`automl-ui/`)
 
-**~15,700 LOC** across 98 TypeScript files. React 18 with Zustand for UI state.
+**~15,000 LOC** across 102 TypeScript files. React 18 with Zustand for UI state.
 
 | Layer | Files | Purpose |
 |-------|-------|---------|
@@ -46,7 +46,6 @@ Dockerfile               Container build for Domino deployment
 - **Model Diagnostics**: Feature importance, leaderboard, confusion matrix, ROC/PR curves, regression diagnostics, learning curves, model comparison
 - **Exploratory Data Analysis**: Interactive data profiling, column explorer, correlation matrix, data quality checks, time series profiling (ACF/PACF, stationarity, decomposition), notebook export, optional async Domino Job execution
 - **Dataset Usage**: Connect to Domino Datasets
-- **Model Registry**: MLflow integration for versioning, stage transitions, model cards, and downloads
 - **Model Export**: deployment bundle and notebook formats
 - **Deployment**: Deploy trained models to Domino Model APIs with full lifecycle management (create, start, stop, delete)
 - **Experiment Tracking**: MLflow logging of per-model hyperparameters, metrics, and artifacts
@@ -133,7 +132,7 @@ Async endpoints:
 | GET | `/svc/v1/jobs/{id}/logs` | Get job logs |
 | POST | `/svc/v1/jobs/{id}/cancel` | Cancel running job |
 | DELETE | `/svc/v1/jobs/{id}` | Delete job |
-| POST | `/svc/v1/jobs/{id}/register` | Register model to MLflow |
+| POST | `/svc/v1/jobs/{id}/register` | Register model to Domino Model Registry |
 | GET | `/svc/v1/jobs/queue/status` | Get queue status |
 | GET | `/svc/v1/jobs/cleanup/preview` | Preview cleanup candidates |
 | POST | `/svc/v1/jobs/cleanup` | Bulk cleanup jobs |
@@ -174,30 +173,10 @@ Async endpoints:
 | POST | `/svc/v1/predictions/model/precision-recall` | PR curve |
 | POST | `/svc/v1/predictions/model/regression-diagnostics` | Regression diagnostics |
 
-### Predictions
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/svc/v1/predictions/predict` | Single prediction |
-| POST | `/svc/v1/predictions/predict/batch` | Batch prediction |
-| GET | `/svc/v1/predictions/model/{id}/info` | Get loaded model info |
-| DELETE | `/svc/v1/predictions/model/{id}/unload` | Unload model from memory |
-| GET | `/svc/v1/predictions/models/loaded` | List loaded models |
-
 ### Registry
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/svc/v1/registry/register` | Register model to MLflow |
-| GET | `/svc/v1/registry/models` | List registered models |
-| GET | `/svc/v1/registry/models/mlflow` | List MLflow models |
-| GET | `/svc/v1/registry/models/{name}/versions` | Get model versions |
-| GET | `/svc/v1/registry/models/{name}/stages` | Get model by stage |
-| GET | `/svc/v1/registry/models/{name}/versions/{v}/uri` | Get model URI |
-| POST | `/svc/v1/registry/models/{name}/versions/{v}/download` | Download model |
-| POST | `/svc/v1/registry/models/transition-stage` | Transition model stage |
-| POST | `/svc/v1/registry/models/update-description` | Update model description |
-| POST | `/svc/v1/registry/models/card` | Generate model card |
-| DELETE | `/svc/v1/registry/models/{name}` | Delete model |
-| DELETE | `/svc/v1/registry/models/{name}/versions/{v}` | Delete version |
+| POST | `/svc/v1/registry/register` | Register model to Domino Model Registry |
 
 ### Export
 | Method | Endpoint | Description |
