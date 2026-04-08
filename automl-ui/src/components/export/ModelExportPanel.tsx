@@ -213,14 +213,14 @@ export function ModelExportPanel({
         )}
 
         {/* Docker Container Export */}
-        <div className="border border-domino-border rounded-lg p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <CubeIcon className="h-5 w-5 text-domino-accent-purple" />
-          <h3 className="font-medium">Docker Container</h3>
-        </div>
-        <p className="text-sm text-domino-text-secondary mb-4">
-          Export a Docker-ready deployment package with Dockerfile, inference script, and model artifacts.
-        </p>
+        {/*<div className="border border-domino-border rounded-lg p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <CubeIcon className="h-5 w-5 text-domino-accent-purple" />
+            <h3 className="font-medium">Docker Container</h3>
+          </div>
+          <p className="text-sm text-domino-text-secondary mb-4">
+            Export a Docker-ready deployment package with Dockerfile, inference script, and model artifacts.
+          </p>
 
         {dockerSuccess ? (
           <div className="space-y-3">
@@ -267,26 +267,20 @@ export function ModelExportPanel({
               placeholder="/mnt/data/<project>/exports/<job>"
             />
 
-            {dockerError && (
-              <div className="p-3 bg-domino-accent-red/5 border border-domino-accent-red/30 text-domino-accent-red text-sm rounded flex items-start gap-2">
-                <XCircleIcon className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                <span>{dockerError}</span>
-              </div>
-            )}
-
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={handleExportDocker}
-              isLoading={exportDeploymentMutation.isPending}
-              disabled={exportDeploymentMutation.isPending || !dockerOutputDir.trim()}
-            >
-              <CubeIcon className="h-4 w-4 mr-1" />
-              Export Docker Package
-            </Button>
-          </div>
-        )}
-        </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleExportDocker}
+                isLoading={exportDeploymentMutation.isPending}
+                disabled={exportDeploymentMutation.isPending || !dockerOutputDir.trim()}
+                className="hidden"
+              >
+                <CubeIcon className="h-4 w-4 mr-1" />
+                Export Docker Package
+              </Button>
+            </div>
+          )}
+        </div> */}
       </div>
 
       {/* Notebook Export Result */}
