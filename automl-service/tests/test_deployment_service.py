@@ -12,76 +12,58 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.db.models import Job, JobStatus, ModelType
 from app.services.deployment_service import (
-    _safe_deployment_result,
     deploy_from_job,
+    get_model_api_status_safe,
 )
 
 
 # ---------------------------------------------------------------------------
-# _safe_deployment_result
+# get_model_api_status_safe
 # ---------------------------------------------------------------------------
 
 
-class TestSafeDeploymentResult:
-    """Tests for the _safe_deployment_result normalizer."""
+class TestGetModelApiStatusSafe:
 
-    def test_dict_with_all_keys_preserved(self) -> None:
-        result = _safe_deployment_result(
-            {"success": True, "data": [{"id": "d1"}], "extra": "val"},
-            "fallback msg",
+    @pytest.mark.asyncio
+    async def test_returns_status_and_is_pending_on_success(self):
+        mock_api = AsyncMock()
+        mock_api.get_model_api_status = AsyncMock(
+            return_value={"success": True, "data": {"status": "Running", "isPending": False}}
         )
-        assert result["success"] is True
-        assert result["data"] == [{"id": "d1"}]
-        assert result["extra"] == "val"
+        with patch("app.services.deployment_service.get_domino_model_api", return_value=mock_api):
+            result = await get_model_api_status_safe("api-abc")
+        assert result == {"success": True, "status": "Running", "isPending": False}
 
-    def test_dict_missing_success_gets_default_false(self) -> None:
-        result = _safe_deployment_result({"data": [1, 2]}, "fallback msg")
-        assert result["success"] is False
-        assert result["data"] == [1, 2]
-
-    def test_dict_missing_data_gets_default_empty_list(self) -> None:
-        result = _safe_deployment_result({"success": True}, "fallback msg")
-        assert result["success"] is True
-        assert result["data"] == []
-
-    def test_empty_dict_gets_both_defaults(self) -> None:
-        result = _safe_deployment_result({}, "fallback msg")
-        assert result == {"success": False, "data": []}
-
-    def test_dict_with_error_key_preserved(self) -> None:
-        result = _safe_deployment_result(
-            {"error": "something went wrong"},
-            "fallback msg",
+    @pytest.mark.asyncio
+    async def test_defaults_unknown_status_when_absent(self):
+        mock_api = AsyncMock()
+        mock_api.get_model_api_status = AsyncMock(
+            return_value={"success": True, "data": {}}
         )
-        assert result["error"] == "something went wrong"
+        with patch("app.services.deployment_service.get_domino_model_api", return_value=mock_api):
+            result = await get_model_api_status_safe("api-abc")
+        assert result["status"] == "unknown"
+        assert result["isPending"] is False
+
+    @pytest.mark.asyncio
+    async def test_returns_error_when_api_fails(self):
+        mock_api = AsyncMock()
+        mock_api.get_model_api_status = AsyncMock(
+            return_value={"success": False, "error": "not found"}
+        )
+        with patch("app.services.deployment_service.get_domino_model_api", return_value=mock_api):
+            result = await get_model_api_status_safe("api-abc")
         assert result["success"] is False
-        assert result["data"] == []
+        assert result["error"] == "not found"
 
-    def test_dict_does_not_mutate_original(self) -> None:
-        original = {"success": True}
-        result = _safe_deployment_result(original, "msg")
-        assert "data" in result
-        assert "data" not in original
-
-    def test_none_returns_error_dict(self) -> None:
-        result = _safe_deployment_result(None, "Invalid response")
-        assert result == {"success": False, "data": [], "error": "Invalid response"}
-
-    def test_string_returns_error_dict(self) -> None:
-        result = _safe_deployment_result("some string", "bad response")
-        assert result == {"success": False, "data": [], "error": "bad response"}
-
-    def test_list_returns_error_dict(self) -> None:
-        result = _safe_deployment_result([1, 2, 3], "not a dict")
-        assert result == {"success": False, "data": [], "error": "not a dict"}
-
-    def test_int_returns_error_dict(self) -> None:
-        result = _safe_deployment_result(42, "invalid")
-        assert result == {"success": False, "data": [], "error": "invalid"}
-
-    def test_bool_returns_error_dict(self) -> None:
-        result = _safe_deployment_result(True, "nope")
-        assert result == {"success": False, "data": [], "error": "nope"}
+    @pytest.mark.asyncio
+    async def test_returns_error_on_exception(self):
+        mock_api = AsyncMock()
+        mock_api.get_model_api_status = AsyncMock(side_effect=RuntimeError("boom"))
+        with patch("app.services.deployment_service.get_domino_model_api", return_value=mock_api):
+            result = await get_model_api_status_safe("api-abc")
+        assert result["success"] is False
+        assert "boom" in result["error"]
 
 
 # ---------------------------------------------------------------------------

@@ -1,35 +1,42 @@
 import { useState, useCallback } from 'react'
 import api from '../api'
 import { useAsyncOperation } from './useAsyncOperation'
-import { aggregateAsyncState, orArray, orNull } from './asyncHelpers'
+import { aggregateAsyncState, orNull } from './asyncHelpers'
 import type {
-  Deployment,
   DeploymentResponse,
   DeployFromJobRequest,
 } from '../types/deployment'
 
+interface ModelApiStatus {
+  status: string
+  isPending: boolean
+}
+
 interface UseDeploymentsResult {
-  deployments: Deployment[]
+  modelApiStatus: ModelApiStatus | null
   loading: boolean
   error: string | null
-  fetchDeploymentsByModelApi: (modelApiId: string) => Promise<Deployment[]>
+  fetchModelApiStatus: (modelApiId: string) => Promise<ModelApiStatus | null>
   deployFromJob: (request: DeployFromJobRequest) => Promise<DeploymentResponse | null>
 }
 
 export function useDeployments(): UseDeploymentsResult {
-  const [deployments, setDeployments] = useState<Deployment[]>([])
+  const [modelApiStatus, setModelApiStatus] = useState<ModelApiStatus | null>(null)
 
-  const fetchDeploymentsByModelApiOp = useAsyncOperation(
+  const fetchModelApiStatusOp = useAsyncOperation(
     async (modelApiId: string) => {
-      const { data } = await api.get<{ success: boolean; data: Deployment[]; error?: string }>(`deployments/deployments?model_api_id=${modelApiId}`)
+      const { data } = await api.get<{ success: boolean; status?: string; isPending?: boolean; error?: string }>(`deployments/model-api/${modelApiId}/status`)
       if (!data.success) {
-        throw new Error(data.error || 'Failed to fetch deployments')
+        throw new Error(data.error || 'Failed to fetch model API status')
       }
-      const deploymentList = data.data || []
-      setDeployments(deploymentList)
-      return deploymentList
+      const statusData: ModelApiStatus = {
+        status: data.status || 'unknown',
+        isPending: data.isPending || false,
+      }
+      setModelApiStatus(statusData)
+      return statusData
     },
-    { errorMessage: 'Failed to fetch deployments' }
+    { errorMessage: 'Failed to fetch model API status' }
   )
 
   const deployFromJobOp = useAsyncOperation(
@@ -44,23 +51,23 @@ export function useDeployments(): UseDeploymentsResult {
   )
 
   const { loading, error } = aggregateAsyncState([
-    fetchDeploymentsByModelApiOp,
+    fetchModelApiStatusOp,
     deployFromJobOp,
   ])
 
-  const fetchDeploymentsByModelApi = useCallback(async (modelApiId: string) => {
-    return orArray(fetchDeploymentsByModelApiOp.execute(modelApiId))
-  }, [fetchDeploymentsByModelApiOp.execute])
+  const fetchModelApiStatus = useCallback(async (modelApiId: string) => {
+    return orNull(fetchModelApiStatusOp.execute(modelApiId))
+  }, [fetchModelApiStatusOp.execute])
 
   const deployFromJob = useCallback(async (request: DeployFromJobRequest) => {
     return orNull(deployFromJobOp.execute(request))
   }, [deployFromJobOp.execute])
 
   return {
-    deployments,
+    modelApiStatus,
     loading,
     error,
-    fetchDeploymentsByModelApi,
+    fetchModelApiStatus,
     deployFromJob,
   }
 }

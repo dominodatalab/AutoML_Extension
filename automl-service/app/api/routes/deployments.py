@@ -2,23 +2,21 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from app.services.deployment_service import (
-    list_deployments_safe,
+    get_model_api_status_safe,
     deploy_from_job as deploy_from_job_service,
 )
 
 router = APIRouter()
 
 
-@router.get("/deployments")
-async def list_deployments(
-    model_api_id: str = Query(..., description="Model API ID to fetch deployments for"),
-):
-    """List deployments for a Model API."""
-    return await list_deployments_safe(model_api_id=model_api_id)
+@router.get("/model-api/{model_api_id}/status")
+async def get_model_api_status(model_api_id: str):
+    """Get active status for a Model API."""
+    return await get_model_api_status_safe(model_api_id=model_api_id)
 
 
 class DeployFromJobBody(BaseModel):

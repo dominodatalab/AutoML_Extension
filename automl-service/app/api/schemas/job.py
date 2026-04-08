@@ -409,6 +409,7 @@ class JobResponse(BaseModel):
     registered_model_name: Optional[str] = None
     registered_model_version: Optional[str] = None
     model_registry_url: Optional[str] = None
+    model_api_url: Optional[str] = None
     model_api_id: Optional[str] = None
     created_at: datetime
     started_at: Optional[datetime] = None

@@ -15,13 +15,14 @@ const STATUS_STYLES: Record<string, string> = {
   starting: 'bg-domino-accent-purple/10 text-domino-accent-purple',
   building: 'bg-domino-accent-purple/10 text-domino-accent-purple',
   pending: 'bg-domino-accent-yellow/15 text-[#998A12]',
+  'ready to run': 'bg-domino-accent-yellow/15 text-[#998A12]',
   stopped: 'bg-domino-text-muted/15 text-domino-text-muted',
   stopping: 'bg-domino-text-muted/15 text-domino-text-muted',
   failed: 'bg-domino-accent-red/10 text-domino-accent-red',
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const style = STATUS_STYLES[status] || 'bg-domino-text-muted/15 text-domino-text-muted'
+  const style = STATUS_STYLES[status.toLowerCase()] || 'bg-domino-text-muted/15 text-domino-text-muted'
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium capitalize ${style}`}>
       {status}
@@ -30,7 +31,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export function DominoIntegrationsTab({ job, onRefresh }: DominoIntegrationsTabProps) {
-  const { deployments, loading, fetchDeploymentsByModelApi } = useDeployments()
+  const { modelApiStatus, loading, fetchModelApiStatus } = useDeployments()
   const [showRegisterDialog, setShowRegisterDialog] = useState(false)
   const [showDeployDialog, setShowDeployDialog] = useState(false)
   const experimentUrl = toDominoTenantUrl(job.experiment_run_url)
@@ -38,9 +39,9 @@ export function DominoIntegrationsTab({ job, onRefresh }: DominoIntegrationsTabP
 
   useEffect(() => {
     if (job.model_api_id) {
-      fetchDeploymentsByModelApi(job.model_api_id)
+      fetchModelApiStatus(job.model_api_id)
     }
-  }, [job.model_api_id, fetchDeploymentsByModelApi])
+  }, [job.model_api_id, fetchModelApiStatus])
 
   return (
     <>
@@ -100,26 +101,22 @@ export function DominoIntegrationsTab({ job, onRefresh }: DominoIntegrationsTabP
           <div className="text-center py-4">
             <p className="text-sm text-domino-text-muted">Loading...</p>
           </div>
-        ) : deployments.length > 0 ? (
-          <div className="space-y-1.5">
-            {deployments.map((d) => (
-              <div key={d.id} className="flex items-center gap-3 text-xs">
-                <StatusBadge status={d.status} />
-                {d.url ? (
-                  <a
-                    href={toDominoTenantUrl(d.url) || d.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[#3B3BD3] hover:underline truncate"
-                  >
-                    {d.url}
-                    <ExternalLinkIcon className="inline ml-1 -mt-0.5" />
-                  </a>
-                ) : (
-                  <span className="text-domino-text-muted">No endpoint URL yet</span>
-                )}
-              </div>
-            ))}
+        ) : (job.model_api_id && modelApiStatus) ? (
+          <div className="flex items-center gap-3 text-xs">
+            <StatusBadge status={modelApiStatus.status} />
+            {job.model_api_url ? (
+              <a
+                href={toDominoTenantUrl(job.model_api_url) || job.model_api_url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[#3B3BD3] hover:underline truncate"
+              >
+                View in Domino
+                <ExternalLinkIcon className="inline ml-1 -mt-0.5" />
+              </a>
+            ) : (
+              <span className="text-domino-text-muted">Deployed</span>
+            )}
           </div>
         ) : job.is_registered ? (
           <div className="text-center py-4 space-y-3">
@@ -189,7 +186,7 @@ export function DominoIntegrationsTab({ job, onRefresh }: DominoIntegrationsTabP
         jobId={job.id}
         defaultModelName={job.name}
         onClose={() => setShowDeployDialog(false)}
-        onSuccess={() => setShowDeployDialog(false)}
+        onSuccess={() => { setShowDeployDialog(false); onRefresh() }}
       />
     )}
     </>

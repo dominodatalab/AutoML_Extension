@@ -26,14 +26,6 @@ class TestDeployments:
         assert body.get("success") is True, f"List model APIs not successful: {body}"
         assert isinstance(body.get("data"), list)
 
-    def test_list_deployments(self, client):
-        resp = client.get("/svc/v1/deployments/deployments")
-        assert resp.status_code == 200, f"List deployments failed ({resp.status_code}): {resp.text}"
-        body = resp.json()
-        # Endpoint returns {"success": bool, "data": [...]}
-        assert body.get("success") is True, f"List deployments not successful: {body}"
-        assert isinstance(body.get("data"), list)
-
     @pytest.mark.slow
     def test_deploy_from_job(self, client, shared_state, cleanup_registry):
         job_id = shared_state.get("tabular_job_id")

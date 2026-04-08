@@ -136,28 +136,12 @@ class ModelAPIManager:
 
         return await self.client._make_request("POST", "/api/modelServing/v1/modelApis", json_data=payload)
 
+    async def get_status(self, model_api_id: str) -> Dict[str, Any]:
+        """Get active status for a Model API.
 
-class ModelDeploymentManager:
-    """Manages Model Deployment resources."""
-
-    def __init__(self, client: DominoModelAPIClient):
-        self.client = client
-
-    async def list_deployments(self, model_api_id: str) -> Dict[str, Any]:
-        """List deployments for a Model API.
-
-        GET /api/modelServing/v1/modelDeployments
+        GET /models/{model_api_id}/activeStatus
         """
-        result = await self.client._make_request(
-            "GET", "/api/modelServing/v1/modelDeployments", params={"modelApiId": model_api_id}
-        )
-
-        if result.get("success") and "data" in result:
-            data = result["data"]
-            if isinstance(data, dict) and "items" in data:
-                result["data"] = data.get("items", [])
-
-        return result
+        return await self.client._make_request("GET", f"/models/{model_api_id}/activeStatus")
 
 
 class DominoModelAPI:
@@ -166,7 +150,6 @@ class DominoModelAPI:
     def __init__(self):
         self._client = DominoModelAPIClient()
         self.model_apis = ModelAPIManager(self._client)
-        self.deployments = ModelDeploymentManager(self._client)
 
     async def create_model_api_from_registry(
         self,
@@ -183,8 +166,8 @@ class DominoModelAPI:
             description, project_id, environment_id, replicas,
         )
 
-    async def list_deployments(self, model_api_id: str) -> Dict[str, Any]:
-        return await self.deployments.list_deployments(model_api_id)
+    async def get_model_api_status(self, model_api_id: str) -> Dict[str, Any]:
+        return await self.model_apis.get_status(model_api_id)
 
 
 @lru_cache()

@@ -59,8 +59,10 @@ class TestLogTrainingResults:
 
         mock_save_model.assert_called_once()
         assert mock_save_model.call_args.kwargs["artifacts"] == {"model": model_dir}
-        mock_log_artifacts.assert_called_once()
-        assert mock_log_artifacts.call_args.kwargs["artifact_path"] == "autogluon_model"
+        assert mock_log_artifacts.call_count == 2
+        artifact_paths = [c.kwargs["artifact_path"] for c in mock_log_artifacts.call_args_list]
+        assert "autogluon_model" in artifact_paths
+        assert "autogluon_model_raw" in artifact_paths
 
     def test_predict_parses_dataframe_split_format(self, tmp_path):
         """predict must parse MLflow's dataframe_split format into a DataFrame.

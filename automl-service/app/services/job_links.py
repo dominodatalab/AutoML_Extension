@@ -202,6 +202,26 @@ def _build_model_registry_url(job: Job) -> Optional[str]:
     return f"{host}{path}" if host else path
 
 
+def _build_model_api_url(job: Job) -> Optional[str]:
+    """Build deep link to Domino Model API overview page."""
+    if not job.model_api_id:
+        return None
+
+    if not job.project_id:
+        return None
+
+    project = _resolve_project_details(job.project_id)
+
+    owner = project.owner_username
+    project_name = project.name
+
+    encoded_owner = quote(owner, safe="")
+    encoded_project = quote(project_name, safe="")
+    path = f"/models/{job.model_api_id}/overview?ownerName={encoded_owner}&projectName={encoded_project}"
+    host = _resolve_domino_ui_host()
+    return f"{host}{path}" if host else path
+
+
 def attach_external_links(job: Job, logger) -> Job:
     """Attach computed external URLs used by the Job Overview UI."""
     experiment_id = _resolve_experiment_id(job, logger)
@@ -209,4 +229,5 @@ def attach_external_links(job: Job, logger) -> Job:
     setattr(job, "experiment_id", experiment_id)
     setattr(job, "experiment_run_url", _build_experiment_run_url(job, experiment_id))
     setattr(job, "model_registry_url", _build_model_registry_url(job))
+    setattr(job, "model_api_url", _build_model_api_url(job))
     return job

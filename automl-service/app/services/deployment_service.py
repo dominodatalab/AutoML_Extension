@@ -16,25 +16,22 @@ from app.dependencies import get_db_session
 logger = logging.getLogger(__name__)
 
 
-def _safe_deployment_result(result, invalid_message: str) -> dict:
-    """Normalize deployment API responses for compatibility handlers."""
-    if isinstance(result, dict):
-        normalized = dict(result)
-        normalized.setdefault("success", False)
-        normalized.setdefault("data", [])
-        return normalized
-    return {"success": False, "data": [], "error": invalid_message}
-
-
-async def list_deployments_safe(model_api_id: str) -> dict:
-    """List deployments for a Model API."""
+async def get_model_api_status_safe(model_api_id: str) -> dict:
+    """Get active status for a Model API."""
     try:
         api = get_domino_model_api()
-        result = await api.list_deployments(model_api_id=model_api_id)
-        return _safe_deployment_result(result, "Invalid response")
+        result = await api.get_model_api_status(model_api_id=model_api_id)
+        if not result.get("success"):
+            return {"success": False, "error": result.get("error", "Unknown error")}
+        data = result.get("data") or {}
+        return {
+            "success": True,
+            "status": data.get("status", "unknown"),
+            "isPending": data.get("isPending", False),
+        }
     except Exception as exc:
-        logger.error(f"Error listing deployments: {exc}")
-        return {"success": False, "data": [], "error": str(exc)}
+        logger.error(f"Error fetching model API status: {exc}")
+        return {"success": False, "error": str(exc)}
 
 
 

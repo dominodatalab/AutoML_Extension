@@ -15,7 +15,7 @@ import pytest_asyncio
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.utils import utc_now
-from app.db.models import Job, JobLog, JobStatus, ModelType, RegisteredModel
+from app.db.models import Job, JobLog, JobStatus, ModelType
 from app.db import crud
 
 
@@ -439,42 +439,4 @@ class TestDeleteJobLogs:
         await crud.create_job(db_session, job)
 
         deleted = await crud.delete_job_logs(db_session, job.id)
-        assert deleted == 0
-
-
-# ---------------------------------------------------------------------------
-# delete_registered_models_for_job
-# ---------------------------------------------------------------------------
-
-
-class TestDeleteRegisteredModelsForJob:
-    """Verify cascade deletion of registered models by job_id."""
-
-    @pytest.mark.asyncio
-    async def test_deletes_models_and_returns_count(self, db_session, make_job):
-        job = make_job()
-        await crud.create_job(db_session, job)
-
-        for i in range(3):
-            model = RegisteredModel(
-                id=str(uuid.uuid4()),
-                name=f"model-{job.id[:8]}-{i}",
-                job_id=job.id,
-                version=1,
-                created_at=utc_now(),
-            )
-            await crud.create_registered_model(db_session, model)
-
-        deleted = await crud.delete_registered_models_for_job(db_session, job.id)
-        assert deleted == 3
-
-        models = await crud.get_registered_models(db_session)
-        assert not any(m.job_id == job.id for m in models)
-
-    @pytest.mark.asyncio
-    async def test_returns_zero_when_no_models(self, db_session, make_job):
-        job = make_job()
-        await crud.create_job(db_session, job)
-
-        deleted = await crud.delete_registered_models_for_job(db_session, job.id)
         assert deleted == 0

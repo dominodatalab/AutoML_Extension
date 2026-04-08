@@ -112,3 +112,22 @@ class TestCreateModelApiFromRegistry:
         version_num = payload["version"]["source"]["registeredModelVersion"]
         assert isinstance(version_num, int)
         assert version_num == 5
+
+
+class TestGetStatus:
+
+    @pytest.mark.asyncio
+    async def test_calls_active_status_endpoint(self):
+        manager = _make_manager(
+            make_request_return={"success": True, "data": {"status": "Running", "isPending": False}}
+        )
+        result = await manager.get_status("api-xyz")
+        assert result["success"] is True
+        manager.client._make_request.assert_awaited_once_with("GET", "/models/api-xyz/activeStatus")
+
+    @pytest.mark.asyncio
+    async def test_returns_raw_client_result(self):
+        expected = {"success": False, "error": "not found", "status_code": 404}
+        manager = _make_manager(make_request_return=expected)
+        result = await manager.get_status("api-missing")
+        assert result is expected

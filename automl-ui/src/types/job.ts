@@ -166,6 +166,7 @@ export interface Job {
   registered_model_version?: string
   model_api_id?: string
   model_registry_url?: string
+  model_api_url?: string
   created_at: string
   started_at?: string
   completed_at?: string
