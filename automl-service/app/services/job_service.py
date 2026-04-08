@@ -105,7 +105,7 @@ def get_viewing_user_name() -> str:
 
 def _attach_external_links(job: Job) -> Job:
     """Attach computed external URLs used by the Job Overview UI."""
-    return attach_external_links(job, logger)
+    return attach_external_links(job)
 
 
 def validate_job_create_request(job_request: JobCreateRequest) -> None:

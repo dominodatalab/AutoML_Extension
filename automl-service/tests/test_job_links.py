@@ -22,9 +22,6 @@ from app.services.job_links import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-_MOCK_LOGGER = MagicMock()
-
-
 def _stub_job(**overrides) -> Job:
     """Build a lightweight Job instance for link tests."""
     defaults = dict(
@@ -405,8 +402,7 @@ class TestAttachExternalLinks:
             experiment_name=None,
         )
 
-        logger = MagicMock()
-        result = attach_external_links(job, logger)
+        result = attach_external_links(job)
 
         assert hasattr(result, "domino_job_url")
         domino_url = getattr(result, "domino_job_url")
@@ -445,8 +441,7 @@ class TestAttachExternalLinks:
             project_name=None,
         )
 
-        logger = MagicMock()
-        result = attach_external_links(job, logger)
+        result = attach_external_links(job)
         assert getattr(result, "domino_job_url") is None
         assert getattr(result, "experiment_run_url") is None
         assert getattr(result, "model_registry_url") is None
@@ -460,8 +455,7 @@ class TestAttachExternalLinks:
         config_module._settings_instance = None
 
         job = _stub_job(domino_job_id=None, registered_model_name=None)
-        logger = MagicMock()
-        result = attach_external_links(job, logger)
+        result = attach_external_links(job)
         assert result is job
 
         config_module._settings_instance = None
