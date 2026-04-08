@@ -242,10 +242,12 @@ RUN pip install \
     "feedparser>=6.0.10" \
     "pdfplumber>=0.10.0"
 
-# allow model endpoint builds to succeed
+# allow model endpoint builds to succeed -- seems /mnt is a python slim pre-existing dir
+# and model endpoint builds create directories inside it which fails since its owned by another user
 RUN chmod 777 /mnt
 
 # Cleanup after apt package installs
 RUN rm -rf /var/lib/apt/lists/*
 
+# allow model endpoint builds to succeed -- permission errors with certain directory operations without this
 USER 12574
