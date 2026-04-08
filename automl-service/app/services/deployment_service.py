@@ -87,5 +87,5 @@ async def deploy_from_job(
         "success": True,
         "job_id": job_id,
         "model_api_id": model_api_id,
-        "message": f"Model API '{deploy_name}' created from registered model {job.registered_model_name} v{job.registered_model_version}",
+        "message": f"Model API '{deploy_name}' created from registered model {job.registered_model_name} version {job.registered_model_version}",
     }
