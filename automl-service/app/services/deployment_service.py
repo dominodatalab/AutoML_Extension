@@ -73,7 +73,7 @@ async def deploy_from_job(
     )
 
     if not result["success"]:
-        raise HTTPException(status_code=400, detail=result.get("error"))
+        raise HTTPException(status_code=500, detail=result.get("error"))
 
     api_data = result.get("data") or {}
     model_api_id = api_data.get("id")

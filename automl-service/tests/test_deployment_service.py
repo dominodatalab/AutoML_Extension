@@ -161,7 +161,7 @@ class TestDeployFromJob:
              patch.dict("os.environ", {"DOMINO_ENVIRONMENT_ID": "env-123"}):
             with pytest.raises(HTTPException) as exc_info:
                 await deploy_from_job("job-id")
-            assert exc_info.value.status_code == 400
+            assert exc_info.value.status_code == 500
             assert "environment not found" in exc_info.value.detail
 
     @pytest.mark.asyncio
