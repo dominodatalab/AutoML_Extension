@@ -1,17 +1,15 @@
-type DetailTab = 'overview' | 'progress' | 'leaderboard' | 'diagnostics' | 'learning' | 'forecast' | 'export' | 'domino' | 'logs'
+type DetailTab = 'overview' | 'progress' | 'leaderboard' | 'diagnostics' | 'learning' | 'export' | 'domino' | 'logs'
 
 interface TabConfig {
   key: string
   label: string
   showWhenDone?: boolean
-  showForTimeseries?: boolean
 }
 
 interface JobTabNavigationProps {
   activeTab: DetailTab
   onTabChange: (tab: DetailTab) => void
   currentStatus: string
-  modelType?: string
   dominoEnabled?: boolean
 }
 
@@ -20,16 +18,14 @@ const allTabs: TabConfig[] = [
   { key: 'leaderboard', label: 'Leaderboard', showWhenDone: true },
   { key: 'diagnostics', label: 'Diagnostics', showWhenDone: true },
   { key: 'learning', label: 'Metrics', showWhenDone: true },
-  { key: 'forecast', label: 'Forecast', showWhenDone: true, showForTimeseries: true },
   { key: 'export', label: 'Outputs', showWhenDone: true },
   { key: 'domino', label: 'Deployments', showWhenDone: true },
   { key: 'logs', label: 'Logs' },
 ]
 
-export function JobTabNavigation({ activeTab, onTabChange, currentStatus, modelType, dominoEnabled }: JobTabNavigationProps) {
+export function JobTabNavigation({ activeTab, onTabChange, currentStatus, dominoEnabled }: JobTabNavigationProps) {
   const tabs = allTabs.filter((tab) => {
     if (tab.showWhenDone && currentStatus !== 'completed') return false
-    if (tab.showForTimeseries && modelType !== 'timeseries') return false
     if (tab.key === 'domino' && !dominoEnabled) return false
     return true
   })

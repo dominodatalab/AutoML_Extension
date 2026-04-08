@@ -8,7 +8,6 @@ import { LearningCurvesPanel } from '../components/diagnostics/LearningCurvesPan
 import { DeployModelApiDialog } from '../components/deployment/DeployModelApiDialog'
 import { ExportDockerDialog } from '../components/export/ExportDockerDialog'
 import { ModelExportPanel } from '../components/export/ModelExportPanel'
-import { TimeSeriesForecastPanel } from '../components/timeseries/TimeSeriesForecastPanel'
 import { InteractiveLeaderboard } from '../components/leaderboard/InteractiveLeaderboard'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
 import { useJobProgress } from '../hooks/useJobProgress'
@@ -137,7 +136,6 @@ function JobDetail() {
         activeTab={activeTab}
         onTabChange={setActiveTab}
         currentStatus={currentStatus}
-        modelType={job?.model_type}
         dominoEnabled={dominoEnabled}
       />
 
@@ -177,9 +175,6 @@ function JobDetail() {
         <ModelExportPanel jobId={job.id} jobName={job.name} projectName={job.project_name} modelType={job.model_type} problemType={job.problem_type} />
       )}
 
-      {activeTab === 'forecast' && currentStatus === 'completed' && job?.model_type === 'timeseries' && (
-        <TimeSeriesForecastPanel job={job} />
-      )}
 
       {activeTab === 'domino' && currentStatus === 'completed' && job && (
         <DominoIntegrationsTab job={job} onRefresh={refetch} />

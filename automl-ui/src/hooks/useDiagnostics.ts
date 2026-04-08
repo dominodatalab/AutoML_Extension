@@ -8,9 +8,6 @@ import type {
   PrecisionRecallResult,
   RegressionDiagnosticsResult,
   LeaderboardResult,
-  PredictionResult,
-  BatchPredictionResult,
-  ModelInfo
 } from '../types/diagnostics'
 
 interface UseDiagnosticsResult {
@@ -20,8 +17,6 @@ interface UseDiagnosticsResult {
   precisionRecall: PrecisionRecallResult | null
   regressionDiagnostics: RegressionDiagnosticsResult | null
   leaderboard: LeaderboardResult | null
-  modelInfo: ModelInfo | null
-  predictions: PredictionResult | null
   loading: boolean
   error: string | null
   reset: () => void
@@ -31,9 +26,6 @@ interface UseDiagnosticsResult {
   getPrecisionRecall: (jobId: string, modelType?: string) => Promise<PrecisionRecallResult | null>
   getRegressionDiagnostics: (jobId: string, modelType?: string) => Promise<RegressionDiagnosticsResult | null>
   getLeaderboard: (jobId: string, modelType?: string) => Promise<LeaderboardResult | null>
-  getModelInfo: (modelId: string, modelType: string) => Promise<ModelInfo | null>
-  predict: (modelId: string, modelType: string, data: Record<string, unknown>[], returnProbs?: boolean) => Promise<PredictionResult | null>
-  batchPredict: (modelId: string, modelType: string, inputFile: string, outputFile: string) => Promise<BatchPredictionResult | null>
 }
 
 export function useDiagnostics(): UseDiagnosticsResult {
@@ -85,40 +77,6 @@ export function useDiagnostics(): UseDiagnosticsResult {
     'Failed to get leaderboard'
   )
 
-  const modelInfoState = useApiState(
-    async (modelId: string, modelType: string) => {
-      const { data } = await api.get<ModelInfo>(`predictions/model/${encodeURIComponent(modelId)}/info`, { params: { model_type: modelType } })
-      return data
-    },
-    'Failed to get model info'
-  )
-
-  const predictState = useApiState(
-    async (modelId: string, modelType: string, inputData: Record<string, unknown>[], returnProbs = false) => {
-      const { data } = await api.post<PredictionResult>('predictions/predict', {
-        model_id: modelId,
-        model_type: modelType,
-        data: inputData,
-        return_probabilities: returnProbs
-      })
-      return data
-    },
-    'Failed to make predictions'
-  )
-
-  const batchPredictState = useApiState(
-    async (modelId: string, modelType: string, inputFile: string, outputFile: string) => {
-      const { data } = await api.post<BatchPredictionResult>('predictions/predict/batch', {
-        model_id: modelId,
-        model_type: modelType,
-        input_file: inputFile,
-        output_file: outputFile
-      })
-      return data
-    },
-    'Failed to run batch predictions'
-  )
-
   const allStates = [
     featureImportanceState,
     confusionMatrixState,
@@ -126,9 +84,6 @@ export function useDiagnostics(): UseDiagnosticsResult {
     precisionRecallState,
     regressionDiagnosticsState,
     leaderboardState,
-    modelInfoState,
-    predictState,
-    batchPredictState,
   ]
   const { loading, error } = aggregateAsyncState(allStates)
 
@@ -141,7 +96,6 @@ export function useDiagnostics(): UseDiagnosticsResult {
   }, [
     featureImportanceState, confusionMatrixState, rocCurveState,
     precisionRecallState, regressionDiagnosticsState, leaderboardState,
-    modelInfoState, predictState, batchPredictState,
   ])
 
   return {
@@ -151,8 +105,6 @@ export function useDiagnostics(): UseDiagnosticsResult {
     precisionRecall: precisionRecallState.data,
     regressionDiagnostics: regressionDiagnosticsState.data,
     leaderboard: leaderboardState.data,
-    modelInfo: modelInfoState.data,
-    predictions: predictState.data,
     loading,
     error,
     reset,
@@ -162,8 +114,5 @@ export function useDiagnostics(): UseDiagnosticsResult {
     getPrecisionRecall: precisionRecallState.execute,
     getRegressionDiagnostics: regressionDiagnosticsState.execute,
     getLeaderboard: leaderboardState.execute,
-    getModelInfo: modelInfoState.execute,
-    predict: predictState.execute,
-    batchPredict: batchPredictState.execute,
   }
 }

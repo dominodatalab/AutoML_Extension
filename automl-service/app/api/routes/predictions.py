@@ -8,7 +8,6 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.prediction_service import get_prediction_service
 from app.core.model_diagnostics import get_model_diagnostics
 from app.db import crud
 from app.dependencies import get_db
@@ -76,55 +75,6 @@ async def _run_diagnostics(
     return method(**kwargs)
 
 
-class PredictRequest(BaseModel):
-    """Request for single/batch predictions."""
-    model_id: str = Field(..., description="ID/path of the trained model")
-    model_type: str = Field(..., description="Type: tabular, timeseries")
-    data: Optional[List[Dict[str, Any]]] = Field(None, description="Data rows for prediction")
-    file_path: Optional[str] = Field(None, description="Path to data file")
-    return_probabilities: bool = Field(False, description="Return class probabilities")
-    prediction_length: Optional[int] = Field(None, description="Prediction horizon for time series")
-
-
-class PredictResponse(BaseModel):
-    """Response from prediction."""
-    model_id: str
-    model_type: str
-    num_rows: int
-    predictions: List[Any]
-    probabilities: Optional[List[Dict[str, float]]] = None
-    problem_type: Optional[str] = None
-    label: Optional[str] = None
-
-
-class BatchPredictRequest(BaseModel):
-    """Request for batch predictions to file."""
-    model_id: str
-    model_type: str
-    input_file: str
-    output_file: str
-    return_probabilities: bool = False
-
-
-class BatchPredictResponse(BaseModel):
-    """Response from batch prediction."""
-    model_id: str
-    output_file: str
-    output_rows: int
-    success: bool
-
-
-class ModelInfoResponse(BaseModel):
-    """Response with model information."""
-    model_id: str
-    model_type: str
-    problem_type: Optional[str] = None
-    label: Optional[str] = None
-    features: Optional[List[str]] = None
-    model_names: Optional[List[str]] = None
-    best_model: Optional[str] = None
-    leaderboard: Optional[List[Dict]] = None
-
 
 class FeatureImportanceRequest(BaseModel):
     """Request for feature importance."""
@@ -179,72 +129,6 @@ class RegressionDiagnosticsResponse(BaseModel):
     residuals_histogram_chart: Optional[str] = None
     error: Optional[str] = None
 
-
-@router.post("/predict", response_model=PredictResponse)
-@handle_errors("Prediction error")
-async def predict(request: PredictRequest):
-    """Run predictions on data using a trained model."""
-    service = get_prediction_service()
-
-    # For time series, allow forecasting without input data
-    if request.model_type == "timeseries" and not request.data and not request.file_path:
-        result = service.forecast(
-            model_id=request.model_id,
-            prediction_length=request.prediction_length
-        )
-    elif request.data:
-        result = service.predict(
-            model_id=request.model_id,
-            model_type=request.model_type,
-            data=request.data,
-            return_probabilities=request.return_probabilities
-        )
-    elif request.file_path:
-        result = service.predict_from_file(
-            model_id=request.model_id,
-            model_type=request.model_type,
-            file_path=request.file_path,
-            return_probabilities=request.return_probabilities
-        )
-    else:
-        raise HTTPException(status_code=400, detail="Either data or file_path is required")
-
-    return PredictResponse(**result)
-
-
-@router.post("/predict/batch", response_model=BatchPredictResponse)
-@handle_errors("Batch prediction error")
-async def batch_predict(request: BatchPredictRequest):
-    """Run batch predictions and save to file."""
-    service = get_prediction_service()
-
-    result = service.batch_predict(
-        model_id=request.model_id,
-        model_type=request.model_type,
-        input_file=request.input_file,
-        output_file=request.output_file,
-        return_probabilities=request.return_probabilities
-    )
-
-    return BatchPredictResponse(
-        model_id=request.model_id,
-        output_file=result["output_file"],
-        output_rows=result["output_rows"],
-        success=True
-    )
-
-
-@router.get("/model/{model_id}/info", response_model=ModelInfoResponse)
-@handle_errors("Error getting model info")
-async def get_model_info(model_id: str, model_type: str):
-    """Get information about a trained model."""
-    service = get_prediction_service()
-
-    try:
-        info = service.get_model_info(model_id, model_type)
-        return ModelInfoResponse(**info)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
 
 
 @router.post("/model/feature-importance", response_model=FeatureImportanceResponse)
