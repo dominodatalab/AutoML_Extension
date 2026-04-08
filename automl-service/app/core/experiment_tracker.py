@@ -1,10 +1,23 @@
 """MLflow experiment tracking integration for Domino."""
 
+import json
 import logging
 import os
+import tempfile
 from datetime import datetime
 from functools import lru_cache
 from typing import Any, Optional
+
+import mlflow
+import numpy as np
+from sklearn.metrics import (
+    accuracy_score,
+    balanced_accuracy_score,
+    mean_absolute_error,
+    mean_squared_error,
+    precision_recall_fscore_support,
+    r2_score,
+)
 
 from app.config import get_settings
 
@@ -20,8 +33,6 @@ class ExperimentTracker:
 
     def _setup_mlflow(self):
         """Set up MLflow with Domino tracking URI."""
-        import mlflow
-
         # Use Domino's MLflow tracking URI if available
         tracking_uri = self.settings.mlflow_tracking_uri
         if tracking_uri:
@@ -32,8 +43,6 @@ class ExperimentTracker:
 
     def create_experiment(self, experiment_name: Optional[str] = None) -> str:
         """Create or get an MLflow experiment."""
-        import mlflow
-
         if not experiment_name:
             experiment_name = f"AutoML__{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
@@ -50,8 +59,6 @@ class ExperimentTracker:
         project_name: Optional[str] = None,
     ) -> str:
         """Start a new MLflow run."""
-        import mlflow
-
         # Add Domino-specific tags, preferring caller-provided context over env
         run_tags = {
             "domino.project_id": project_id or self.settings.domino_project_id or "",
@@ -71,8 +78,6 @@ class ExperimentTracker:
 
     def log_params(self, params: dict[str, Any]):
         """Log parameters to MLflow."""
-        import mlflow
-
         # Convert non-string values to strings
         clean_params = {}
         for key, value in params.items():
@@ -84,8 +89,6 @@ class ExperimentTracker:
 
     def log_metrics(self, metrics: dict[str, float], step: Optional[int] = None):
         """Log metrics to MLflow."""
-        import mlflow
-
         # Filter to only numeric values
         clean_metrics = {}
         for key, value in metrics.items():
@@ -97,32 +100,22 @@ class ExperimentTracker:
 
     def log_metric(self, key: str, value: float, step: Optional[int] = None):
         """Log a single metric to MLflow."""
-        import mlflow
-
         if isinstance(value, (int, float)) and value is not None:
             mlflow.log_metric(key, float(value), step=step)
             logger.debug(f"Logged metric: {key}={value}")
 
     def log_artifact(self, local_path: str, artifact_path: Optional[str] = None):
         """Log an artifact to MLflow."""
-        import mlflow
-
         mlflow.log_artifact(local_path, artifact_path)
         logger.debug(f"Logged artifact: {local_path}")
 
     def log_artifacts(self, local_dir: str, artifact_path: Optional[str] = None):
         """Log a directory of artifacts to MLflow."""
-        import mlflow
-
         mlflow.log_artifacts(local_dir, artifact_path)
         logger.debug(f"Logged artifacts from directory: {local_dir}")
 
     def log_artifact_dict(self, data: dict, filename: str):
         """Log a dictionary as a JSON artifact to MLflow."""
-        import json
-        import tempfile
-        import mlflow
-
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 filepath = os.path.join(tmpdir, filename)
@@ -135,9 +128,6 @@ class ExperimentTracker:
 
     def log_text(self, text: str, filename: str):
         """Log text content as an artifact to MLflow."""
-        import tempfile
-        import mlflow
-
         try:
             suffix = os.path.splitext(filename)[1] or '.txt'
             with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False) as f:
@@ -173,8 +163,6 @@ class ExperimentTracker:
         - Early-stopped values from bagged_info['child_hyperparameters_fit']
         - Detailed per-model metrics (precision, recall, F1 for classification; RMSE, MAE, R² for regression)
         """
-        import mlflow
-
         try:
             # Determine algorithm and model family
             algorithm = self._extract_algorithm(model_name)
@@ -347,8 +335,6 @@ class ExperimentTracker:
         - model.get_info()['bagged_info']['child_hyperparameters'] - configured params
         - model.get_info()['bagged_info']['child_hyperparameters_fit'] - actual fitted values (e.g., early-stopped)
         """
-        import mlflow
-
         try:
             # Try to get the model from predictor
             model = predictor._trainer.load_model(model_name)
@@ -442,9 +428,6 @@ class ExperimentTracker:
 
         Returns per-class precision, recall, F1 and aggregate metrics.
         """
-        import numpy as np
-        from sklearn.metrics import precision_recall_fscore_support, accuracy_score, balanced_accuracy_score
-
         metrics = {}
         try:
             y_pred = predictor.predict(test_data, model=model_name)
@@ -499,9 +482,6 @@ class ExperimentTracker:
 
         Returns RMSE, MAE, R², MAPE, and max error.
         """
-        import numpy as np
-        from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-
         metrics = {}
         try:
             y_pred = predictor.predict(test_data, model=model_name)
@@ -542,8 +522,6 @@ class ExperimentTracker:
         For timeseries, we use the leaderboard scores since per-model prediction
         requires train_data which may not be available.
         """
-        import numpy as np
-
         metrics = {}
         try:
             # If we have train_data, we can make predictions
@@ -597,8 +575,6 @@ class ExperimentTracker:
            - With detailed per-model metrics (precision/recall/F1 for classification, RMSE/MAE/R² for regression)
         2. Log a final evaluation summary run with artifacts
         """
-        import mlflow
-
         run_id = None
         # Handle both list format and dict with "models" key format
         if isinstance(leaderboard, list):
@@ -690,8 +666,6 @@ class ExperimentTracker:
                     )
 
                 if model_path:
-                    import tempfile
-
                     model_type = job_config.get("model_type", "tabular")
 
                     # Save model as pyfunc so it's deployable as a model API endpoint with no further modification
@@ -743,8 +717,6 @@ class ExperimentTracker:
 
     def get_run_metrics(self, run_id: str) -> dict[str, float]:
         """Get metrics from a specific MLflow run."""
-        import mlflow
-
         client = mlflow.tracking.MlflowClient()
         try:
             run = client.get_run(run_id)
@@ -755,8 +727,6 @@ class ExperimentTracker:
 
     def end_run(self, status: str = "FINISHED"):
         """End the current MLflow run."""
-        import mlflow
-
         mlflow.end_run(status=status)
         logger.debug("Ended MLflow run")
 
