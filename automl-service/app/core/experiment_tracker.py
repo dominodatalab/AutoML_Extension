@@ -684,7 +684,7 @@ class ExperimentTracker:
                                 self._predictor = TabularPredictor.load(model_dir)
                             print("[AutoGluonWrapper] model loaded successfully", flush=True)
 
-                        def predict(self, context: mlflow.pyfunc.PythonModelContext, model_input, params=None):
+                        def predict(self, context: mlflow.pyfunc.PythonModelContext, model_input: Any, params=None):
                             import pandas as pd
                             if isinstance(model_input, dict) and "dataframe_split" in model_input:
                                 split = model_input["dataframe_split"]
