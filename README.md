@@ -21,11 +21,11 @@ cd automl-service
 
 # Option A: Using uv (recommended — handles AutoGluon's 200+ transitive deps)
 pip install uv
-export VIRTUAL_ENV=../.venv uv pip install -r requirements.txt
+export VIRTUAL_ENV=../.venv uv pip install -r requirements-dev.txt -r requirements.txt
 export UV_ENV_FILE=../.env-dev
 
 # Option B: Using pip (may hit resolution-too-deep on complex dep graphs)
-pip install -r requirements.txt
+pip install -r requirements-dev.txt -r requirements.txt
 source ../.env-dev
 
 # Run the server
