@@ -21,116 +21,41 @@ cd automl-service
 
 # Option A: Using uv (recommended — handles AutoGluon's 200+ transitive deps)
 pip install uv
-VIRTUAL_ENV=../.venv uv pip install -r requirements.txt
+export VIRTUAL_ENV=../.venv uv pip install -r requirements.txt
+export UV_ENV_FILE=../.env-dev
 
 # Option B: Using pip (may hit resolution-too-deep on complex dep graphs)
 pip install -r requirements.txt
+source ../.env-dev
 
 # Run the server
-uvicorn app.main:app --reload --port 8000
+PORT=8000 ./app.sh --backend
 ```
 
 ### Frontend
 
 ```bash
 cd automl-ui
+
 npm install
-npm run dev        # Dev server on http://localhost:5173
+
+# Run  dev server
+FRONTEND_PORT=3000 BACKEND_PORT=8000 ./app.sh --frontend
+
 npm run build      # Production build
 ```
 
+### Run all dev servers
+
+`./app.sh --dev`
+
 ### Domino Deployment
 
-The `app.sh` script starts both backend and frontend as a combined Domino App:
-```bash
-# Runs automatically when deployed as a Domino App
-./app.sh
-```
+Run the `app_prod.sh` script,which starts both backend and frontend as a combined Domino App
 
-### Training Execution Modes
-
-Training requests launch an external Domino Job via `python-domino`.
-
-### Async EDA Profiling
-
-EDA supports both synchronous and asynchronous profiling:
-
-- Synchronous: profile in-app and return results immediately
-- Asynchronous: launch an external Domino Job, then poll for status/results
-
-Async endpoints:
-
-- `POST /svc/v1/profiling/profile/async/start`
-- `POST /svc/v1/profiling/profile/async/status`
-- `GET /svc/v1/profiling/profile/async/{request_id}`
-
-## Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DATABASE_URL` | No | SQLite URL (default local: `sqlite:///./automl.db`, Domino: `sqlite:////mnt/data/<safe_project_name>/automl.db`) |
-| `MODELS_PATH` | No | Model storage directory |
-| `DATASETS_PATH` | No | Dataset storage directory |
-| `UPLOADS_PATH` | No | Upload directory |
-| `TEMP_PATH` | No | Temp directory |
-| `EDA_RESULTS_PATH` | No | Shared EDA async result path |
-| `DOMINO_API_PROXY` | Domino app | Domino proxy base URL used by API clients |
-| `DOMINO_API_HOST` | Domino only | Domino API host |
-| `DOMINO_API_KEY` | Optional | Domino API key (fallback auth) |
-| `DOMINO_USER_API_KEY` | Optional | Legacy Domino API key |
-| `DOMINO_TOKEN_FILE` | Optional | Token file path for Domino SDK/auth fallback |
-| `API_KEY_OVERRIDE` | Optional | Explicit API key override (bypasses localhost token endpoint) |
-| `DOMINO_PROJECT_ID` | Domino only | Current project ID |
-| `DOMINO_PROJECT_NAME` | Domino only | Current project name |
-| `DOMINO_PROJECT_OWNER` | Domino only | Current project owner |
-| `DOMINO_TRAINING_HARDWARE_TIER_NAME` | Optional | Default hardware tier for external Domino training jobs |
-| `DOMINO_TRAINING_ENVIRONMENT_ID` | Optional | Default environment for external Domino training jobs |
-| `DOMINO_EDA_HARDWARE_TIER_NAME` | Optional | Default hardware tier for async EDA jobs |
-| `DOMINO_EDA_ENVIRONMENT_ID` | Optional | Default environment for async EDA jobs |
-| `MLFLOW_TRACKING_URI` | Domino only | MLflow tracking server |
-| `MLFLOW_TRACKING_TOKEN` | Optional | MLflow auth token |
-| `ENABLE_LOCAL_COMPUTE` | No | Enable local in-app queue execution (`true`/`false`) |
-| `WORKERS` | No | Uvicorn worker count (use `1` for local queue mode) |
-
-In Domino, default writable paths are scoped per project under `/mnt/data/<safe_project_name>/`.
-`<safe_project_name>` resolves in this order: `DOMINO_PROJECT_NAME` -> `default_project`,
-then non-path-safe characters are replaced with `_`.
-Derived defaults:
-- `MODELS_PATH`: `/mnt/data/<safe_project_name>/models`
-- `DATASETS_PATH`: `/mnt/data/<safe_project_name>/datasets`
-- `UPLOADS_PATH`: `/mnt/data/<safe_project_name>/uploads`
-- `TEMP_PATH`: `/mnt/data/<safe_project_name>/temp`
-- `EDA_RESULTS_PATH`: `/mnt/data/<safe_project_name>/eda_results`
-
-## Technology Stack
-
-### Backend
-- **Python 3.11** with async FastAPI
-- **AutoGluon 1.5** (Tabular, TimeSeries)
-- **SQLAlchemy 2.0** + aiosqlite (async SQLite)
-- **MLflow 3.9** for experiment tracking
-- **Ray Tune** for hyperparameter optimization
-- **PyTorch 2.9** (underlying ML framework)
-
-### Frontend
-- **React 18** with TypeScript
-- **Vite 5** (build tool)
-- **Tailwind CSS 3.4** (utility-first styling with custom Domino design tokens)
-- **Zustand 4** (UI state)
-- **Recharts 2** (diagnostics charts)
-- **Heroicons** (icons)
-
-# Local Development
-
-## installation
-See the individual service directories automl-service, automl-ui READMEs for installation instructions.
-
-## development
-You can develop this application locally by setting some environment variables, and running scripts and the dev servers.
+### Build Generated Domino Clients
 
 ```sh
-source .env-dev # see .env-dev-example
-
 # download swagger specs
 (cd automl-service && export OUT_PATH=./app/api/downloaded_openapi_specs/ && mkdir -p $OUT_PATH && ./scripts/download_api_specs.sh)
 
@@ -141,16 +66,13 @@ echo "then pick what you want and put into automl-service/app/api/domino_public_
 
 # generate private api client
 (cd automl-service && OUT_PATH=./app/api/generated_private IN_PATH=./app/api/domino_private_spec.json ./scripts/generate_api_client.sh)
-
-# run dev servers, option A
-FRONTEND_PORT=3000 BACKEND_PORT=8000 ./app.sh --frontend
-PORT=8000 ./app.sh --backend
-
-# run dev servers, option B
-./app.sh --dev
 ```
 
-## Retrieving DEV_ACCESS_TOKEN
+### Retrieving DEV_ACCESS_TOKEN
+
+Retrieve from you Account Settings in Domino.
+
+Or
 
 - start Domino workspace or App
 - open a terminal. In workspace, this would be via vscode or jupyterlab (or many other notebook types)
