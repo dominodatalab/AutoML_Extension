@@ -4,7 +4,90 @@ Backend service for the AutoML Extension, powered by [AutoGluon](https://auto.gl
 
 ## Setup
 
-See [main README](../README.md)
+See the [main README](../README.md) for the top-level quick start. Frontend-specific instructions live in [../automl-ui/README.md](../automl-ui/README.md).
+
+### Install dependencies
+
+From `automl-service/`:
+
+```bash
+# Recommended: uv for Python dependencies
+pip install uv
+uv venv ../.venv
+VIRTUAL_ENV=../.venv uv pip install -r requirements-dev.txt -r requirements.txt
+
+# Alternative: pip only
+pip install -r requirements-dev.txt -r requirements.txt
+```
+
+### Development configuration
+
+From the repository root, create a local env file and populate the Domino values needed for local development:
+
+```bash
+cp .env-dev-example .env-dev
+source .env-dev
+```
+
+The local development flow typically requires these values:
+
+- `DOMINO_API_HOST`
+- `DEV_ACCESS_TOKEN`
+- `DOMINO_ENVIRONMENT_ID`
+- `DOMINO_ENVIRONMENT_REVISION_ID`
+- `MLFLOW_TRACKING_URI`
+- `MLFLOW_TRACKING_TOKEN`
+
+`DOMINO_ENVIRONMENT_ID` and `DOMINO_ENVIRONMENT_REVISION_ID` are required when local development needs to launch remote Domino Jobs for training or async Exploratory Data Analysis.
+
+### Running the backend
+
+Backend only, from the repository root:
+
+```bash
+source .env-dev
+PORT=8000 ./app.sh --backend
+```
+
+Full-stack development, from the repository root:
+
+```bash
+source .env-dev
+./app.sh --dev
+```
+
+### Production / Domino runtime
+
+From the repository root:
+
+```bash
+./app_prod.sh
+```
+
+This starts the backend and serves the built frontend assets using the dependencies already installed in the Domino environment.
+
+### Build Generated Domino Clients
+
+```bash
+# Download swagger specs
+(cd automl-service && export OUT_PATH=./app/api/downloaded_openapi_specs/ && mkdir -p "$OUT_PATH" && ./scripts/download_api_specs.sh)
+
+echo "then pick what you want and put into automl-service/app/api/domino_public_spec.json and automl-service/app/api/domino_private_spec.json"
+
+# Generate public API client
+(cd automl-service && OUT_PATH=./app/api/generated IN_PATH=./app/api/domino_public_spec.json ./scripts/generate_api_client.sh)
+
+# Generate private API client
+(cd automl-service && OUT_PATH=./app/api/generated_private IN_PATH=./app/api/domino_private_spec.json ./scripts/generate_api_client.sh)
+```
+
+### Retrieving `DEV_ACCESS_TOKEN`
+
+Retrieve it from your Account Settings in Domino, or from a Domino Workspace/App terminal:
+
+```bash
+curl localhost:8899/access-token
+```
 
 ## Synthetic Test Data
 

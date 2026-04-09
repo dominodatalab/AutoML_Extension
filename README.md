@@ -14,69 +14,36 @@ See the [Extension Design document](./docs/extension-design.md).
 - Node.js 20+
 - [uv](https://github.com/astral-sh/uv) (recommended for Python dependency installation)
 
-### Backend
+### Install dependencies
 
 ```bash
 cd automl-service
 
-# Option A: Using uv (recommended — handles AutoGluon's 200+ transitive deps)
+# Recommended: uv for Python dependencies
 pip install uv
-export VIRTUAL_ENV=../.venv uv pip install -r requirements-dev.txt -r requirements.txt
-export UV_ENV_FILE=../.env-dev
+uv venv ../.venv
+VIRTUAL_ENV=../.venv uv pip install -r requirements-dev.txt -r requirements.txt
 
-# Option B: Using pip (may hit resolution-too-deep on complex dep graphs)
-pip install -r requirements-dev.txt -r requirements.txt
-source ../.env-dev
-
-# Run the server
-PORT=8000 ./app.sh --backend
+cd ../automl-ui
+npm install
 ```
 
-### Frontend
+### Run the app in development
+
+From the repository root:
 
 ```bash
-cd automl-ui
-
-npm install
-
-# Run  dev server
-FRONTEND_PORT=3000 BACKEND_PORT=8000 ./app.sh --frontend
-
-npm run build      # Production build
+./app.sh --dev
 ```
 
-### Run all dev servers
+### Domino deployment
 
-`./app.sh --dev`
+Run the `app_prod.sh` script, which starts both backend and frontend as a combined Domino App.
 
-### Domino Deployment
+## Service Docs
 
-Run the `app_prod.sh` script,which starts both backend and frontend as a combined Domino App
-
-### Build Generated Domino Clients
-
-```sh
-# download swagger specs
-(cd automl-service && export OUT_PATH=./app/api/downloaded_openapi_specs/ && mkdir -p $OUT_PATH && ./scripts/download_api_specs.sh)
-
-echo "then pick what you want and put into automl-service/app/api/domino_public_spec.json and automl-service/app/api/domino_private_spec.json"
-
-# generate public api client
-(cd automl-service && OUT_PATH=./app/api/generated IN_PATH=./app/api/domino_public_spec.json ./scripts/generate_api_client.sh)
-
-# generate private api client
-(cd automl-service && OUT_PATH=./app/api/generated_private IN_PATH=./app/api/domino_private_spec.json ./scripts/generate_api_client.sh)
-```
-
-### Retrieving DEV_ACCESS_TOKEN
-
-Retrieve from you Account Settings in Domino.
-
-Or
-
-- start Domino workspace or App
-- open a terminal. In workspace, this would be via vscode or jupyterlab (or many other notebook types)
-- `curl localhost:8899/access-token`
+- Backend setup, local development, generated-client rebuilds, and testing: [automl-service/README.md](./automl-service/README.md)
+- Frontend install, development, and production build details: [automl-ui/README.md](./automl-ui/README.md)
 
 ## License
 

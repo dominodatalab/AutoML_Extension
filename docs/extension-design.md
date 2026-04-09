@@ -38,9 +38,9 @@ The AutoML Extension is a full-stack web application that runs as a Domino App. 
    - **Model Registry** — push to Domino Model Registry
    - **Export** — download as a reproducible Jupyter notebook
 5. **Review Data**
-   - Review the data used in the Exploratory Data Exploration view
-   - Run EDA job to complete analysis for large datasets
-   - Export IPython Notebook to implement cleaning
+   - Inspect the selected dataset in the Exploratory Data Analysis view
+   - Run Exploratory Data Analysis jobs to complete analysis for large datasets
+   - Export IPython notebooks to implement cleaning separately in a Domino Workspace
 
 ### Architecture (High-Level)
 
@@ -61,14 +61,14 @@ information in the other tabs of the job overview UI.
 
 **Data Exploration View**
 
-This view shows a preview of the selected data, allows EDA job launching, review of an analysis of the data, and Ipython
-Notebook export functionality. The exported notebook file contains data transformations selected by the user in the
-Transformations tab.
+This view shows a preview of the selected data, allows Exploratory Data Analysis job launching, supports review of the
+dataset, and provides IPython notebook export functionality. The exported notebook file contains data transformations
+selected by the user in the Transformations tab.
 
-**EDA Job**
+**Exploratory Data Analysis Job**
 
-The EDA Job may run locally or as a Domino Job. It launches from the Data Exploration view. It computes reports on typical
-EDA statistics that a Data Scientist would want to know.
+The Exploratory Data Analysis job may run locally in the app container or remotely as a Domino Job. It launches from the
+Data Exploration view and computes reports on the dataset statistics that a data scientist would typically want to review.
 
 **App File Structure Overview**
 
@@ -131,31 +131,22 @@ This section details everything the extension requires from the Domino platform.
 
 ### 4.1 Environment Variables
 
-> **Criticality levels**:
-> - **Required** — App cannot function in Domino without this. Framework must inject it.
-> - **Recommended** — Core features degrade without this. Framework should inject it.
-> - **Optional** — Enables specific features or overrides defaults. Inject if applicable.
-
 #### Development Configuration
 
-See [Dev Environment Variable File](../.env-dev-example)
-
-#### Production Authentication
-
-Authentication in the training and EDA jobs occurs via infrastructure in Domino.
+See [Dev Environment Variable File](../.env-dev-example). When developing locally, these values must be set manually.
 
 #### Compute Configuration
 
 | Variable | Source | Criticality | Default | Purpose | When Missing |
 |----------|--------|-------------|---------|---------|-------------|
-| `DOMINO_ENVIRONMENT_ID` | Extension | Required | `None` | Environment ID for job launching | ... |
-| `DOMINO_ENVIRONMENT_REVISION_ID` | Extension | Required | `None` | Environment revision ID job launching | ... |
+| `DOMINO_ENVIRONMENT_ID` | Extension | Required | `None` | Environment ID for Domino Job launching | Must be set manually for local development. Domino injects it automatically when the extension runs in Domino. |
+| `DOMINO_ENVIRONMENT_REVISION_ID` | Extension | Required | `None` | Environment revision ID for Domino Job launching | Must be set manually for local development. Domino injects it automatically when the extension runs in Domino. |
 
 #### Database
 
 | Variable | Source | Criticality | Default | Purpose | When Missing |
 |----------|--------|-------------|---------|---------|-------------|
-| `DATABASE_URL` | Extension | Required | File system's local directory | URI for the sqlite database. Required in production | Defaults to file system's local directory |
+| `DATABASE_URL` | Extension | Required | `sqlite:///./automl.db` locally, `/mnt/data/<safe_project_name>/automl.db` in Domino | URI for the SQLite database that stores application state | Falls back to the environment-specific default path when unset |
 
 #### MLflow
 
@@ -166,15 +157,29 @@ Authentication in the training and EDA jobs occurs via infrastructure in Domino.
 
 ### 4.2 Authentication Flow
 
-The extension uses the access token found in the Authorization header of requests to the backend.
+Authentication in the training and Exploratory Data Analysis jobs occurs via infrastructure in Domino.
+
+Authentication in the main extension app depends on Domino Extended Identity Propagation features, which forward an
+`Authorization` header to the backend. The extension uses the access token found in that header for request-scoped calls
+to Domino APIs.
 
 ---
 
 ## 5. Deployment Model
 
-The extension runs as a single Docker container serving both frontend and backend:
+The extension runs as a single Docker container serving both frontend and backend.
 
-`app.sh` supports four modes:
+The application relies on a SQLite database to store local state for jobs, metadata, and async Exploratory Data Analysis
+tracking. In local development the database defaults to `./automl.db`. In Domino, it defaults to
+`/mnt/data/<safe_project_name>/automl.db`, which lives on the project's default dataset mount for the deployed app.
+Model artifacts, uploaded files, temporary files, and async analysis outputs are stored under the same project-scoped
+`/mnt/data/<safe_project_name>/` root.
+
+Execution is split between local and remote compute. Interactive API work and some data analysis can run inside the app
+container, while long-running work can also be launched as remote Domino Jobs. In the current design, model training runs
+as remote Domino Jobs, and async Exploratory Data Analysis can also run as remote Domino Jobs.
+
+`app.sh` supports five modes:
 
 | Mode | Flag | Use Case |
 |------|------|----------|
@@ -182,4 +187,4 @@ The extension runs as a single Docker container serving both frontend and backen
 | Backend only | `--backend` | When frontend is served separately |
 | Frontend only | `--frontend` | Vite dev server for frontend development |
 | Dev | `--dev` | Backend + Vite dev server with HMR |
-| Prod | `--prod` | Meant for use when running in Domino. Uses pre-built assets and installation in Domino Environment. Use `app_prod.sh` when deploying the App in Domino |
+| Prod | `--prod` | Meant for use when running in Domino. Uses pre-built assets and dependencies installed in the Domino environment. Use `app_prod.sh` when deploying the app in Domino |
