@@ -31,8 +31,6 @@ from app.api.schemas.job import (
     JobMetricsResponse,
     JobProgressResponse,
     JobStatusResponse,
-    RegisterModelRequest,
-    RegisterModelResponse,
 )
 from app.config import get_settings
 from app.core.authorization import require_storage_modify, require_domino_job_start, require_domino_job_list, current_user_can_modify_storage, require_domino_job_stop
@@ -45,7 +43,6 @@ from app.db.models import Job, JobLog, JobStatus, ModelType, ProblemType
 from app.db import crud
 from app.services.job_links import attach_external_links
 from app.services.models import JobConfig
-from app.workers.training_worker import register_trained_model
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +105,7 @@ def get_viewing_user_name() -> str:
 
 def _attach_external_links(job: Job) -> Job:
     """Attach computed external URLs used by the Job Overview UI."""
-    return attach_external_links(job, logger)
+    return attach_external_links(job)
 
 
 def validate_job_create_request(job_request: JobCreateRequest) -> None:
@@ -205,8 +202,6 @@ def build_job_model(
         eval_metric=job_request.eval_metric,
         experiment_name=job_request.experiment_name,
         enable_mlflow=job_request.enable_mlflow,
-        auto_register=job_request.auto_register,
-        register_name=job_request.register_name,
         status=JobStatus.PENDING,
         autogluon_config=build_autogluon_config(job_request),
     )
@@ -799,7 +794,7 @@ async def _fetch_mlflow_results(job_id: str) -> Optional[dict]:
             "feature_importance": feature_importance,
             "experiment_run_id": run_id,
             "experiment_name": experiment_name,
-            "model_path": f"runs:/{run_id}/autogluon_model",
+            "model_path": f"runs:/{run_id}/autogluon_model_raw",
         }
 
     loop = asyncio.get_event_loop()
@@ -900,7 +895,7 @@ async def _sync_domino_job_state(
 
     terminal_status = _terminal_status_from_domino(latest_domino_status)
     if not terminal_status:
-        if normalized:
+        if latest_domino_status:
             logger.warning(
                 "Unrecognized Domino terminal status '%s' for job %s (domino id %s)",
                 latest_domino_status,
@@ -1170,40 +1165,3 @@ async def bulk_delete_jobs(db: AsyncSession, job_ids: list[str]) -> dict:
             failed.append({"job_id": job_id, "error": str(exc)})
 
     return {"deleted_job_ids": deleted_job_ids, "failed": failed}
-
-
-async def register_model_for_job(
-    db: AsyncSession,
-    job_id: str,
-    request: RegisterModelRequest,
-) -> RegisterModelResponse:
-    """Register a completed job's trained model in Domino registry."""
-    owner_user_name = get_viewing_user_name()
-    job = await get_job_or_404(db, job_id, owner_user_name)
-    if job.status != JobStatus.COMPLETED:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot register model from job with status: {job.status.value}",
-        )
-
-    try:
-        prefixed_model_name = request.model_name
-        if not prefixed_model_name.startswith("automlapp-"):
-            prefixed_model_name = f"automlapp-{prefixed_model_name}"
-
-        result = await register_trained_model(
-            job_id=job_id,
-            model_name=prefixed_model_name,
-            description=request.description,
-            stage=request.stage,
-        )
-        return RegisterModelResponse(
-            success=True,
-            model_name=result.get("model_name"),
-            version=result.get("version"),
-            run_id=result.get("run_id"),
-            artifact_uri=result.get("artifact_uri"),
-            stage=result.get("stage"),
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to register model: {exc}") from exc

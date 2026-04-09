@@ -79,8 +79,6 @@ export function useWizard() {
       advanced_config: wizard.training.advancedConfig,
       timeseries_config: wizard.training.timeseriesConfig,
       enable_mlflow: mlflowTracking,
-      auto_register: wizard.training.autoRegister,
-      register_name: wizard.training.registerName,
     }
 
     const job = await createJobMutation.mutateAsync(request)

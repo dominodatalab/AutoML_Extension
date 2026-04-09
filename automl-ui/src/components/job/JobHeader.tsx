@@ -1,19 +1,13 @@
 import { useRef, useEffect } from 'react'
-import { StopIcon, RocketLaunchIcon, CubeIcon } from '@heroicons/react/24/outline'
+import { StopIcon } from '@heroicons/react/24/outline'
 import type { Job } from '../../types/job'
 
 interface JobHeaderProps {
   job: Job | undefined
   currentStatus: string
-  standaloneMode?: boolean
   cancelIsPending: boolean
-  showDeployDropdown: boolean
   showActionsDropdown: boolean
   onCancel: () => void
-  onToggleDeployDropdown: () => void
-  onCloseDeployDropdown: () => void
-  onOpenDeployApiDialog: () => void
-  onOpenDockerExportDialog: () => void
   onToggleActionsDropdown: () => void
   onCloseActionsDropdown: () => void
   onOpenDeleteConfirm: () => void
@@ -22,35 +16,24 @@ interface JobHeaderProps {
 export function JobHeader({
   job,
   currentStatus,
-  standaloneMode,
   cancelIsPending,
-  showDeployDropdown,
   showActionsDropdown,
   onCancel,
-  onToggleDeployDropdown,
-  onCloseDeployDropdown,
-  onOpenDeployApiDialog,
-  onOpenDockerExportDialog,
   onToggleActionsDropdown,
   onCloseActionsDropdown,
   onOpenDeleteConfirm,
 }: JobHeaderProps) {
-  const deployDropdownRef = useRef<HTMLDivElement>(null)
   const actionsDropdownRef = useRef<HTMLDivElement>(null)
 
-  // Close dropdowns when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (deployDropdownRef.current && !deployDropdownRef.current.contains(event.target as Node)) {
-        onCloseDeployDropdown()
-      }
       if (actionsDropdownRef.current && !actionsDropdownRef.current.contains(event.target as Node)) {
         onCloseActionsDropdown()
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [onCloseDeployDropdown, onCloseActionsDropdown])
+  }, [onCloseActionsDropdown])
 
   return (
     <div className="flex items-center justify-between flex-wrap mb-5">
@@ -70,38 +53,7 @@ export function JobHeader({
             Cancel
           </button>
         )}
-        {currentStatus === 'completed' && job?.model_path && !standaloneMode && (
-          <div className="relative" ref={deployDropdownRef}>
-            <button
-              onClick={onToggleDeployDropdown}
-              className="h-[32px] px-[15px] bg-domino-accent-purple text-white text-sm font-normal rounded-[2px] hover:bg-domino-accent-purple-hover transition-all duration-200 inline-flex items-center gap-1.5"
-            >
-              Deploy
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            {showDeployDropdown && (
-              <div className="absolute right-0 mt-1 w-72 bg-white shadow-lg border border-domino-border py-1 z-50">
-                <button
-                  onClick={onOpenDeployApiDialog}
-                  className="w-full px-4 py-2 text-left text-sm text-domino-text-primary hover:bg-domino-bg-tertiary flex items-center gap-2 transition-colors"
-                >
-                  <RocketLaunchIcon className="w-4 h-4" />
-                  Publish as Domino Model API
-                </button>
-                <button
-                  onClick={onOpenDockerExportDialog}
-                  className="w-full px-4 py-2 text-left text-sm text-domino-text-primary hover:bg-domino-bg-tertiary flex items-center gap-2 transition-colors"
-                >
-                  <CubeIcon className="w-4 h-4" />
-                  Export as Docker Container
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-        <div className="relative" ref={actionsDropdownRef}>
+<div className="relative" ref={actionsDropdownRef}>
           <button
             onClick={onToggleActionsDropdown}
             className="h-[32px] w-[32px] flex items-center justify-center border border-domino-border rounded-[2px] text-domino-text-secondary hover:border-domino-accent-purple hover:text-domino-accent-purple transition-all duration-200"

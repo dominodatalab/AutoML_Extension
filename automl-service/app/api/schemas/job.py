@@ -352,14 +352,6 @@ class JobCreateRequest(BaseModel):
         None, description="MLflow experiment name"
     )
 
-    # Model registration
-    auto_register: bool = Field(
-        False, description="Automatically register model to Domino registry"
-    )
-    register_name: Optional[str] = Field(
-        None, description="Name for registered model"
-    )
-
     domino_hardware_tier_name: Optional[str] = Field(
         None,
         description="Optional Domino hardware tier name for external training jobs",
@@ -417,6 +409,8 @@ class JobResponse(BaseModel):
     registered_model_name: Optional[str] = None
     registered_model_version: Optional[str] = None
     model_registry_url: Optional[str] = None
+    model_api_url: Optional[str] = None
+    model_api_id: Optional[str] = None
     created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -528,26 +522,3 @@ class JobProgressResponse(BaseModel):
     current_model: Optional[str] = None
     eta_seconds: Optional[int] = None
     started_at: Optional[datetime] = None
-
-
-class RegisterModelRequest(BaseModel):
-    """Request schema for registering a trained model."""
-
-    job_id: str = Field(..., description="ID of the completed job")
-    model_name: str = Field(..., min_length=1, max_length=255, description="Name for registered model")
-    description: Optional[str] = Field(None, description="Model description")
-    stage: Optional[Literal["None", "Staging", "Production"]] = Field(
-        None, description="Initial stage for the model"
-    )
-
-
-class RegisterModelResponse(BaseModel):
-    """Response schema for model registration."""
-
-    success: bool
-    model_name: str
-    version: Optional[str] = None
-    run_id: Optional[str] = None
-    artifact_uri: Optional[str] = None
-    stage: Optional[str] = None
-    error: Optional[str] = None

@@ -164,7 +164,9 @@ export interface Job {
   is_registered?: boolean
   registered_model_name?: string
   registered_model_version?: string
+  model_api_id?: string
   model_registry_url?: string
+  model_api_url?: string
   created_at: string
   started_at?: string
   completed_at?: string
@@ -191,8 +193,6 @@ export interface JobCreateRequest {
   experiment_name?: string
   advanced_config?: AdvancedAutoGluonConfig
   timeseries_config?: TimeSeriesAdvancedConfig
-  auto_register?: boolean
-  register_name?: string
   enable_mlflow?: boolean
 }
 

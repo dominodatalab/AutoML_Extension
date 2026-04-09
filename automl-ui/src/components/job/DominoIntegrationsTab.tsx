@@ -1,11 +1,13 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { Job } from '../../types/job'
-import type { ModelApi, Deployment } from '../../types/deployment'
 import { useDeployments } from '../../hooks/useDeployments'
 import { toDominoTenantUrl } from '../../utils/dominoLinks'
+import { RegisterModelDialog } from '../registry/ModelRegistryPanel'
+import { DeployModelApiDialog } from '../deployment/DeployModelApiDialog'
 
 interface DominoIntegrationsTabProps {
   job: Job
+  onRefresh: () => void
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -13,13 +15,14 @@ const STATUS_STYLES: Record<string, string> = {
   starting: 'bg-domino-accent-purple/10 text-domino-accent-purple',
   building: 'bg-domino-accent-purple/10 text-domino-accent-purple',
   pending: 'bg-domino-accent-yellow/15 text-[#998A12]',
+  'ready to run': 'bg-domino-accent-yellow/15 text-[#998A12]',
   stopped: 'bg-domino-text-muted/15 text-domino-text-muted',
   stopping: 'bg-domino-text-muted/15 text-domino-text-muted',
   failed: 'bg-domino-accent-red/10 text-domino-accent-red',
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const style = STATUS_STYLES[status] || 'bg-domino-text-muted/15 text-domino-text-muted'
+  const style = STATUS_STYLES[status.toLowerCase()] || 'bg-domino-text-muted/15 text-domino-text-muted'
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium capitalize ${style}`}>
       {status}
@@ -27,30 +30,26 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
-export function DominoIntegrationsTab({ job }: DominoIntegrationsTabProps) {
-  const { modelApis, deployments, loading, fetchModelApis, fetchDeployments } = useDeployments()
+export function DominoIntegrationsTab({ job, onRefresh }: DominoIntegrationsTabProps) {
+  const { modelApiStatus, loading, fetchModelApiStatus } = useDeployments()
+  const [showRegisterDialog, setShowRegisterDialog] = useState(false)
+  const [showDeployDialog, setShowDeployDialog] = useState(false)
   const experimentUrl = toDominoTenantUrl(job.experiment_run_url)
   const modelRegistryUrl = toDominoTenantUrl(job.model_registry_url)
 
   useEffect(() => {
-    fetchModelApis()
-    fetchDeployments()
-  }, [fetchModelApis, fetchDeployments])
-
-  // Build a map of modelApiId → deployments for that API
-  const deploymentsByApi = new Map<string, Deployment[]>()
-  for (const d of deployments) {
-    const list = deploymentsByApi.get(d.modelApiId) || []
-    list.push(d)
-    deploymentsByApi.set(d.modelApiId, list)
-  }
+    if (job.model_api_id) {
+      fetchModelApiStatus(job.model_api_id)
+    }
+  }, [job.model_api_id, fetchModelApiStatus])
 
   return (
+    <>
     <div className="space-y-6">
       {/* Model Registry */}
       <SectionCard
         title="Model Registry"
-        description="Registered model versions tracked in Domino."
+        description="Domino Model Registry entry for this training job's model."
       >
         {job.is_registered && job.registered_model_name ? (
           <div className="space-y-3">
@@ -79,37 +78,58 @@ export function DominoIntegrationsTab({ job }: DominoIntegrationsTabProps) {
             </dl>
           </div>
         ) : (
-          <EmptyState
-            message="No model registered in Domino yet."
-            action="Register via the Deploy menu in the header."
-          />
+          <div className="text-center py-4 space-y-3">
+            <p className="text-sm text-domino-text-muted">No model registered in Domino yet.</p>
+            {job.status === 'completed' && job.model_path && (
+              <button
+                onClick={() => setShowRegisterDialog(true)}
+                className="text-sm text-[#3B3BD3] hover:underline"
+              >
+                Register Model
+              </button>
+            )}
+          </div>
         )}
       </SectionCard>
 
       {/* Model APIs & Deployments */}
       <SectionCard
-        title="Model APIs"
-        description="Domino Model API endpoints available in this project."
+        title="Model API"
+        description="Model API deployed from this training job's registered model."
       >
         {loading ? (
           <div className="text-center py-4">
-            <p className="text-sm text-domino-text-muted">Loading model APIs...</p>
+            <p className="text-sm text-domino-text-muted">Loading...</p>
           </div>
-        ) : modelApis.length > 0 ? (
-          <div className="space-y-4">
-            {modelApis.map((api) => (
-              <ModelApiRow
-                key={api.id}
-                api={api}
-                deployments={deploymentsByApi.get(api.id) || []}
-              />
-            ))}
+        ) : (job.model_api_id && modelApiStatus) ? (
+          <div className="flex items-center gap-3 text-xs">
+            <StatusBadge status={modelApiStatus.status} />
+            {job.model_api_url ? (
+              <a
+                href={toDominoTenantUrl(job.model_api_url) || job.model_api_url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[#3B3BD3] hover:underline truncate"
+              >
+                View in Domino
+                <ExternalLinkIcon className="inline ml-1 -mt-0.5" />
+              </a>
+            ) : (
+              <span className="text-domino-text-muted">Deployed</span>
+            )}
+          </div>
+        ) : job.is_registered ? (
+          <div className="text-center py-4 space-y-3">
+            <p className="text-sm text-domino-text-muted">No Model API deployed yet.</p>
+            <button
+              onClick={() => setShowDeployDialog(true)}
+              className="text-sm text-[#3B3BD3] hover:underline"
+            >
+              Deploy the registered Model as a Model API
+            </button>
           </div>
         ) : (
-          <EmptyState
-            message="No Model APIs in this project yet."
-            action="Publish via the Deploy menu in the header."
-          />
+          <EmptyState message="Register this training job's model first to deploy a Model API." />
         )}
       </SectionCard>
 
@@ -153,50 +173,26 @@ export function DominoIntegrationsTab({ job }: DominoIntegrationsTabProps) {
         )}
       </SectionCard>
     </div>
+
+    {showRegisterDialog && (
+      <RegisterModelDialog
+        jobId={job.id}
+        onClose={() => setShowRegisterDialog(false)}
+        onSuccess={() => { setShowRegisterDialog(false); onRefresh() }}
+      />
+    )}
+    {showDeployDialog && (
+      <DeployModelApiDialog
+        jobId={job.id}
+        defaultModelName={job.name}
+        onClose={() => setShowDeployDialog(false)}
+        onSuccess={() => { setShowDeployDialog(false); onRefresh() }}
+      />
+    )}
+    </>
   )
 }
 
-function ModelApiRow({ api, deployments }: { api: ModelApi; deployments: Deployment[] }) {
-  return (
-    <div className="border border-domino-border rounded p-3 space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-domino-text-primary">{api.name}</span>
-        {api.createdAt && (
-          <span className="text-xs text-domino-text-muted">
-            {new Date(api.createdAt).toLocaleDateString()}
-          </span>
-        )}
-      </div>
-      {api.description && (
-        <p className="text-xs text-domino-text-secondary">{api.description}</p>
-      )}
-      {deployments.length > 0 ? (
-        <div className="space-y-1.5 pt-1">
-          {deployments.map((d) => (
-            <div key={d.id} className="flex items-center gap-3 text-xs">
-              <StatusBadge status={d.status} />
-              {d.url ? (
-                <a
-                  href={toDominoTenantUrl(d.url) || d.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-[#3B3BD3] hover:underline truncate"
-                >
-                  {d.url}
-                  <ExternalLinkIcon className="inline ml-1 -mt-0.5" />
-                </a>
-              ) : (
-                <span className="text-domino-text-muted">No endpoint URL</span>
-              )}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="text-xs text-domino-text-muted pt-1">No active deployments</p>
-      )}
-    </div>
-  )
-}
 
 function SectionCard({
   title,

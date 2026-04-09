@@ -95,14 +95,11 @@ class Job(Base):
     # MLflow gating
     enable_mlflow: Mapped[bool] = mapped_column(default=False)
 
-    # Auto-register to Domino Model Registry after training
-    auto_register: Mapped[bool] = mapped_column(default=False)
-    register_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-
     # Registration status
     is_registered: Mapped[bool] = mapped_column(default=False)
     registered_model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     registered_model_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    model_api_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
@@ -142,17 +139,3 @@ class JobLog(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
-
-class RegisteredModel(Base):
-    """Registered models for tracking deployments."""
-    __tablename__ = "registered_models"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    job_id: Mapped[str] = mapped_column(String(36), nullable=False)
-    version: Mapped[int] = mapped_column(Integer, default=1)
-    mlflow_model_uri: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    domino_model_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    deployed: Mapped[bool] = mapped_column(default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)

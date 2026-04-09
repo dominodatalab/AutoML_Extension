@@ -144,9 +144,7 @@ def cleanup_registry(client, shared_state) -> Generator[dict, None, None]:
     Each value is a list of IDs/paths.
     """
     registry = {
-        "deployments": [],
         "model_apis": [],
-        "registered_models": [],
         "job_ids": [],
         "data_files": [],
     }
@@ -154,22 +152,10 @@ def cleanup_registry(client, shared_state) -> Generator[dict, None, None]:
     yield registry
 
     # ── Teardown: best-effort cleanup in dependency order ──
-    _cleanup_deployments(client, registry["deployments"])
     _cleanup_model_apis(client, registry["model_apis"])
-    _cleanup_registered_models(client, registry["registered_models"])
     _cleanup_jobs(client, registry["job_ids"])
     _cleanup_data_files(registry["data_files"])
 
-
-def _cleanup_deployments(client: httpx.Client, deployment_ids: list) -> None:
-    for dep_id in reversed(deployment_ids):
-        try:
-            # Stop first, then delete
-            client.post(f"/svc/v1/deployments/{dep_id}/stop")
-            time.sleep(2)
-            client.delete(f"/svc/v1/deployments/{dep_id}")
-        except Exception as exc:
-            print(f"[cleanup] Warning: failed to delete deployment {dep_id}: {exc}")
 
 
 def _cleanup_model_apis(client: httpx.Client, model_api_ids: list) -> None:
@@ -179,13 +165,6 @@ def _cleanup_model_apis(client: httpx.Client, model_api_ids: list) -> None:
         except Exception as exc:
             print(f"[cleanup] Warning: failed to delete model API {api_id}: {exc}")
 
-
-def _cleanup_registered_models(client: httpx.Client, model_names: list) -> None:
-    for name in reversed(model_names):
-        try:
-            client.delete(f"/svc/v1/registry/models/{name}")
-        except Exception as exc:
-            print(f"[cleanup] Warning: failed to delete registered model {name}: {exc}")
 
 
 def _cleanup_jobs(client: httpx.Client, job_ids: list) -> None:

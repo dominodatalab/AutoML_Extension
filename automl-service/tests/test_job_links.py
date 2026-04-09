@@ -10,6 +10,7 @@ from app.db.models import Job, JobStatus, ModelType
 from app.services.job_links import (
     _build_domino_job_url,
     _build_experiment_run_url,
+    _build_model_api_url,
     _build_model_registry_url,
     _normalize_domino_ui_host,
     _resolve_project_name,
@@ -20,9 +21,6 @@ from app.services.job_links import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-_MOCK_LOGGER = MagicMock()
-
 
 def _stub_job(**overrides) -> Job:
     """Build a lightweight Job instance for link tests."""
@@ -41,6 +39,7 @@ def _stub_job(**overrides) -> Job:
         experiment_name=None,
         registered_model_name=None,
         registered_model_version=None,
+        model_api_id=None,
     )
     defaults.update(overrides)
     job = MagicMock(spec=Job)
@@ -292,6 +291,49 @@ class TestBuildModelRegistryUrl:
 
 
 # ===========================================================================
+# _build_model_api_url
+# ===========================================================================
+
+
+class TestBuildModelApiUrl:
+    """Tests for _build_model_api_url."""
+
+    def test_returns_none_without_model_api_id(self, monkeypatch):
+        _clear_env(monkeypatch, _DOMINO_ENV_KEYS)
+        job = _stub_job(model_api_id=None)
+        assert _build_model_api_url(job) is None
+
+    def test_returns_none_without_project_id(self, monkeypatch):
+        _clear_env(monkeypatch, _DOMINO_ENV_KEYS)
+        job = _stub_job(model_api_id="api-123", project_id=None)
+        assert _build_model_api_url(job) is None
+
+    def test_full_url_contains_model_api_id_and_owner(self, monkeypatch, mock_project_details):
+        _clear_env(monkeypatch, _DOMINO_ENV_KEYS)
+        monkeypatch.setenv("DOMINO_USER_HOST", "https://domino.example.com")
+        import app.config as config_module
+        config_module._settings_instance = None
+        mock_project_details.configure(owner_username="alice", name="my-proj")
+        job = _stub_job(model_api_id="api-abc123", project_id="project-001")
+        result = _build_model_api_url(job)
+        assert result is not None
+        assert "/models/api-abc123/overview" in result
+        assert "ownerName=alice" in result
+        assert "projectName=my-proj" in result
+        config_module._settings_instance = None
+
+    def test_returns_path_without_host(self, monkeypatch, mock_project_details):
+        _clear_env(monkeypatch, _DOMINO_ENV_KEYS)
+        import app.config as config_module
+        config_module._settings_instance = None
+        mock_project_details.configure(owner_username="bob", name="proj-x")
+        job = _stub_job(model_api_id="api-999", project_id="project-002")
+        result = _build_model_api_url(job)
+        assert result == "/models/api-999/overview?ownerName=bob&projectName=proj-x"
+        config_module._settings_instance = None
+
+
+# ===========================================================================
 # _resolve_project_name
 # ===========================================================================
 
@@ -342,7 +384,7 @@ class TestResolveProjectName:
 class TestAttachExternalLinks:
     """Tests for attach_external_links — the top-level orchestrator."""
 
-    def test_sets_all_four_attributes(self, monkeypatch, mock_project_details):
+    def test_sets_all_attributes(self, monkeypatch, mock_project_details):
         _clear_env(monkeypatch, _DOMINO_ENV_KEYS)
         monkeypatch.setenv("DOMINO_USER_HOST", "https://domino.example.com")
         import app.config as config_module
@@ -355,33 +397,34 @@ class TestAttachExternalLinks:
             domino_job_id="run-1",
             registered_model_name="automlapp-my-model",
             registered_model_version="2",
+            model_api_id="api-abc",
             experiment_run_id=None,
             experiment_name=None,
         )
 
-        logger = MagicMock()
-        result = attach_external_links(job, logger)
+        result = attach_external_links(job)
 
-        # domino_job_url
         assert hasattr(result, "domino_job_url")
         domino_url = getattr(result, "domino_job_url")
         assert domino_url is not None
         assert "/jobs/alice/my-proj/run-1" in domino_url
 
-        # experiment_id (None since no MLflow run/name)
         assert hasattr(result, "experiment_id")
-
-        # experiment_run_url (None since experiment_id is None)
         assert hasattr(result, "experiment_run_url")
 
-        # model_registry_url
         assert hasattr(result, "model_registry_url")
         registry_url = getattr(result, "model_registry_url")
         assert registry_url is not None
         assert "/model-registry/automlapp-my-model/model-card" in registry_url
         assert "version=2" in registry_url
-        assert mock_project_details.state.project_id == "project-111"
 
+        assert hasattr(result, "model_api_url")
+        api_url = getattr(result, "model_api_url")
+        assert api_url is not None
+        assert "/models/api-abc/overview" in api_url
+        assert "ownerName=alice" in api_url
+
+        assert mock_project_details.state.project_id == "project-111"
         config_module._settings_instance = None
 
     def test_all_links_none_when_no_context(self, monkeypatch):
@@ -392,16 +435,17 @@ class TestAttachExternalLinks:
         job = _stub_job(
             domino_job_id=None,
             registered_model_name=None,
+            model_api_id=None,
             experiment_run_id=None,
             experiment_name=None,
             project_name=None,
         )
 
-        logger = MagicMock()
-        result = attach_external_links(job, logger)
+        result = attach_external_links(job)
         assert getattr(result, "domino_job_url") is None
         assert getattr(result, "experiment_run_url") is None
         assert getattr(result, "model_registry_url") is None
+        assert getattr(result, "model_api_url") is None
 
         config_module._settings_instance = None
 
@@ -411,8 +455,7 @@ class TestAttachExternalLinks:
         config_module._settings_instance = None
 
         job = _stub_job(domino_job_id=None, registered_model_name=None)
-        logger = MagicMock()
-        result = attach_external_links(job, logger)
+        result = attach_external_links(job)
         assert result is job
 
         config_module._settings_instance = None

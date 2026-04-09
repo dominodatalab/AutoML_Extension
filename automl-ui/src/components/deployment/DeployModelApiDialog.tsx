@@ -34,8 +34,6 @@ function toModelApiName(name: string): string {
   return `automlapp-${normalized}`.slice(0, 64)
 }
 
-const PYTHON_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
-
 export function DeployModelApiDialog({
   jobId,
   defaultModelName,
@@ -46,12 +44,9 @@ export function DeployModelApiDialog({
   const defaultApiName = useMemo(() => toModelApiName(defaultModelName), [defaultModelName])
 
   const [modelName, setModelName] = useState(defaultApiName)
-  const [functionName, setFunctionName] = useState('predict')
-  const [minReplicas, setMinReplicas] = useState(1)
-  const [maxReplicas, setMaxReplicas] = useState(1)
+  const [replicas, setReplicas] = useState(1)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
-  const [endpointUrl, setEndpointUrl] = useState<string | null>(null)
 
   useEffect(() => {
     notifyModalOpen()
@@ -65,39 +60,19 @@ export function DeployModelApiDialog({
     setSubmitError(null)
 
     const name = modelName.trim()
-    const fn = functionName.trim()
-
     if (!name) {
       setSubmitError('Model API name is required')
-      return
-    }
-
-    if (!fn) {
-      setSubmitError('Prediction function is required')
-      return
-    }
-
-    if (!PYTHON_IDENTIFIER.test(fn)) {
-      setSubmitError('Prediction function must be a valid Python identifier')
-      return
-    }
-
-    if (maxReplicas < minReplicas) {
-      setSubmitError('Max replicas must be greater than or equal to min replicas')
       return
     }
 
     const result = await deployFromJob({
       job_id: jobId,
       model_name: name,
-      function_name: fn,
-      min_replicas: minReplicas,
-      max_replicas: maxReplicas,
+      replicas,
     })
 
     if (result?.success) {
       setSuccess(true)
-      setEndpointUrl(result.url || result.endpoint_url || null)
       setTimeout(() => {
         onSuccess()
         onClose()
@@ -105,7 +80,6 @@ export function DeployModelApiDialog({
       return
     }
 
-    // If the request threw, useDeployments.error carries the backend message.
     if (!result) {
       return
     }
@@ -138,17 +112,12 @@ export function DeployModelApiDialog({
             <p className="text-sm text-domino-text-secondary mt-1">
               Domino is provisioning your Model API.
             </p>
-            {endpointUrl && (
-              <p className="text-xs text-domino-text-secondary mt-3 break-all">
-                Endpoint: <span className="text-domino-text-primary">{endpointUrl}</span>
-              </p>
-            )}
           </div>
         ) : (
           <form onSubmit={handleSubmit}>
             <div className="px-6 space-y-4">
               <p className="text-sm text-domino-text-secondary">
-                Create and deploy a Domino Model API directly from this completed AutoML job.
+                Create a Domino Model API from this job's registered model.
               </p>
 
               <div>
@@ -162,33 +131,13 @@ export function DeployModelApiDialog({
               </div>
 
               <div>
-                <label className="label">Prediction Function</label>
+                <label className="label">Replicas</label>
                 <Input
-                  value={functionName}
-                  onChange={(e) => setFunctionName(e.target.value)}
-                  placeholder="predict"
+                  type="number"
+                  min={1}
+                  value={replicas}
+                  onChange={(e) => setReplicas(Number(e.target.value) || 1)}
                 />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label">Min Replicas</label>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={minReplicas}
-                    onChange={(e) => setMinReplicas(Number(e.target.value) || 0)}
-                  />
-                </div>
-                <div>
-                  <label className="label">Max Replicas</label>
-                  <Input
-                    type="number"
-                    min={1}
-                    value={maxReplicas}
-                    onChange={(e) => setMaxReplicas(Number(e.target.value) || 1)}
-                  />
-                </div>
               </div>
 
               {displayError && (

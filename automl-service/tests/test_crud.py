@@ -15,7 +15,7 @@ import pytest_asyncio
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.utils import utc_now
-from app.db.models import Job, JobLog, JobStatus, ModelType, RegisteredModel
+from app.db.models import Job, JobLog, JobStatus, ModelType
 from app.db import crud
 
 
@@ -354,52 +354,6 @@ class TestJobLogs:
 
 
 # ---------------------------------------------------------------------------
-# create_registered_model / get_registered_models
-# ---------------------------------------------------------------------------
-
-
-class TestRegisteredModels:
-    """Verify model registration CRUD."""
-
-    @pytest.mark.asyncio
-    async def test_create_and_list_models(self, db_session, make_job):
-        job = make_job()
-        await crud.create_job(db_session, job)
-
-        model = RegisteredModel(
-            id=str(uuid.uuid4()),
-            name="my-model",
-            job_id=job.id,
-            version=1,
-            created_at=utc_now(),
-        )
-        created = await crud.create_registered_model(db_session, model)
-        assert created.name == "my-model"
-
-        models = await crud.get_registered_models(db_session)
-        assert len(models) >= 1
-        assert any(m.name == "my-model" for m in models)
-
-    @pytest.mark.asyncio
-    async def test_get_registered_model_by_name(self, db_session, make_job):
-        job = make_job()
-        await crud.create_job(db_session, job)
-
-        model = RegisteredModel(
-            id=str(uuid.uuid4()),
-            name="unique-model",
-            job_id=job.id,
-            version=1,
-            created_at=utc_now(),
-        )
-        await crud.create_registered_model(db_session, model)
-
-        found = await crud.get_registered_model(db_session, "unique-model")
-        assert found is not None
-        assert found.job_id == job.id
-
-
-# ---------------------------------------------------------------------------
 # get_jobs_for_cleanup
 # ---------------------------------------------------------------------------
 
@@ -458,32 +412,6 @@ class TestGetJobsForCleanup:
 
 
 # ---------------------------------------------------------------------------
-# count_jobs_with_file_path
-# ---------------------------------------------------------------------------
-
-
-class TestCountJobsWithFilePath:
-    """Verify reference counting by file_path."""
-
-    @pytest.mark.asyncio
-    async def test_counts_matching_file_paths(self, db_session, make_job):
-        path = "/data/shared.csv"
-        await crud.create_job(db_session, make_job(name="j1", file_path=path))
-        await crud.create_job(db_session, make_job(name="j2", file_path=path))
-        await crud.create_job(
-            db_session, make_job(name="j3", file_path="/data/other.csv")
-        )
-
-        count = await crud.count_jobs_with_file_path(db_session, path)
-        assert count == 2
-
-    @pytest.mark.asyncio
-    async def test_returns_zero_when_no_match(self, db_session):
-        count = await crud.count_jobs_with_file_path(db_session, "/no/match.csv")
-        assert count == 0
-
-
-# ---------------------------------------------------------------------------
 # delete_job_logs
 # ---------------------------------------------------------------------------
 
@@ -511,42 +439,4 @@ class TestDeleteJobLogs:
         await crud.create_job(db_session, job)
 
         deleted = await crud.delete_job_logs(db_session, job.id)
-        assert deleted == 0
-
-
-# ---------------------------------------------------------------------------
-# delete_registered_models_for_job
-# ---------------------------------------------------------------------------
-
-
-class TestDeleteRegisteredModelsForJob:
-    """Verify cascade deletion of registered models by job_id."""
-
-    @pytest.mark.asyncio
-    async def test_deletes_models_and_returns_count(self, db_session, make_job):
-        job = make_job()
-        await crud.create_job(db_session, job)
-
-        for i in range(3):
-            model = RegisteredModel(
-                id=str(uuid.uuid4()),
-                name=f"model-{job.id[:8]}-{i}",
-                job_id=job.id,
-                version=1,
-                created_at=utc_now(),
-            )
-            await crud.create_registered_model(db_session, model)
-
-        deleted = await crud.delete_registered_models_for_job(db_session, job.id)
-        assert deleted == 3
-
-        models = await crud.get_registered_models(db_session)
-        assert not any(m.job_id == job.id for m in models)
-
-    @pytest.mark.asyncio
-    async def test_returns_zero_when_no_models(self, db_session, make_job):
-        job = make_job()
-        await crud.create_job(db_session, job)
-
-        deleted = await crud.delete_registered_models_for_job(db_session, job.id)
         assert deleted == 0

@@ -181,7 +181,6 @@ When neither env var is set, defaults to: `/domino/datasets/local`, `/mnt/data`,
 
 | # | Method | Endpoint | Purpose | Source File |
 |---|--------|----------|---------|-------------|
-| 1 | GET | `http://localhost:8899/access-token` | Acquire ephemeral Domino access token | `domino_model_api.py` |
 | 2 | GET | `/v4/projects/{projectId}/settings` | Resolve default environment ID | `domino_model_api.py` |
 | 3 | GET | `/api/datasetrw/v1/datasets/{datasetId}` | Get dataset metadata | `dataset_manager.py` |
 

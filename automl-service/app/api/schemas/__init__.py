@@ -12,11 +12,6 @@ from app.api.schemas.dataset import (
     DatasetPreviewResponse,
     DatasetSchemaResponse,
 )
-from app.api.schemas.model import (
-    RegisteredModelResponse,
-    ModelVersionResponse,
-)
-
 __all__ = [
     "JobCreateRequest",
     "JobResponse",
@@ -26,6 +21,4 @@ __all__ = [
     "DatasetResponse",
     "DatasetPreviewResponse",
     "DatasetSchemaResponse",
-    "RegisteredModelResponse",
-    "ModelVersionResponse",
 ]

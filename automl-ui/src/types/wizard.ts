@@ -25,8 +25,6 @@ export interface TrainingConfig {
   experimentName?: string
   advancedConfig?: AdvancedAutoGluonConfig
   timeseriesConfig?: TimeSeriesAdvancedConfig
-  autoRegister?: boolean
-  registerName?: string
 }
 
 export interface WizardState {
