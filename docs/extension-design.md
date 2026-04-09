@@ -94,7 +94,7 @@ Dockerfile               Dockerfile layer the extension's/training job's/EDA job
 **File structure** — 
 
 | Layer | Purpose |
-|-------|-------|---------|
+|-------|---------|
 | `src/pages/` | Dashboard, NewJob wizard, JobDetail, EDA Analysis |
 | `src/components/` | Common UI, wizard steps, diagnostics, charts, EDA |
 | `src/hooks/` | Data fetching (jobs, datasets, models, diagnostics, profiling, progress) |
@@ -115,7 +115,7 @@ Dockerfile               Dockerfile layer the extension's/training job's/EDA job
 **File structure** — 
 
 | Layer | Purpose |
-|-------|-------|---------|
+|-------|---------|
 | `app/api/routes/` | REST endpoints + WebSocket |
 | `app/api/schemas/` | Pydantic request/response models |
 | `app/core/` | Predictions, diagnostics, export, profiling, MLflow, Domino integration |
