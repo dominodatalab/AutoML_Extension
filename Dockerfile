@@ -19,6 +19,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 ENV DOMINO_USER=$DUSER
 ENV DOMINO_GROUP=$DGROUP
 ENV MLFLOW_VERSION=3.2.0
+ENV DATABASE_URL=sqlite:////mnt/data/AutoML_Extension/automl.db
 
 # Set Python environment variables
 ENV PYTHONUNBUFFERED=1 \
