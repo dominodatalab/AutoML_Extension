@@ -109,6 +109,23 @@ class TestCreateModelApiFromRegistry:
         assert isinstance(body.version.source.registered_model_version, int)
         assert body.version.source.registered_model_version == 5
 
+    def test_status_200_with_no_parsed_falls_back_to_content(self):
+        manager = _make_manager()
+        mock_response = MagicMock()
+        mock_response.parsed = None
+        mock_response.status_code = 200
+        mock_response.content = b'{"id": "api-from-200"}'
+        with patch("app.core.domino_model_api.create_model_api.sync_detailed", return_value=mock_response), \
+             patch("app.core.domino_model_api.get_domino_public_api_client_sync"):
+            result = manager.create_model_api_from_registry(
+                name="my-api",
+                registered_model_name="automlapp-model",
+                registered_model_version=1,
+                environment_id="env-123",
+            )
+        assert result["success"] is True
+        assert result["data"]["id"] == "api-from-200"
+
     def test_failed_response_returns_error(self):
         manager = _make_manager()
         mock_response = MagicMock()

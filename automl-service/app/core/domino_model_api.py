@@ -1,5 +1,6 @@
 """Domino Model API client for managing model deployments."""
 
+import json
 import os
 import logging
 from functools import lru_cache
@@ -84,6 +85,10 @@ class ModelAPIManager:
             return {"success": False, "error": str(e)}
 
         if response.parsed is None:
+            # The generated client only parses 201; handle 200 as well since Domino
+            # returns either status code for a successful creation.
+            if response.status_code in (200, 201):
+                return {"success": True, "data": {"id": json.loads(response.content).get("id")}}
             return {"success": False, "error": f"Model API creation failed with status {response.status_code}"}
 
         return {"success": True, "data": {"id": response.parsed.id}}
