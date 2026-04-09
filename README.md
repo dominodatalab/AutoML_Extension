@@ -2,56 +2,9 @@
 
 A full-stack AutoML platform built on [AutoGluon](https://auto.gluon.ai/) and [Domino Data Lab](https://www.dominodatalab.com/). Provides a web UI for training, evaluating, and deploying ML models across tabular and time series data types.
 
-## Architecture
+## Architecture & Design
 
-```
-automl-service/          FastAPI backend (Python 3.11, AutoGluon 1.5, MLflow)
-automl-ui/               React frontend (TypeScript, Vite, Tailwind CSS)
-docs/                    Documentation and design references
-style-guide/             Domino design system reference
-app.sh                   Combined startup script for Domino Apps
-Dockerfile               Container build for Domino deployment
-```
-
-### Backend (`automl-service/`)
-
-Async FastAPI with SQLAlchemy ORM, AutoGluon ML, and MLflow tracking.
-
-| Layer | Purpose |
-|-------|---------|
-| `app/api/routes/` | REST endpoints (107 routes) + WebSocket |
-| `app/api/schemas/` | Pydantic request/response models |
-| `app/core/` | Diagnostics, export, profiling, MLflow, Domino integration |
-| `app/core/trainers/` | Tabular and timeseries trainers |
-| `app/db/` | SQLAlchemy models, async CRUD, migrations |
-| `app/workers/` | Background training and EDA orchestration |
-
-### Frontend (`automl-ui/`)
-
-React with Zustand for UI state.
-
-| Layer | Files | Purpose |
-|-------|-------|---------|
-| `src/pages/` | Dashboard, NewJob wizard, JobDetail, EDA Analysis |
-| `src/components/` | Common UI, wizard steps, diagnostics, charts, EDA |
-| `src/hooks/` | Data fetching (jobs, datasets, models, diagnostics, profiling, progress) |
-| `src/utils/` | Formatters, notebook generator, error handling, path utils |
-| `src/api/` | Fetch-based API client with Domino endpoint mapping |
-| `src/types/` | TypeScript type definitions |
-
-## Features
-
-- **Training Wizard**: 4-step workflow (data source, model type, configuration, review) with advanced AutoGluon config (bagging, stacking, HPO, pseudo-labeling, distillation)
-- **Training Execution**: Run training as a Domino Job
-- **Model Diagnostics**: Feature importance, leaderboard, confusion matrix, ROC/PR curves, regression diagnostics, learning curves, model comparison
-- **Exploratory Data Analysis**: Interactive data profiling, column explorer, correlation matrix, data quality checks, time series profiling (ACF/PACF, stationarity, decomposition), notebook export, optional async Domino Job execution
-- **Dataset Usage**: Connect to Domino Datasets
-- **Model Export**: eployment bundle and notebook formats
-- **Model Registration**: Register trained models in the Domino Model Registry
-- **Deployment**: Deploy registered models as Domino Model APIs
-- **Experiment Tracking**: MLflow logging of per-model hyperparameters, metrics, and artifacts
-- **Real-time Progress**: WebSocket-based training progress updates
-- **Job Management**: Queue status, bulk cleanup, orphan detection
+See the [Extension Design document](./docs/extension-design.md).
 
 ## Quick Start
 
