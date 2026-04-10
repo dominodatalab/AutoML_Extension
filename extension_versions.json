@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "versions": [
     {
+      "manifestSchemaVersion": 1,
       "version": "0.0.1",
       "releaseTag": "0.0.1",
       "minDominoVersion": "6.3.0",

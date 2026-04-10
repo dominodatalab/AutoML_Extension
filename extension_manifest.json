@@ -1,4 +1,5 @@
 {
+  "manifestSchemaVersion": 1,
   "project": {                                                                                                                               
     "name": "Domino_Official_AutoML_Extension",
     "description": "Contains the app for the AutoML Extension",                                                                        
