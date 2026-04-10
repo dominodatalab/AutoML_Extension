@@ -155,7 +155,7 @@ function JobDetail() {
       )}
 
       {activeTab === 'export' && currentStatus === 'completed' && job && (
-        <ModelExportPanel jobId={job.id} jobName={job.name} projectName={job.project_name} modelType={job.model_type} problemType={job.problem_type} />
+        <ModelExportPanel jobId={job.id} modelType={job.model_type} />
       )}
 
 

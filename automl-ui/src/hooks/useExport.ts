@@ -1,18 +1,5 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import api from '../api'
-
-export interface DeploymentPackageRequest {
-  job_id: string
-  model_type?: string
-  output_dir: string
-}
-
-export interface DeploymentPackageResponse {
-  success: boolean
-  output_dir?: string
-  files: string[]
-  error?: string
-}
 
 export interface LearningCurvesRequest {
   job_id: string
@@ -28,11 +15,10 @@ export interface LearningCurvesResponse {
   }>
   fit_summary?: string
   fit_summary_raw?: unknown
-  training_history?: Record<string, unknown>  // Legacy support
-  chart?: string  // Deprecated
+  training_history?: Record<string, unknown>
+  chart?: string
   error?: string
 }
-
 
 export interface ExportFormat {
   supported: boolean
@@ -45,22 +31,6 @@ export interface SupportedFormats {
   timeseries: Record<string, ExportFormat>
 }
 
-// Hook for creating deployment package
-export function useExportDeployment() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async (request: DeploymentPackageRequest) => {
-      const { data } = await api.post<DeploymentPackageResponse>('export/deployment', request)
-      return data
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['exports'] })
-    },
-  })
-}
-
-// Hook for getting learning curves using job_id
 export function useLearningCurves(jobId: string, modelType?: string, enabled = true) {
   return useQuery({
     queryKey: ['learningcurves', jobId, modelType],
@@ -76,8 +46,6 @@ export function useLearningCurves(jobId: string, modelType?: string, enabled = t
   })
 }
 
-
-// Hook for getting supported export formats
 export function useSupportedFormats() {
   return useQuery({
     queryKey: ['exportformats'],
@@ -89,41 +57,10 @@ export function useSupportedFormats() {
   })
 }
 
-// Hook for exporting notebook
 interface NotebookExportResponse {
   success: boolean
   filename: string
   notebook: Record<string, unknown>
-}
-
-// Hook for downloading deployment package as zip (binary response)
-export function useDownloadDeploymentPackage() {
-  return useMutation({
-    mutationFn: async (outputDir: string) => {
-      const { getBasePath } = await import('../utils/basePath')
-      const basePath = getBasePath()
-      const url = `${basePath}/svc/v1/export/deployment/download`
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ output_dir: outputDir }),
-      })
-
-      if (!response.ok) {
-        const errText = await response.text().catch(() => response.statusText)
-        throw new Error(errText || 'Download failed')
-      }
-
-      const blob = await response.blob()
-      const disposition = response.headers.get('Content-Disposition') || ''
-      const match = disposition.match(/filename="?([^"]+)"?/)
-      const filename = match?.[1] || 'deployment_package.zip'
-
-      return { blob, filename }
-    },
-  })
 }
 
 export function useExportNotebook() {
