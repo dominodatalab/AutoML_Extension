@@ -8,9 +8,10 @@
 
 LABEL maintainer="Domino Data Lab"
 LABEL description="AutoGluon AutoML environment for Domino Data Lab"
-LABEL version="v1.0.0"
 
 ARG EXTENSION_VERSION=${EXTENSION_VERSION:-main}
+LABEL version=$EXTENSION_VERSION
+
 ARG GITHUB_ORG=dominodatalab
 ARG DUSER=ubuntu
 ARG DGROUP=ubuntu
