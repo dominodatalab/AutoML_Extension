@@ -9,9 +9,9 @@ from fastapi import HTTPException
 from sqlalchemy import update as sa_update
 
 from app.core.domino_model_api import get_domino_model_api
-from app.db import crud
 from app.db.models import Job as JobModel, JobStatus
 from app.dependencies import get_db_session
+from app.services.job_service import get_job_or_404
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ async def deploy_from_job(
 ) -> dict:
     """Create a Domino Model API from a job's registered model."""
     async with get_db_session() as db:
-        job = await crud.get_job(db, job_id)
+        job = await get_job_or_404(db, job_id)
         if not job:
             raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
 
