@@ -76,7 +76,6 @@ class AutoGluonRunner:
                 self.settings.models_path,
                 f"job_{job_id}_{timestamp}",
             )
-            os.makedirs(model_path, exist_ok=True)
 
             # Use default advanced config if not provided
             if advanced_config is None:
