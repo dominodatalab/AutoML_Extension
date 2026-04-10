@@ -1,0 +1,52 @@
+{
+  "project": {                                                                                                                               
+    "name": "Domino_Official_AutoML_Extension",
+    "description": "Contains the app for the AutoML Extension",                                                                        
+    "visibility": "Private",
+    "isRestricted": false
+  },
+  "app": {
+    "computeEnvironment": {
+      "type": "custom",
+      "customEnvironment": {
+        "dockerfilePath": "ExtensionComputeEnvDockerfile",
+        "baseImage": "python:3.10-slim-bullseye",
+        "autoCompatibleWithDomino": false,
+        "visibility": "global",
+        "buildArgs": {
+          "EXTENSION_VERSION": "v1.0.0"
+        }
+      }
+    },
+    "appName": "Domino AutoML",
+    "appDescription": "AutoGluon-powered AutoML for tabular, time series, and multimodal data.",
+    "appVersionDescription": "Domino AutoML v1.0.0",
+    "vanityUrl": "automl-extension",
+    "entryScript": "app_prod.sh",
+    "visibility": "public",
+    "enableDeepLinking": true,
+    "discoverable": true,
+    "mountDatasets": false,
+    "mountNetAppVolumes": false,
+    "externalVolumeMounts": [],
+    "hardwareTierIdSuggestion": "small-k8s",
+    "autoscalingSpec": {
+      "enabled": false
+    }
+  },
+  "extension": {
+    "name": "AutoML",
+    "description": "AutoGluon-powered AutoML for tabular, time series, and multimodal data.",
+    "enabled": true,
+    "uiMountPointTypeConfigs": {
+      "projectSidebar": {
+        "enabled": true,
+        "allProjects": true,
+        "urlConfig": {
+          "route": null,
+          "contextualQueryParams": ["projectId"]
+        }
+      }
+    }
+  }
+}

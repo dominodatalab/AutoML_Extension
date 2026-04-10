@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "versions": [
+    {
+      "version": "0.0.1",
+      "releaseTag": "0.0.1",
+      "minDominoVersion": "6.3.0",
+      "testedWithDominoVersions": ["6.3.0"]
+    }
+  ]
+}
