@@ -30,7 +30,7 @@ The AutoML Extension is a full-stack web application that runs as a Domino App. 
   5. Review Data
 ```
 
-1. **Select data** — browse your Domino Datasets
+1. **Select data** — browse your Domino Datasets. Only the latest files from the Dataset (in the scratchspace) are available for selection.
 2. **Train** — configure target column, problem type, and time budget; AutoGluon trains and ensembles models
 3. **Evaluate** — leaderboard, feature importance, SHAP explanations, residual plots
 4. **Deploy / Export** — three paths to production:
