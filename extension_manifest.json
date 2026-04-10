@@ -9,18 +9,18 @@
     "computeEnvironment": {
       "type": "custom",
       "customEnvironment": {
-        "dockerfilePath": "ExtensionComputeEnvDockerfile",
+        "dockerfilePath": "Dockerfile",
         "baseImage": "python:3.10-slim-bullseye",
         "autoCompatibleWithDomino": false,
         "visibility": "global",
         "buildArgs": {
-          "EXTENSION_VERSION": "v1.0.0"
+          "EXTENSION_VERSION": "0.0.1"
         }
       }
     },
-    "appName": "Domino AutoML",
+    "appName": "Domino AutoML App",
     "appDescription": "AutoGluon-powered AutoML for tabular, time series, and multimodal data.",
-    "appVersionDescription": "Domino AutoML v1.0.0",
+    "appVersionDescription": "Domino AutoML 0.0.1",
     "vanityUrl": "automl-extension",
     "entryScript": "app_prod.sh",
     "visibility": "public",
