@@ -27,7 +27,10 @@ class DataProfiler(BaseProfiler):
         sampling_strategy: str = "random",
         stratify_column: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Generate a comprehensive profile of a data file."""
+        """Generate a comprehensive profile of a data file.
+
+        dataset_id may be omitted when the profiler is running in a Domino Job, but MUST
+        be provided when running in the main application"""
         df = await self._load_dataframe(file_path=file_path, dataset_id=dataset_id)
         return self.profile_dataframe(df, sample_size, sampling_strategy, stratify_column)
 

@@ -30,6 +30,10 @@ def _patch_dataset_fetch(monkeypatch, file_path: str):
         "app.core.data_profiler.dataset_file_bytes.fetch",
         fake_fetch,
     )
+    monkeypatch.setattr(
+        "app.core.ts_profiler.dataset_file_bytes.fetch",
+        fake_fetch,
+    )
 
 
 def _patch_dataset_fetch_not_found(monkeypatch):
@@ -39,6 +43,10 @@ def _patch_dataset_fetch_not_found(monkeypatch):
 
     monkeypatch.setattr(
         "app.core.data_profiler.dataset_file_bytes.fetch",
+        fake_fetch,
+    )
+    monkeypatch.setattr(
+        "app.core.ts_profiler.dataset_file_bytes.fetch",
         fake_fetch,
     )
 
@@ -144,17 +152,31 @@ async def test_profile_missing_file_path(app_client):
     assert response.status_code == 422
 
 
+@pytest.mark.asyncio
+async def test_profile_missing_dataset_id(app_client):
+    """POST /svc/v1/profiling/profile without dataset_id returns 422."""
+    response = await app_client.post(
+        "/svc/v1/profiling/profile",
+        json={"file_path": "/tmp/data.csv"},
+    )
+
+    assert response.status_code == 422
+
+
 # ---------------------------------------------------------------------------
 # POST /svc/v1/profiling/profile/timeseries — time series profiling
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_profile_timeseries_csv(app_client, timeseries_csv):
+async def test_profile_timeseries_csv(app_client, timeseries_csv, monkeypatch):
     """POST /svc/v1/profiling/profile/timeseries returns a time series profile."""
+    _patch_dataset_fetch(monkeypatch, timeseries_csv)
+
     response = await app_client.post(
         "/svc/v1/profiling/profile/timeseries",
         json={
+            "dataset_id": "test-dataset-id",
             "file_path": timeseries_csv,
             "time_column": "timestamp",
             "target_column": "value",
@@ -178,11 +200,14 @@ async def test_profile_timeseries_csv(app_client, timeseries_csv):
 
 
 @pytest.mark.asyncio
-async def test_profile_timeseries_without_id_column(app_client, timeseries_csv):
+async def test_profile_timeseries_without_id_column(app_client, timeseries_csv, monkeypatch):
     """POST /svc/v1/profiling/profile/timeseries works without id_column (single series)."""
+    _patch_dataset_fetch(monkeypatch, timeseries_csv)
+
     response = await app_client.post(
         "/svc/v1/profiling/profile/timeseries",
         json={
+            "dataset_id": "test-dataset-id",
             "file_path": timeseries_csv,
             "time_column": "timestamp",
             "target_column": "value",
@@ -201,6 +226,7 @@ async def test_profile_timeseries_missing_required_fields(app_client, timeseries
     response = await app_client.post(
         "/svc/v1/profiling/profile/timeseries",
         json={
+            "dataset_id": "test-dataset-id",
             "file_path": timeseries_csv,
             # missing time_column and target_column
         },
@@ -210,11 +236,14 @@ async def test_profile_timeseries_missing_required_fields(app_client, timeseries
 
 
 @pytest.mark.asyncio
-async def test_profile_timeseries_nonexistent_file(app_client):
+async def test_profile_timeseries_nonexistent_file(app_client, monkeypatch):
     """POST /svc/v1/profiling/profile/timeseries with nonexistent file returns 404."""
+    _patch_dataset_fetch_not_found(monkeypatch)
+
     response = await app_client.post(
         "/svc/v1/profiling/profile/timeseries",
         json={
+            "dataset_id": "test-dataset-id",
             "file_path": "/nonexistent/path/to/ts.csv",
             "time_column": "timestamp",
             "target_column": "value",
@@ -222,6 +251,21 @@ async def test_profile_timeseries_nonexistent_file(app_client):
     )
 
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_profile_timeseries_missing_dataset_id(app_client, timeseries_csv):
+    """POST /svc/v1/profiling/profile/timeseries without dataset_id returns 422."""
+    response = await app_client.post(
+        "/svc/v1/profiling/profile/timeseries",
+        json={
+            "file_path": timeseries_csv,
+            "time_column": "timestamp",
+            "target_column": "value",
+        },
+    )
+
+    assert response.status_code == 422
 
 
 # ---------------------------------------------------------------------------

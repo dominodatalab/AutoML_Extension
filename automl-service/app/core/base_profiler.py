@@ -20,7 +20,10 @@ class BaseProfiler(ABC):
         dataset_id: Optional[str] = None,
         parse_dates: Optional[list[str]] = None,
     ) -> pd.DataFrame:
-        """Load a supported tabular file from a dataset or local filesystem."""
+        """Load a supported tabular file from a dataset or local filesystem.
+
+        dataset_id may be omitted when the profiler is running in a Domino Job, but MUST
+        be provided when running in the main application"""
         content: str | BytesIO = file_path
         normalized_file_path = file_path.lower()
 
