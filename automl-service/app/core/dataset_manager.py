@@ -250,24 +250,6 @@ class DominoDatasetManager:
 
     async def get_dataset(self, dataset_id: str) -> Optional[DatasetResponse]:
         """Get dataset details using REST API."""
-        if dataset_id.startswith("local:"):
-            # Local dataset
-            file_name = dataset_id.replace("local:", "")
-            file_path = os.path.join(self.settings.datasets_path, file_name)
-
-            if os.path.exists(file_path):
-                stat = os.stat(file_path)
-                return DatasetResponse(
-                    id=dataset_id,
-                    name=file_name,
-                    path=file_path,
-                    description="Local dataset",
-                    size_bytes=stat.st_size,
-                    file_count=1,
-                    files=[DatasetFileResponse(name=file_name, path=file_path, size=stat.st_size)],
-                )
-            return None
-
         # Domino dataset - use REST API
         if self.settings.is_domino_environment:
             try:
@@ -298,79 +280,6 @@ class DominoDatasetManager:
                 logger.error(f"Failed to get dataset details: {e}")
 
         return None
-
-    async def get_dataset_file_path(
-        self,
-        dataset_id: str,
-        file_name: Optional[str] = None,
-    ) -> str:
-        """Get the file path for a dataset file."""
-        if dataset_id.startswith("local:"):
-            file_name = dataset_id.replace("local:", "")
-            return os.path.join(self.settings.datasets_path, file_name)
-
-        if dataset_id.startswith("domino:"):
-            # Domino dataset from mounted dataset root
-            dataset_name = dataset_id.replace("domino:", "")
-            for mount_path in self._resolve_dataset_mount_paths():
-                dataset_path = os.path.join(mount_path, dataset_name)
-                if file_name:
-                    candidate = os.path.join(dataset_path, file_name)
-                    if os.path.exists(candidate):
-                        return candidate
-                if os.path.isfile(dataset_path):
-                    return dataset_path
-                if os.path.isdir(dataset_path):
-                    first_supported = self._first_supported_file(dataset_path)
-                    if first_supported:
-                        return first_supported
-            raise FileNotFoundError(
-                f"No data files found in dataset: {dataset_id} across mount roots {self._resolve_dataset_mount_paths()}"
-            )
-
-        # For other Domino datasets, files are mounted under the dataset root
-        dataset = await self.get_dataset(dataset_id)
-        if dataset:
-            candidate_paths: list[str] = []
-            if dataset.path:
-                candidate_paths.append(dataset.path)
-            for mount_path in self._resolve_dataset_mount_paths():
-                candidate_paths.append(os.path.join(mount_path, dataset.name))
-
-            # Preserve order and uniqueness.
-            deduped_paths: list[str] = []
-            seen_paths: set[str] = set()
-            for candidate in candidate_paths:
-                if not candidate:
-                    continue
-                normalized = os.path.abspath(candidate)
-                if normalized in seen_paths:
-                    continue
-                deduped_paths.append(normalized)
-                seen_paths.add(normalized)
-
-            for dataset_path in deduped_paths:
-                if file_name:
-                    named_file_path = os.path.join(dataset_path, file_name)
-                    if os.path.exists(named_file_path):
-                        return named_file_path
-                if os.path.isfile(dataset_path) and self._is_supported_file(dataset_path):
-                    return dataset_path
-                if os.path.isdir(dataset_path):
-                    first_supported = self._first_supported_file(dataset_path)
-                    if first_supported:
-                        return first_supported
-
-            for file_entry in dataset.files:
-                if file_name and file_entry.name != file_name:
-                    continue
-                if file_entry.path and os.path.exists(file_entry.path):
-                    return file_entry.path
-
-            if dataset.path:
-                return dataset.path
-
-        raise FileNotFoundError(f"Dataset not found: {dataset_id}")
 
     async def preview_dataset(
         self,
