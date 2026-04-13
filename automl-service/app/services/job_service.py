@@ -66,7 +66,7 @@ _CANONICAL_GIT_SERVICE_PROVIDER_VALUES = {
 async def require_user_owns_local_job(db, job_id: str):
     """Return the job when the current viewer may access it."""
     username = get_viewing_user_name()
-    job = await get_job_or_404(db, job_id, username)
+    job = await get_job_or_404(db, job_id)
 
     if job.owner != username:
         if not current_user_can_modify_storage(project_id=job.project_id):
@@ -407,8 +407,7 @@ async def get_job_logs(
     limit: int = 1000,
 ) -> list:
     """Return logs for a job after validating job existence."""
-    owner_user_name = get_viewing_user_name()
-    job = await get_job_or_404(db, job_id, owner_user_name)
+    job = await get_job_or_404(db, job_id)
     logs = []
     if job.domino_job_id is not None:
         logs = await _fetch_domino_job_logs(job_id=job.id, domino_job_id=job.domino_job_id, limit=limit)
@@ -626,7 +625,7 @@ def _fetch_domino_job_or_throw(domino_job_id: str) -> JobEnvelopeV1 | None:
 
     return job
 
-async def get_job_or_404(db: AsyncSession, job_id: str, owner_user_name: str) -> Job:
+async def get_job_or_404(db: AsyncSession, job_id: str) -> Job:
     """Get job by id if user may retrieve the job"""
     job = await crud.get_job(db, job_id)
     if not job:
@@ -1019,8 +1018,7 @@ def normalize_job_leaderboard(job: Job) -> Job:
 
 async def get_job_response(db: AsyncSession, job_id: str) -> Job:
     """Get job payload normalized for API response compatibility."""
-    owner_user_name = get_viewing_user_name()
-    job = await get_job_or_404(db, job_id, owner_user_name)
+    job = await get_job_or_404(db, job_id)
     job = await _sync_domino_job_state(db, job, sync_terminal_metadata=True)
     job = await _ensure_mlflow_results(db, job)
     job = normalize_job_leaderboard(job)
@@ -1040,8 +1038,7 @@ def extract_metrics_leaderboard(job: Job) -> Optional[list[dict]]:
 
 async def get_job_status_response(db: AsyncSession, job_id: str) -> JobStatusResponse:
     """Build status response payload for a job."""
-    owner_user_name = get_viewing_user_name()
-    job = await get_job_or_404(db, job_id, owner_user_name)
+    job = await get_job_or_404(db, job_id)
     job = await _sync_domino_job_state(db, job, sync_terminal_metadata=True)
     return JobStatusResponse(
         id=job.id,
@@ -1055,8 +1052,7 @@ async def get_job_status_response(db: AsyncSession, job_id: str) -> JobStatusRes
 
 async def get_job_metrics_response(db: AsyncSession, job_id: str) -> JobMetricsResponse:
     """Build metrics response payload for a job."""
-    owner_user_name = get_viewing_user_name()
-    job = await get_job_or_404(db, job_id, owner_user_name)
+    job = await get_job_or_404(db, job_id)
     job = await _sync_domino_job_state(db, job, sync_terminal_metadata=True)
     job = await _ensure_mlflow_results(db, job)
     return JobMetricsResponse(
@@ -1068,8 +1064,7 @@ async def get_job_metrics_response(db: AsyncSession, job_id: str) -> JobMetricsR
 
 async def get_job_progress_response(db: AsyncSession, job_id: str)  -> JobProgressResponse:
     """Build progress response payload for a job."""
-    owner_user_name = get_viewing_user_name()
-    job = await get_job_or_404(db, job_id, owner_user_name)
+    job = await get_job_or_404(db, job_id)
     job = await _sync_domino_job_state(db, job, sync_terminal_metadata=True)
     return JobProgressResponse(
         id=job.id,
@@ -1084,8 +1079,7 @@ async def get_job_progress_response(db: AsyncSession, job_id: str)  -> JobProgre
 
 async def cancel_job(db: AsyncSession, job_id: str) -> dict:
     """Cancel a pending/running job and queue task."""
-    owner_user_name = get_viewing_user_name()
-    job = await get_job_or_404(db, job_id, owner_user_name)
+    job = await get_job_or_404(db, job_id)
 
     if job.status not in [JobStatus.PENDING, JobStatus.RUNNING]:
         raise HTTPException(
@@ -1125,8 +1119,7 @@ async def delete_job(db: AsyncSession, job_id: str) -> dict:
     from app.core.cleanup_service import get_cleanup_service
     await require_user_owns_local_job(db, job_id)
 
-    owner_user_name = get_viewing_user_name()
-    job = await get_job_or_404(db, job_id, owner_user_name)
+    job = await get_job_or_404(db, job_id)
     cleanup_result = await get_cleanup_service().delete_job_artifacts(job, db)
     await crud.delete_job(db, job_id)
 

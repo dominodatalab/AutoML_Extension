@@ -354,6 +354,10 @@ def test_resolve_eda_job_result(tmp_path):
     request_id = "myrequestid"
     experiment_name = "eda_exp_name" + str(uuid4())
     expected_eda_result = {"cat": "dog"}
+    tracking_uri = str(tmp_path / "mlruns")
+
+    # Use an isolated local MLflow file store
+    mlflow.set_tracking_uri(tracking_uri)
 
     # Test setup: log artifact to an experiment run
     mlflow.set_experiment(experiment_name)
