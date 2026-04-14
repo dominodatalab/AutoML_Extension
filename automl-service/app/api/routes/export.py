@@ -217,14 +217,7 @@ async def export_notebook(
     db: AsyncSession = Depends(get_db)
 ):
     """Export job configuration as a Jupyter notebook."""
-<<<<<<< HEAD
     job = await get_job_or_404(db, request.job_id)
-=======
-    # Get job details
-    job = await get_job_or_404(db, request.job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Job not found: {request.job_id}")
->>>>>>> 871fd4d (Refactor to use get job or 404, and add test)
 
     model_type = _normalize_model_type(job.model_type)
     resolved_data_path = await _resolve_notebook_data_path(job)
