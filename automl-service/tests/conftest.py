@@ -80,6 +80,14 @@ def pytest_configure(config):
     config.option.htmlpath = str(report_dir / filename)
 
 
+@pytest.fixture(autouse=True)
+def _use_local_mlflow_tracking_uri(monkeypatch):
+    """Keep tests on the repo-local MLflow store instead of inherited remote URIs."""
+    tracking_uri = Path(__file__).resolve().parent.parent / "mlruns"
+    tracking_uri.mkdir(exist_ok=True)
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", str(tracking_uri))
+
+
 # ---------------------------------------------------------------------------
 # Auto-skip markers when optional packages are absent
 # ---------------------------------------------------------------------------
