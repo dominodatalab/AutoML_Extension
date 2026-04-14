@@ -35,6 +35,8 @@ async def get_job_paths(
     Raises HTTPException(500) if model_path is not an MLflow URI or download fails.
     """
     job = await get_job_or_404(db, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
 
     if not job.model_path:
         raise HTTPException(

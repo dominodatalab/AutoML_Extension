@@ -33,11 +33,12 @@ def _make_success_response(model_id: str, model_version: int = 3):
 
 
 @pytest.mark.asyncio
-async def test_deploy_from_job_happy_path(app_client):
+async def test_deploy_from_job_happy_path(app_client, monkeypatch):
     """
     Verifies that the helper that reaches out to domino to get jobs is called and that the domino api
     for creating model apis is called
     """
+    monkeypatch.setenv("DOMINO_ENVIRONMENT_ID", "fakeenvid")
     set_request_auth_header("Bearer test-token")
     job_id = "8771df7b-5550-4b6e-bea9-838f9fad040b"
     project_id = "69c66e4d729d187bd89d71f4"
@@ -54,4 +55,5 @@ async def test_deploy_from_job_happy_path(app_client):
         set_request_auth_header(None)
     body = response.json()
 
+    assert body['success'], f"Body was not successful, {body}"
     assert response.status_code == 200
