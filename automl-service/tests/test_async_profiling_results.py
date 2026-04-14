@@ -2,6 +2,7 @@
 
 import json
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
@@ -477,6 +478,17 @@ def _patch_start_infra(monkeypatch, store: DummyStartStore, launch_result: Optio
         "app.api.routes.profiling.get_dataset_manager",
         lambda: MagicMock(get_dataset_path=AsyncMock(return_value="/domino/datasets/ds-123")),
     )
+
+    @asynccontextmanager
+    async def fake_db_session():
+        yield object()
+
+    monkeypatch.setattr("app.api.routes.profiling.get_db_session", fake_db_session)
+    monkeypatch.setattr(
+        "app.api.routes.profiling.get_job_or_404",
+        AsyncMock(return_value=SimpleNamespace(id="job-abc", project_id="proj-123")),
+    )
+
     if launch_result is not None:
         launcher = MagicMock(start_eda_job=AsyncMock(return_value=launch_result))
         monkeypatch.setattr("app.api.routes.profiling.get_domino_job_launcher", lambda: launcher)

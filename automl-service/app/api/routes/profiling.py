@@ -23,7 +23,9 @@ from app.core.ts_profiler import get_ts_profiler
 from app.api.error_handler import handle_errors
 from app.config import get_settings
 from app.core.authorization import require_domino_job_start
+from app.dependencies import get_db_session
 from app.services.dataset_service import get_dataset_manager
+from app.services.job_service import get_job_or_404
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -42,9 +44,9 @@ _TERMINAL_EDA_JOB_STATUSES = {
 
 class ProfileRequest(BaseModel):
     """Request for data profiling."""
-    dataset_id: Optional[str] = Field(
-        None,
-        description="Optional dataset ID, needed for Domino Jobs",
+    dataset_id: str = Field(
+        ...,
+        description="Dataset ID for the file being profiled",
     )
     file_path: str = Field(..., description="Path to the data file")
     sample_size: int = Field(50000, description="Max rows to sample for profiling")
@@ -167,9 +169,9 @@ async def suggest_target_column(request: ProfileRequest):
 
 class QuickProfileRequest(BaseModel):
     """Request for quick data profiling."""
-    dataset_id: Optional[str] = Field(
-        None,
-        description="Optional dataset ID, needed for Domino Jobs",
+    dataset_id: str = Field(
+        ...,
+        description="Dataset ID for the file being profiled",
     )
     file_path: str = Field(..., description="Path to the data file")
 
@@ -211,9 +213,9 @@ async def quick_profile(request: QuickProfileRequest):
 
 class ColumnProfileRequest(BaseModel):
     """Request for single-column profiling."""
-    dataset_id: Optional[str] = Field(
-        None,
-        description="Optional dataset ID, needed for Domino Jobs",
+    dataset_id: str = Field(
+        ...,
+        description="Dataset ID for the file being profiled",
     )
     file_path: str = Field(..., description="Path to the data file")
     column_name: str = Field(..., description="Name of the column to profile")
@@ -370,9 +372,9 @@ async def get_available_presets():
 
 class TimeSeriesProfileRequest(BaseModel):
     """Request for time series profiling."""
-    dataset_id: Optional[str] = Field(
-        None,
-        description="Optional dataset ID, needed for Domino Jobs",
+    dataset_id: str = Field(
+        ...,
+        description="Dataset ID for the file being profiled",
     )
     file_path: str = Field(..., description="Path to the data file")
     time_column: str = Field(..., description="Name of the datetime column")
@@ -404,7 +406,7 @@ class AsyncProfileStartRequest(BaseModel):
     job_id: str = Field(..., description="Training job ID this EDA is associated with")
     force_restart: bool = Field(False, description="If True, discard any existing result and launch a new Domino job")
     mode: Literal["tabular", "timeseries"] = Field("tabular")
-    dataset_id: str = Field(..., description="Optional dataset ID, needed for Domino Jobs")
+    dataset_id: str = Field(..., description="Dataset ID for the file being profiled")
     file_path: str = Field(..., description="Path to the data file")
     sample_size: int = Field(50000, description="Max rows to sample for profiling")
     sampling_strategy: str = Field(

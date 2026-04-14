@@ -106,7 +106,7 @@ class TestDeployFromJob:
         db.execute = AsyncMock()
 
         with patch("app.services.deployment_service.get_db_session", session_cm), \
-             patch("app.services.deployment_service.crud.get_job", AsyncMock(return_value=None)):
+             patch("app.services.deployment_service.get_job_or_404", AsyncMock(return_value=None)):
             with pytest.raises(HTTPException) as exc_info:
                 await deploy_from_job("nonexistent-job-id")
             assert exc_info.value.status_code == 404
@@ -117,7 +117,7 @@ class TestDeployFromJob:
         session_cm, _ = _make_db_session(job)
 
         with patch("app.services.deployment_service.get_db_session", session_cm), \
-             patch("app.services.deployment_service.crud.get_job", AsyncMock(return_value=job)):
+             patch("app.services.deployment_service.get_job_or_404", AsyncMock(return_value=job)):
             with pytest.raises(HTTPException) as exc_info:
                 await deploy_from_job("job-id")
             assert exc_info.value.status_code == 400
@@ -129,7 +129,7 @@ class TestDeployFromJob:
         session_cm, _ = _make_db_session(job)
 
         with patch("app.services.deployment_service.get_db_session", session_cm), \
-             patch("app.services.deployment_service.crud.get_job", AsyncMock(return_value=job)):
+             patch("app.services.deployment_service.get_job_or_404", AsyncMock(return_value=job)):
             with pytest.raises(HTTPException) as exc_info:
                 await deploy_from_job("job-id")
             assert exc_info.value.status_code == 400
@@ -141,7 +141,7 @@ class TestDeployFromJob:
         session_cm, _ = _make_db_session(job)
 
         with patch("app.services.deployment_service.get_db_session", session_cm), \
-             patch("app.services.deployment_service.crud.get_job", AsyncMock(return_value=job)):
+             patch("app.services.deployment_service.get_job_or_404", AsyncMock(return_value=job)):
             with pytest.raises(HTTPException) as exc_info:
                 await deploy_from_job("job-id")
             assert exc_info.value.status_code == 400
@@ -156,7 +156,7 @@ class TestDeployFromJob:
         )
 
         with patch("app.services.deployment_service.get_db_session", session_cm), \
-             patch("app.services.deployment_service.crud.get_job", AsyncMock(return_value=job)), \
+             patch("app.services.deployment_service.get_job_or_404", AsyncMock(return_value=job)), \
              patch("app.services.deployment_service.get_domino_model_api", return_value=mock_api), \
              patch.dict("os.environ", {"DOMINO_ENVIRONMENT_ID": "env-123"}):
             with pytest.raises(HTTPException) as exc_info:
@@ -174,7 +174,7 @@ class TestDeployFromJob:
         )
 
         with patch("app.services.deployment_service.get_db_session", session_cm), \
-             patch("app.services.deployment_service.crud.get_job", AsyncMock(return_value=job)), \
+             patch("app.services.deployment_service.get_job_or_404", AsyncMock(return_value=job)), \
              patch("app.services.deployment_service.get_domino_model_api", return_value=mock_api), \
              patch.dict("os.environ", {"DOMINO_ENVIRONMENT_ID": "env-123"}):
             result = await deploy_from_job("job-id", model_name="my-api", replicas=2)
@@ -201,7 +201,7 @@ class TestDeployFromJob:
         )
 
         with patch("app.services.deployment_service.get_db_session", session_cm), \
-             patch("app.services.deployment_service.crud.get_job", AsyncMock(return_value=job)), \
+             patch("app.services.deployment_service.get_job_or_404", AsyncMock(return_value=job)), \
              patch("app.services.deployment_service.get_domino_model_api", return_value=mock_api), \
              patch.dict("os.environ", {"DOMINO_ENVIRONMENT_ID": "env-123"}):
             await deploy_from_job("job-id")
@@ -219,7 +219,7 @@ class TestDeployFromJob:
         )
 
         with patch("app.services.deployment_service.get_db_session", session_cm), \
-             patch("app.services.deployment_service.crud.get_job", AsyncMock(return_value=job)), \
+             patch("app.services.deployment_service.get_job_or_404", AsyncMock(return_value=job)), \
              patch("app.services.deployment_service.get_domino_model_api", return_value=mock_api), \
              patch.dict("os.environ", {"DOMINO_ENVIRONMENT_ID": "my-env-id"}):
             await deploy_from_job("job-id")

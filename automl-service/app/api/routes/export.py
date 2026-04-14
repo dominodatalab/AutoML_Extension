@@ -17,9 +17,9 @@ from app.core.model_diagnostics import get_model_diagnostics
 from app.core.dataset_manager import DominoDatasetManager
 from app.core.notebook_generator import generate_tabular_notebook, generate_timeseries_notebook
 from app.dependencies import get_db
-from app.db import crud
 from app.api.utils import get_job_paths
 from app.api.error_handler import handle_errors
+from app.services.job_service import get_job_or_404
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -223,10 +223,7 @@ async def export_notebook(
     db: AsyncSession = Depends(get_db)
 ):
     """Export job configuration as a Jupyter notebook."""
-    # Get job details
-    job = await crud.get_job(db, request.job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Job not found: {request.job_id}")
+    job = await get_job_or_404(db, request.job_id)
 
     model_type = _normalize_model_type(job.model_type)
     resolved_data_path = await _resolve_notebook_data_path(job)
