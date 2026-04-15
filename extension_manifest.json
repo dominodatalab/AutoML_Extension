@@ -25,7 +25,7 @@
     "appVersionDescription": "Domino AutoML 0.0.1",
     "vanityUrl": "automl-extension",
     "entryScript": "app_prod.sh",
-    "visibility": "public",
+    "visibility": "authenticated",
     "enableDeepLinking": true,
     "discoverable": true,
     "mountDatasets": false,
