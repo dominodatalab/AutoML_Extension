@@ -4,7 +4,7 @@
     {
       "manifestSchemaVersion": 1,
       "version": "0.0.1",
-      "releaseTag": "0.0.1",
+      "releaseTag": "v0.0.1",
       "minDominoVersion": "6.3.0",
       "testedWithDominoVersions": ["6.3.0"]
     }

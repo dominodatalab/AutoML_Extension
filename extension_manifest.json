@@ -10,12 +10,13 @@
     "computeEnvironment": {
       "type": "custom",
       "customEnvironment": {
+        "name": "AutoML Extension Compute Environment",
         "dockerfilePath": "Dockerfile",
         "baseImage": "python:3.10-slim-bullseye",
         "autoCompatibleWithDomino": false,
         "visibility": "global",
         "buildArgs": {
-          "EXTENSION_VERSION": "0.0.1"
+          "EXTENSION_VERSION": "v0.0.1"
         }
       }
     },
