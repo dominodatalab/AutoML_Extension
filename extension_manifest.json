@@ -16,13 +16,14 @@
         "autoCompatibleWithDomino": false,
         "visibility": "global",
         "buildArgs": {
-          "EXTENSION_VERSION": "v0.0.4"
+          "EXTENSION_VERSION": "v0.0.5",
+          "EXTENSION_DOMINO_PROJECT_NAME": "Domino_Official_AutoML_Extension"
         }
       }
     },
     "appName": "Domino AutoML App",
     "appDescription": "AutoGluon-powered AutoML for tabular, time series, and multimodal data.",
-    "appVersionDescription": "Domino AutoML 0.0.4",
+    "appVersionDescription": "Domino AutoML 0.0.5",
     "vanityUrl": "automl-extension",
     "entryPoint": "app_prod.sh",
     "visibility": "authenticated",
