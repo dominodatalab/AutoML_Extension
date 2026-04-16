@@ -877,7 +877,7 @@ class TestGetJobOr404:
         await db_session.commit()
 
         with pytest.raises(HTTPException) as exc_info:
-            await get_job_or_404(db_session, job.id, "test-user")
+            await get_job_or_404(db_session, job.id)
 
         assert exc_info.value.status_code == 500
 
@@ -891,7 +891,7 @@ class TestGetJobOr404:
             "app.services.job_service._fetch_domino_job_or_throw",
             new_callable=MagicMock,
         ) as mock_fetch:
-            result = await get_job_or_404(db_session, job.id, "test-user")
+            result = await get_job_or_404(db_session, job.id)
 
         assert result.id == job.id
         mock_fetch.assert_called_once_with("run-123")
@@ -908,12 +908,12 @@ class TestGetJobOr404:
             side_effect=RuntimeError("Domino failed"),
         ):
             with pytest.raises(RuntimeError, match="Domino failed"):
-                await get_job_or_404(db_session, job.id, "test-user")
+                await get_job_or_404(db_session, job.id)
 
     @pytest.mark.asyncio
     async def test_raises_404_when_job_missing(self, db_session):
         with pytest.raises(HTTPException) as exc_info:
-            await get_job_or_404(db_session, "missing-job-id", "test-user")
+            await get_job_or_404(db_session, "missing-job-id")
 
         assert exc_info.value.status_code == 404
 
@@ -1089,5 +1089,4 @@ class TestEnsureMlflowResults:
             result = await _ensure_mlflow_results(db_session, job)
 
         assert result.model_path is None
-
 

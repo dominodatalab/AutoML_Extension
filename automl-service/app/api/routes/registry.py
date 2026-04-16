@@ -14,9 +14,9 @@ from app.api.generated.domino_public_api_client.models.domino_registered_models_
 from app.api.generated.domino_public_api_client.models.new_registered_model_v2 import NewRegisteredModelV2
 from app.api.generated.domino_public_api_client.models.register_model_response_v2 import RegisterModelResponseV2
 from app.core.domino_http import get_domino_public_api_client_sync
-from app.db import crud
 from app.dependencies import get_db
 from app.api.error_handler import handle_errors
+from app.services.job_service import get_job_or_404
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -40,9 +40,7 @@ class RegisterModelResponse(BaseModel):
 @handle_errors("Error registering model")
 async def register_model(request: RegisterModelRequest, db: AsyncSession = Depends(get_db)):
     """Register a trained model to the Domino Model Registry via the Domino REST API."""
-    job = await crud.get_job(db, request.job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Job not found: {request.job_id}")
+    job = await get_job_or_404(db, request.job_id)
     if not job.experiment_run_id:
         raise HTTPException(status_code=400, detail="Job has no MLflow experiment run to register from")
 

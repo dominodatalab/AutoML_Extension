@@ -5,6 +5,7 @@ import logging
 import json
 import os
 import zipfile
+from pathlib import PurePosixPath
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Depends
@@ -12,14 +13,16 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models import Job
 from app.core.model_export import get_model_exporter
 from app.core.model_diagnostics import get_model_diagnostics
 from app.core.dataset_manager import DominoDatasetManager
+from app.core.domino_project_type import DominoProjectType, detect_project_type
 from app.core.notebook_generator import generate_tabular_notebook, generate_timeseries_notebook
 from app.dependencies import get_db
-from app.db import crud
 from app.api.utils import get_job_paths
 from app.api.error_handler import handle_errors
+from app.services.job_service import get_job_or_404
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -77,27 +80,18 @@ def _normalize_model_type(raw_model_type: Any) -> Optional[str]:
     return normalized or None
 
 
-async def _resolve_notebook_data_path(job: Any) -> Optional[str]:
+async def _resolve_notebook_data_path(job: Job) -> Optional[str]:
     """Resolve concrete data path for notebook export."""
-    if getattr(job, "file_path", None):
-        return str(job.file_path)
-
-    dataset_id = getattr(job, "dataset_id", None)
-    if not dataset_id:
+    file_path = job.file_path
+    dataset_id = job.dataset_id
+    project_id = job.project_id
+    if not dataset_id or not file_path or not project_id:
         return None
 
-    try:
-        dataset_manager = DominoDatasetManager()
-        return await dataset_manager.get_dataset_file_path(str(dataset_id))
-    except Exception as exc:
-        logger.warning(
-            "Failed to resolve notebook dataset path for job %s (dataset_id=%s): %s",
-            getattr(job, "id", "unknown"),
-            dataset_id,
-            exc,
-        )
-        return None
+    dataset_manager = DominoDatasetManager()
+    dataset_path = await dataset_manager.get_dataset_path(str(dataset_id))
 
+    return f"{dataset_path}/{file_path}"
 
 @router.post("/deployment", response_model=DeploymentPackageResponse)
 async def export_deployment_package(
@@ -223,10 +217,7 @@ async def export_notebook(
     db: AsyncSession = Depends(get_db)
 ):
     """Export job configuration as a Jupyter notebook."""
-    # Get job details
-    job = await crud.get_job(db, request.job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Job not found: {request.job_id}")
+    job = await get_job_or_404(db, request.job_id)
 
     model_type = _normalize_model_type(job.model_type)
     resolved_data_path = await _resolve_notebook_data_path(job)

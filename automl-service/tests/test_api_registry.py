@@ -1,8 +1,9 @@
 """Tests for POST /svc/v1/registry/register."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 from app.core.context.auth import set_request_auth_header
 from app.api.generated.domino_public_api_client.models.register_model_response_v2 import RegisterModelResponseV2
 
@@ -36,7 +37,7 @@ async def test_register_model_happy_path(app_client):
     set_request_auth_header("Bearer test-token")
     try:
         job = _make_job()
-        with patch("app.api.routes.registry.crud.get_job", return_value=job), \
+        with patch("app.api.routes.registry.get_job_or_404", new_callable=AsyncMock, return_value=job), \
              patch("app.api.routes.registry.register_model_v2.sync_detailed", return_value=_make_success_response(3)), \
              patch("app.api.routes.registry.get_domino_public_api_client_sync"):
             response = await app_client.post(REGISTER_URL, json={
@@ -61,7 +62,11 @@ async def test_register_model_happy_path(app_client):
 async def test_register_model_job_not_found(app_client):
     set_request_auth_header("Bearer test-token")
     try:
-        with patch("app.api.routes.registry.crud.get_job", return_value=None):
+        with patch(
+            "app.api.routes.registry.get_job_or_404",
+            new_callable=AsyncMock,
+            side_effect=HTTPException(status_code=404, detail="Job not found: nonexistent"),
+        ):
             response = await app_client.post(REGISTER_URL, json={
                 "job_id": "nonexistent",
                 "model_name": "my-model",
@@ -77,7 +82,7 @@ async def test_register_model_no_experiment_run(app_client):
     set_request_auth_header("Bearer test-token")
     try:
         job = _make_job(experiment_run_id=None)
-        with patch("app.api.routes.registry.crud.get_job", return_value=job):
+        with patch("app.api.routes.registry.get_job_or_404", new_callable=AsyncMock, return_value=job):
             response = await app_client.post(REGISTER_URL, json={
                 "job_id": "job-123",
                 "model_name": "my-model",
@@ -97,7 +102,7 @@ async def test_register_model_domino_error(app_client):
         error_response = MagicMock()
         error_response.parsed = None
         error_response.status_code = 500
-        with patch("app.api.routes.registry.crud.get_job", return_value=job), \
+        with patch("app.api.routes.registry.get_job_or_404", new_callable=AsyncMock, return_value=job), \
              patch("app.api.routes.registry.register_model_v2.sync_detailed", return_value=error_response), \
              patch("app.api.routes.registry.get_domino_public_api_client_sync"):
             response = await app_client.post(REGISTER_URL, json={

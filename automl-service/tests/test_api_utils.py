@@ -1,8 +1,11 @@
 """Tests for shared API request helpers."""
 
+from types import SimpleNamespace
+
+import pytest
 from starlette.requests import Request
 
-from app.api.utils import resolve_request_project_id
+from app.api.utils import get_job_paths, resolve_request_project_id
 
 
 def _make_request(*, headers=None, query_string: bytes = b"") -> Request:
@@ -52,3 +55,38 @@ def test_resolve_request_project_id_ignores_environment_variable(monkeypatch):
 
 def test_resolve_request_project_id_none_without_request():
     assert resolve_request_project_id(None) is None
+
+
+@pytest.mark.asyncio
+async def test_get_job_paths_uses_get_job_or_404(monkeypatch):
+    db = object()
+    calls: list[tuple[object, str]] = []
+
+    job = SimpleNamespace(
+        id="job-123",
+        status=SimpleNamespace(value="completed"),
+        model_path="runs:/run-123/autogluon_model",
+        model_type=SimpleNamespace(value="tabular"),
+        file_path="/mnt/data/train.csv",
+        problem_type=SimpleNamespace(value="binary"),
+    )
+
+    async def fake_get_job_or_404(db_session, job_id: str):
+        calls.append((db_session, job_id))
+        return job
+
+    monkeypatch.setattr("app.api.utils.get_job_or_404", fake_get_job_or_404)
+    monkeypatch.setattr(
+        "app.api.utils.download_mlflow_artifact",
+        lambda model_path, job_id: f"/tmp/cache/{job_id}",
+    )
+
+    result = await get_job_paths(db, "job-123")
+
+    assert calls == [(db, "job-123")]
+    assert result == (
+        "/tmp/cache/job-123",
+        "tabular",
+        "/mnt/data/train.csv",
+        "binary",
+    )

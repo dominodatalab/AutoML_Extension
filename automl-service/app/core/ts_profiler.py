@@ -30,7 +30,10 @@ class TimeSeriesProfiler(BaseProfiler):
         sampling_strategy: str = "recent",
         rolling_window: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """Generate a comprehensive time series profile."""
+        """Generate a comprehensive time series profile.
+
+        dataset_id may be omitted when the profiler is running in a Domino Job, but MUST
+        be provided when running in the main application"""
         df = await self._load_dataframe(
             file_path=file_path,
             dataset_id=dataset_id,

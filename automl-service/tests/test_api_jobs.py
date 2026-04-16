@@ -613,10 +613,13 @@ async def test_feature_importance_lazily_fetches_and_persists_mlflow_results(app
     db_session.add(job)
     await db_session.commit()
 
-    with patch(
-        "app.services.job_service._fetch_mlflow_results",
-        new_callable=AsyncMock,
-        return_value=_MLFLOW_RESULTS,
+    with (
+        _mock_job_infra(),
+        patch(
+            "app.services.job_service._fetch_mlflow_results",
+            new_callable=AsyncMock,
+            return_value=_MLFLOW_RESULTS,
+        ),
     ):
         response = await app_client.post(
             "/svc/v1/predictions/model/feature-importance",
