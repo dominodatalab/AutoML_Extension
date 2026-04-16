@@ -50,6 +50,7 @@ print_env() {
     echo "  TEMP_PATH: ${TEMP_PATH:-NOT SET}"
     echo "  UPLOADS_PATH: ${UPLOADS_PATH:-NOT SET}"
     echo "  EDA_RESULTS_PATH: ${EDA_RESULTS_PATH:-NOT SET}"
+    echo "  DATABASE_URL: ${DATABASE_URL:- NOT SET}"
     echo ""
 }
 
