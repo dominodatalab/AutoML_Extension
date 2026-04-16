@@ -17,7 +17,7 @@
         "visibility": "global",
         "buildArgs": {
           "EXTENSION_VERSION": "v0.0.5",
-          "EXTENSION_DOMINO_PROJECT_NAME": "Domino_Official_AutoML_Extension"
+          "DATABASE_URL": "sqlite:////mnt/data/Domino_Official_AutoML_Extension/automl.db"
         }
       }
     },
