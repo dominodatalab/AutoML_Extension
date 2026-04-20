@@ -124,14 +124,14 @@ async def test_capabilities_include_storage_cleanup_for_extension_editors(app_cl
 
     seen = {}
 
-    def fake_current_user_can_modify_storage(project_id=None):
-        seen["project_id"] = project_id
+    def fake_current_user_can_manage_storage():
+        seen["called"] = True
         return True
 
     monkeypatch.setattr(
         health_routes,
-        "current_user_can_modify_storage",
-        fake_current_user_can_modify_storage,
+        "current_user_can_manage_storage",
+        fake_current_user_can_manage_storage,
         raising=True,
     )
     response = await app_client.get(
@@ -142,7 +142,7 @@ async def test_capabilities_include_storage_cleanup_for_extension_editors(app_cl
     assert response.status_code == 200
     body = response.json()
     assert body["can_user_modify_storage"] is True
-    assert seen["project_id"] == "project-123"
+    assert seen["called"] is True
 
 
 @pytest.mark.asyncio
@@ -152,14 +152,14 @@ async def test_capabilities_disable_storage_cleanup_without_extension_edit(app_c
 
     seen = {}
 
-    def fake_current_user_can_modify_storage(project_id=None):
-        seen["project_id"] = project_id
+    def fake_current_user_can_manage_storage():
+        seen["called"] = True
         return False
 
     monkeypatch.setattr(
         health_routes,
-        "current_user_can_modify_storage",
-        fake_current_user_can_modify_storage,
+        "current_user_can_manage_storage",
+        fake_current_user_can_manage_storage,
         raising=True,
     )
 
@@ -171,4 +171,4 @@ async def test_capabilities_disable_storage_cleanup_without_extension_edit(app_c
     assert response.status_code == 200
     body = response.json()
     assert body["can_user_modify_storage"] is False
-    assert seen["project_id"] == "project-456"
+    assert seen["called"] is True

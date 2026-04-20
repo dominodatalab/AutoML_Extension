@@ -33,9 +33,23 @@ def current_user_can_modify_storage(project_id: Optional[str] = None) -> bool:
         return False
 
 
-def require_storage_modify(project_id: Optional[str] = None) -> None:
-    """Raise 403 unless the current user may edit the extension."""
-    if not current_user_can_modify_storage(project_id=project_id):
+def current_user_can_manage_storage() -> bool:
+    """Return True when the current user may access storage-management routes.
+
+    Storage management acts on artifacts owned by the extension app itself
+    """
+    try:
+        client = get_domino_public_api_client_sync()
+        extension_project_id = resolve_domino_project_id()
+        return _current_user_can_change_project_settings(client, extension_project_id)
+    except Exception as exn:
+        logger.exception(f"Failed to resolve extension project permission for storage management: {exn}")
+        return False
+
+
+def require_storage_modify() -> None:
+    """Raise 403 unless the current user may manage storage for the extension."""
+    if not current_user_can_manage_storage():
         raise HTTPException(
             status_code=403,
             detail="This operation requires permission to edit the extension.",

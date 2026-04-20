@@ -178,12 +178,12 @@ async def test_cleanup_routes_allow_extension_editors(app_client, monkeypatch, m
     """Cleanup endpoints succeed when extension edit permission is granted."""
     from app.core import authorization
 
-    def fake_fn(project_id: str):
+    def fake_fn():
         return True
 
     monkeypatch.setattr(
         authorization,
-        "current_user_can_modify_storage",
+        "current_user_can_manage_storage",
         fake_fn,
         raising=True,
     )
@@ -209,12 +209,12 @@ async def test_cleanup_routes_reject_users_without_extension_edit(app_client, mo
     """Cleanup endpoints reject users without extension edit permission."""
     from app.core import authorization
 
-    def fake_fn(project_id: str):
+    def fake_fn():
         return False
 
     monkeypatch.setattr(
         authorization,
-        "current_user_can_modify_storage",
+        "current_user_can_manage_storage",
         fake_fn,
         raising=True,
     )
