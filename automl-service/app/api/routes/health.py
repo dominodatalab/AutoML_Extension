@@ -9,8 +9,8 @@ from sqlalchemy import text
 from app.core.context.user import get_viewing_user
 from app.services.project_resolver import resolve_project
 from app.config import get_settings
-from app.core.authorization import current_user_can_modify_storage
-from app.dependencies import get_db, get_request_project_id
+from app.core.authorization import current_user_can_manage_storage
+from app.dependencies import get_db
 
 router = APIRouter()
 
@@ -61,7 +61,7 @@ async def get_current_user(projectId: Optional[str] = None):
 
 
 @router.get("/capabilities")
-async def get_capabilities(project_id: str = Depends(get_request_project_id)):
+async def get_capabilities():
     """Return platform capabilities for frontend feature gating."""
     # TODO may not make sense to have in health routes
     settings = get_settings()
@@ -72,7 +72,7 @@ async def get_capabilities(project_id: str = Depends(get_request_project_id)):
         "mlflow_tracking": not standalone,
         "model_registry": not standalone,
         "model_deployment": not standalone,
-        "can_user_modify_storage": current_user_can_modify_storage(project_id=project_id),
+        "can_user_modify_storage": current_user_can_manage_storage(),
     }
 
 

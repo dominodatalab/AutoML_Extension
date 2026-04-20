@@ -50,6 +50,60 @@ def test_current_user_can_modify_storage_when_authz_denies(monkeypatch):
     assert len(fake_httpx.post_calls) == 1
 
 
+def test_current_user_can_manage_storage_uses_extension_project(monkeypatch):
+    from app.core import authorization as auth
+
+    fake_httpx = FakeHttpxClient(
+        post_payload={"actions": [{"id": "project.change_project_settings-extension-project", "code": "project.change_project_settings", "result": True}]},
+    )
+    fake_client = FakeDominoClient(fake_httpx)
+    monkeypatch.setattr(
+        auth,
+        "get_domino_public_api_client_sync",
+        lambda: fake_client,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        auth,
+        "resolve_domino_project_id",
+        lambda: "extension-project",
+        raising=True,
+    )
+
+    assert auth.current_user_can_manage_storage() is True
+    assert fake_httpx.post_calls == [_make_fake_httpx_post_payload([
+                    {
+                        "id": "project.change_project_settings-extension-project",
+                        "code": "project.change_project_settings",
+                        "context": {"projectId": "extension-project"},
+                    }
+                ])]
+
+
+def test_current_user_can_manage_storage_when_extension_authz_denies(monkeypatch):
+    from app.core import authorization as auth
+
+    fake_httpx = FakeHttpxClient(
+        post_payload={"actions": [{"id": "project.change_project_settings-extension-project", "code":"project.change_project_settings", "result": False}]},
+    )
+    fake_client = FakeDominoClient(fake_httpx)
+    monkeypatch.setattr(
+        auth,
+        "get_domino_public_api_client_sync",
+        lambda: fake_client,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        auth,
+        "resolve_domino_project_id",
+        lambda: "extension-project",
+        raising=True,
+    )
+
+    assert auth.current_user_can_manage_storage() is False
+    assert len(fake_httpx.post_calls) == 1
+
+
 def test_current_user_can_start_job_when_authz_allows(monkeypatch):
     from app.core import authorization as auth
 
