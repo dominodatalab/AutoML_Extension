@@ -45,6 +45,3 @@ Run the `app_prod.sh` script, which starts both backend and frontend as a combin
 - Backend setup, local development, generated-client rebuilds, and testing: [automl-service/README.md](./automl-service/README.md)
 - Frontend install, development, and production build details: [automl-ui/README.md](./automl-ui/README.md)
 
-## License
-
-MIT License
