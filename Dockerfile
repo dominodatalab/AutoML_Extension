@@ -63,7 +63,7 @@ WORKDIR /home/${DOMINO_USER}
 
 # TODO refactor the pip installations to also use this
 RUN test -n "$EXTENSION_VERSION" || (echo "EXTENSION_VERSION build arg is empty" && exit 1)
-RUN git clone https://github.com/$GITHUB_ORG/AutoML_Extension.git --depth 1 --branch $EXTENSION_VERSION
+RUN git clone https://github.com/$GITHUB_ORG/AutoML_Extension.git && cd AutoML_Extension && git checkout $EXTENSION_VERSION
 
 WORKDIR /home/${DOMINO_USER}/AutoML_Extension
 
