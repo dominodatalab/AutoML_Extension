@@ -1,8 +1,8 @@
 {
   "manifestSchemaVersion": 1,
   "project": {                                                                                                                               
-    "name": "Domino_Official_AutoML_Extension_Name_Change",
-    "description": "Contains the app for the AutoML Extension description change",                                                                        
+    "name": "Domino_Official_AutoML_Extension",
+    "description": "Contains the app for the AutoML Extension description change again",                                                                        
     "visibility": "Public",
     "isRestricted": false
   },
@@ -16,16 +16,16 @@
         "autoCompatibleWithDomino": false,
         "visibility": "global",
         "buildArgs": {
-          "EXTENSION_VERSION": "v0.0.10",
+          "EXTENSION_VERSION": "v0.0.11",
           "DATABASE_URL": "sqlite:////mnt/data/Domino_Official_AutoML_Extension/automl.db",
           "UNUSED": "including this to differentiate from v0.0.8 to forces new env revision"
         }
       }
     },
-    "appName": "Domino AutoML App",
+    "appName": "Domino AutoML App v0.0.11",
     "appDescription": "AutoGluon-powered AutoML for tabular, time series, and multimodal data.",
-    "appVersionDescription": "Domino AutoML 0.0.10",
-    "vanityUrl": "automl-extension-v0-0-10",
+    "appVersionDescription": "Domino AutoML 0.0.11",
+    "vanityUrl": "automl-extension-v0-0-11",
     "entryPoint": "app_prod.sh",
     "visibility": "authenticated",
     "enableDeepLinking": true,
@@ -39,7 +39,7 @@
     }
   },
   "extension": {
-    "name": "AutoML v0.0.10",
+    "name": "AutoML v0.0.11",
     "description": "AutoGluon-powered AutoML for tabular, time series, and multimodal data.",
     "enabled": true,
     "uiMountPointTypeConfigs": {
