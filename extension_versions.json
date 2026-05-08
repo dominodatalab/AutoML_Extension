@@ -4,6 +4,13 @@
   "versions": [
     {
       "manifestSchemaVersion": 1,
+      "version": "0.0.10",
+      "releaseTag": "v0.0.10",
+      "minDominoVersion": "6.3.0",
+      "testedWithDominoVersions": ["6.3.0"]
+    },
+    {
+      "manifestSchemaVersion": 1,
       "version": "0.0.9",
       "releaseTag": "v0.0.9",
       "minDominoVersion": "6.5.0",
