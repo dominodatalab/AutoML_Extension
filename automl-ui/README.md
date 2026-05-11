@@ -40,4 +40,4 @@ cd automl-ui
 npm run build
 ```
 
-For Domino deployment, use `./app_prod.sh` or `./app.sh --prod` from the repository root so the backend can serve the built frontend assets.
+For production installation as a Domino Extension, see [../INSTALL.md](../INSTALL.md). For Domino runtime, use `./app_prod.sh` or `./app.sh --prod` from the repository root so the backend can serve the built frontend assets.
