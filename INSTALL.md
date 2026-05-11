@@ -1,10 +1,10 @@
-# Production Installation
+# Manual Production Installation
 
-Use these steps to install AutoML Studio as a Domino Extension.
+Use these steps to manually install AutoML Studio as a Domino Extension.
 
 ## Prerequisites
 
-Enable Domino Extensions in your Domino deployment. Also enable Extended Identity Propagation so the viewing user's identity is attached to requests they send when interacting with apps.
+Enable Extended Identity Propagation so the viewing user's identity is attached to requests they send when interacting with apps.
 
 Set this Central Config value:
 
@@ -35,10 +35,10 @@ The project must be named `AutoML_Extension`.
 6. Set visibility to **Globally Accessible**.
 7. Click **Customize Environment**.
 8. Paste the repository `Dockerfile` into the **Dockerfile Instructions** input.
-9. Set the build argument to your chosen release branch:
+9. Set the build argument to your chosen release tag or branch:
 
    ```dockerfile
-   ARG EXTENSION_VERSION=<release branch name>
+   ARG EXTENSION_VERSION=<release tag or branch name>
    ```
 
 10. Click **Build**.

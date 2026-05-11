@@ -58,7 +58,7 @@ source .env-dev
 
 ### Production / Domino runtime
 
-For production installation as a Domino Extension, see [../INSTALL.md](../INSTALL.md).
+For manual production installation as a Domino Extension, see [../INSTALL.md](../INSTALL.md).
 
 From the repository root:
 
