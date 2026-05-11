@@ -38,10 +38,9 @@ From the repository root:
 
 ### Domino deployment
 
-Run the `app_prod.sh` script, which starts both backend and frontend as a combined Domino App.
+For manual production installation as a Domino Extension, see [INSTALL.md](./INSTALL.md). The production app uses the `app_prod.sh` script, which starts both backend and frontend as a combined Domino App.
 
 ## Service Docs
 
 - Backend setup, local development, generated-client rebuilds, and testing: [automl-service/README.md](./automl-service/README.md)
 - Frontend install, development, and production build details: [automl-ui/README.md](./automl-ui/README.md)
-
