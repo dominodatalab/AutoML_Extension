@@ -168,7 +168,7 @@ function Step1DataSource() {
             return (
               <div key={dataset.id} className="space-y-2">
                 <button
-                  data-test={`${dataset.name}_dataset`}
+                  aria-label={`${dataset.name} dataset selector button`}
                   onClick={() => {
                     void handleSelectDataset(dataset)
                   }}
