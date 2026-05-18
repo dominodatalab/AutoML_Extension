@@ -36,6 +36,7 @@ export function JobTabNavigation({ activeTab, onTabChange, currentStatus, domino
         {tabs.map((tab) => (
           <button
             key={tab.key}
+            aria-label={`job ${tab.key} tab`}
             onClick={() => onTabChange(tab.key as DetailTab)}
             className={`pb-3 text-sm border-b-2 -mb-px transition-colors ${
               activeTab === tab.key

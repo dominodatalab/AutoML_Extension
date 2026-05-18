@@ -52,7 +52,7 @@ export function DataSourceSelector({
         datasets.map((dataset: Dataset) => (
           <div key={dataset.id} className="space-y-2">
             <button
-              data-test={`${dataset.name}_dataset`}
+              aria-label={`${dataset.name} dataset selector button`}
               onClick={() => onSelectDataset(dataset)}
               className={clsx(
                 'w-full p-4 rounded-lg border-2 transition-colors text-left flex items-center gap-4',
