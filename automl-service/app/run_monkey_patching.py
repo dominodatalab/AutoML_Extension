@@ -34,6 +34,9 @@ class CustomEnviron(MutableMapping[str, str]):
         logger.error('----')
         logger.error('Getting request token in visible snapshot')
         logger.error(request_token)
+        if request_token:
+            logger.error('with strip')
+            logger.error(request_token.strip())
         logger.error('----')
         if request_token is not None:
             snapshot[MLFLOW_TRACKING_TOKEN_KEY] = request_token
