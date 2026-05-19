@@ -27,7 +27,7 @@ def set_request_auth_header(value: Optional[str]) -> None:
         _token_var.set(None)
         return
 
-    _token_var.set(found.group(1))
+    _token_var.set(found.group(1).strip())
 
 
 def get_request_auth_header() -> Optional[str]:

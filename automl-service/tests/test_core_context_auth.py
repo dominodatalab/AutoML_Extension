@@ -23,6 +23,16 @@ def test_set_get_and_clear_auth_header():
     assert get_request_auth_token() is None
 
 
+def test_auth_token_strips_surrounding_whitespace():
+    from app.core.context.auth import set_request_auth_header, get_request_auth_token
+
+    set_request_auth_header("Bearer root-token\n")
+    try:
+        assert get_request_auth_token() == "root-token"
+    finally:
+        set_request_auth_header(None)
+
+
 @pytest.mark.asyncio
 async def test_contextvar_is_per_task_isolated():
     from app.core.context.auth import set_request_auth_header, get_request_auth_header
