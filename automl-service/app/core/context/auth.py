@@ -31,7 +31,13 @@ def set_request_auth_header(value: Optional[str]) -> None:
 
 
 def get_request_auth_header() -> Optional[str]:
-    return _auth_header_var.get()
+    header = _auth_header_var.get().strip()
+    if header:
+        return header.strip()
+    return header
 
 def get_request_auth_token() -> Optional[str]:
-    return _token_var.get()
+    token = _token_var.get()
+    if token:
+        return token.strip()
+    return token
