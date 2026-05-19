@@ -752,6 +752,18 @@ async def _ensure_mlflow_results(db: AsyncSession, job: Job) -> Job:
 async def _fetch_mlflow_results(job_id: str) -> Optional[dict]:
     """Fetch training results from MLflow for a completed Domino job."""
     def _sync_fetch():
+        from app.core.context import auth as auth_context
+        logger.error("----")
+        logger.error("TODO REMOVE")
+        logger.error("auth token")
+        request_token = auth_context.get_request_auth_token()
+        logger.error(request_token)
+        logger.error("----")
+        logger.error("----")
+        logger.error("TODO REMOVE")
+        logger.error("tracking token:")
+        logger.error(os.environ.get('MLFLOW_TRACKING_TOKEN'))
+        logger.error("----")
         runs = mlflow.search_runs(
             filter_string=f"tags.job_id = '{job_id}' and tags.run_type = 'evaluation_summary'",
             search_all_experiments=True,
