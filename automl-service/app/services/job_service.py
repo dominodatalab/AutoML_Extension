@@ -35,6 +35,7 @@ from app.api.schemas.job import (
 from app.config import get_settings
 from app.core.authorization import require_storage_modify, require_domino_job_start, require_domino_job_list, current_user_can_modify_storage, require_domino_job_stop
 from app.core.context.user import get_viewing_user
+from app.core.context.executor import run_in_executor_with_context
 from app.core.domino_http import get_domino_public_api_client_sync
 from app.core.domino_job_launcher import DominoJobLauncher, get_domino_job_launcher
 from app.core.dataset_mounts import resolve_dataset_mount_paths
@@ -796,8 +797,7 @@ async def _fetch_mlflow_results(job_id: str) -> Optional[dict]:
             "model_path": f"runs:/{run_id}/autogluon_model_raw",
         }
 
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _sync_fetch)
+    return await run_in_executor_with_context(None, _sync_fetch)
 
 
 async def _sync_domino_job_state(

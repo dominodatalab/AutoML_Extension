@@ -23,6 +23,7 @@ from app.db.models import Job, JobLog, JobStatus, ModelType, ProblemType
 from app.services.job_service import (
     _build_domino_job_logs,
     _ensure_mlflow_results,
+    _fetch_mlflow_results,
     _is_domino_missing_error,
     _normalize_job_name,
     _parse_statuses_csv,
@@ -1045,6 +1046,60 @@ class TestEnsureMlflowResults:
         assert result.model_path == "runs:/existing/model"
 
     @pytest.mark.asyncio
+    async def test_fetch_mlflow_results_uses_request_context_in_executor(self, monkeypatch):
+        import os
+        from types import SimpleNamespace
+
+        from app.core.context.auth import set_request_auth_header
+        from app.run_monkey_patching import MLFLOW_TRACKING_TOKEN_KEY
+        from app.services import job_service
+
+        set_request_auth_header("Bearer request-token")
+        monkeypatch.setenv(MLFLOW_TRACKING_TOKEN_KEY, "fallback-token")
+
+        run = SimpleNamespace(
+            info=SimpleNamespace(run_id="run-context", experiment_id="experiment-context"),
+            data=SimpleNamespace(
+                params={
+                    "best_model": "LightGBM",
+                    "eval_metric": "accuracy",
+                    "problem_type": "binary",
+                },
+                metrics={
+                    "best_score": 0.95,
+                    "num_models_trained": 4,
+                },
+            ),
+        )
+
+        def fake_search_runs(**_kwargs):
+            assert os.environ[MLFLOW_TRACKING_TOKEN_KEY] == "request-token"
+            return [run]
+
+        class FakeMlflowClient:
+            def get_experiment(self, experiment_id):
+                assert experiment_id == "experiment-context"
+                assert os.environ[MLFLOW_TRACKING_TOKEN_KEY] == "request-token"
+                return SimpleNamespace(name="request-experiment")
+
+        def fail_artifact_download(*_args, **_kwargs):
+            raise RuntimeError("artifact download skipped")
+
+        monkeypatch.setattr(job_service.mlflow, "search_runs", fake_search_runs)
+        monkeypatch.setattr(job_service.mlflow.tracking, "MlflowClient", lambda: FakeMlflowClient())
+        monkeypatch.setattr(job_service, "download_mlflow_artifact", fail_artifact_download)
+
+        try:
+            result = await _fetch_mlflow_results("job-context")
+        finally:
+            set_request_auth_header(None)
+
+        assert result is not None
+        assert result["experiment_run_id"] == "run-context"
+        assert result["experiment_name"] == "request-experiment"
+        assert result["model_path"] == "runs:/run-context/autogluon_model_raw"
+
+    @pytest.mark.asyncio
     async def test_skips_fetch_when_job_not_completed(self, db_session, make_job):
         for status in (JobStatus.PENDING, JobStatus.RUNNING, JobStatus.FAILED):
             job = make_job(status=status)
@@ -1089,4 +1144,3 @@ class TestEnsureMlflowResults:
             result = await _ensure_mlflow_results(db_session, job)
 
         assert result.model_path is None
-

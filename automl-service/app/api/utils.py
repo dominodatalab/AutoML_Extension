@@ -1,11 +1,11 @@
 """Shared utilities for API route handlers."""
 
-import asyncio
 from typing import Optional, Tuple
 
 from fastapi import HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.context.executor import run_in_executor_with_context
 from app.core.job_file_cache import download_mlflow_artifact
 from app.services.job_service import get_job_or_404
 
@@ -42,10 +42,12 @@ async def get_job_paths(
             detail=f"Job {job_id} has no trained model. Status: {job.status.value}",
         )
 
-    loop = asyncio.get_event_loop()
     try:
-        local_model_path = await loop.run_in_executor(
-            None, download_mlflow_artifact, job.model_path, job_id
+        local_model_path = await run_in_executor_with_context(
+            None,
+            download_mlflow_artifact,
+            job.model_path,
+            job_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=500, detail=str(e))
