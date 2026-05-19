@@ -12,6 +12,9 @@ from collections.abc import Iterable, Iterator, Mapping, MutableMapping
 
 from app.core.context import auth as auth_context
 
+import logging
+logger = logging.getLogger(__name__)
+
 MLFLOW_TRACKING_TOKEN_KEY = "MLFLOW_TRACKING_TOKEN"
 
 class CustomEnviron(MutableMapping[str, str]):
@@ -28,6 +31,10 @@ class CustomEnviron(MutableMapping[str, str]):
     def _visible_snapshot(self) -> dict[str, str]:
         snapshot = dict(self._delegate)
         request_token = auth_context.get_request_auth_token()
+        logger.error('----')
+        logger.error('Getting request token in visible snapshot')
+        logger.error(request_token)
+        logger.error('----')
         if request_token is not None:
             snapshot[MLFLOW_TRACKING_TOKEN_KEY] = request_token
         return snapshot
@@ -35,6 +42,10 @@ class CustomEnviron(MutableMapping[str, str]):
     def __getitem__(self, key: str) -> str:
         if key == MLFLOW_TRACKING_TOKEN_KEY:
             request_token = auth_context.get_request_auth_token()
+            logger.error('----')
+            logger.error('Getting request token in __getitem__')
+            logger.error(request_token)
+            logger.error('----')
             if request_token is not None:
                 return request_token
         return self._delegate[key]
