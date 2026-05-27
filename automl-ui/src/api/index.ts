@@ -40,6 +40,32 @@ class ApiClient {
     }
   }
 
+  private redirectBrowserOnApiRedirect(response: Response, requestUrl: string): boolean {
+    if (typeof window === 'undefined') {
+      return false
+    }
+
+    const absoluteRequestUrl = new URL(requestUrl, window.location.href)
+
+    if (response.type === 'opaqueredirect') {
+      window.location.assign(absoluteRequestUrl.toString())
+      return true
+    }
+
+    if (response.status !== 302) {
+      return false
+    }
+
+    const location = response.headers.get('Location')
+    if (!location) {
+      return false
+    }
+
+    const redirectUrl = new URL(location, absoluteRequestUrl)
+    window.location.assign(redirectUrl.toString())
+    return true
+  }
+
   private async request<T>(
     method: string,
     endpoint: string,
@@ -71,6 +97,7 @@ class ApiClient {
       method,
       headers,
       credentials: 'include',
+      redirect: 'manual',
     }
 
     if (data && method !== 'GET') {
@@ -84,6 +111,10 @@ class ApiClient {
 
     try {
       const response = await fetch(fullUrl, fetchConfig)
+
+      if (this.redirectBrowserOnApiRedirect(response, fullUrl)) {
+        throw new Error('Redirecting after API 302 response')
+      }
 
       if (!response.ok) {
         // Check if response is HTML (common when Domino intercepts)
