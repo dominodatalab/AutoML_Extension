@@ -79,6 +79,7 @@ def create_app() -> FastAPI:
         logger.debug(f"Capture request metadata: {request.method} {request.url.path} {redacted_headers + safe_headers}")
 
         auth_header = request.headers.get("authorization")
+        logger.info(f"DELETE ME auth header middleware {auth_header}")
         set_request_auth_header(auth_header)
         try:
             response = await call_next(request)
