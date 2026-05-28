@@ -83,6 +83,16 @@ def create_app() -> FastAPI:
         logger.error(f"Unhandled exception on {request.url}: {exc}", exc_info=True)
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
+    # RESTful routers
+    app.include_router(health.router, prefix="/svc/v1/health", tags=["Health"])
+    app.include_router(jobs.router, prefix="/svc/v1/jobs", tags=["Jobs"])
+    app.include_router(datasets.router, prefix="/svc/v1/datasets", tags=["Datasets"])
+    app.include_router(predictions.router, prefix="/svc/v1/predictions", tags=["Predictions"])
+    app.include_router(profiling.router, prefix="/svc/v1/profiling", tags=["Profiling"])
+    app.include_router(registry.router, prefix="/svc/v1/registry", tags=["Registry"])
+    app.include_router(export.router, prefix="/svc/v1/export", tags=["Export"])
+    app.include_router(deployments.router, prefix="/svc/v1/deployments", tags=["Deployments"])
+
     # Request context capture: store the forwarded auth header in a request-scoped ContextVar.
     @app.middleware("http")
     async def capture_request_context(request: Request, call_next):
@@ -100,16 +110,6 @@ def create_app() -> FastAPI:
         finally:
             set_request_auth_header(None)
         return response
-
-    # RESTful routers
-    app.include_router(health.router, prefix="/svc/v1/health", tags=["Health"])
-    app.include_router(jobs.router, prefix="/svc/v1/jobs", tags=["Jobs"])
-    app.include_router(datasets.router, prefix="/svc/v1/datasets", tags=["Datasets"])
-    app.include_router(predictions.router, prefix="/svc/v1/predictions", tags=["Predictions"])
-    app.include_router(profiling.router, prefix="/svc/v1/profiling", tags=["Profiling"])
-    app.include_router(registry.router, prefix="/svc/v1/registry", tags=["Registry"])
-    app.include_router(export.router, prefix="/svc/v1/export", tags=["Export"])
-    app.include_router(deployments.router, prefix="/svc/v1/deployments", tags=["Deployments"])
 
     # Optional static file serving for combined frontend+backend mode
     static_dir = os.environ.get("STATIC_DIR")
