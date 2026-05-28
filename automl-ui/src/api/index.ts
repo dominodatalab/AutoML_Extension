@@ -41,29 +41,30 @@ class ApiClient {
   }
 
   private redirectBrowserOnApiRedirect(response: Response, requestUrl: string): boolean {
-    if (typeof window === 'undefined') {
-      return false
-    }
-
-    const absoluteRequestUrl = new URL(requestUrl, window.location.href)
-
-    if (response.type === 'opaqueredirect') {
-      window.location.assign(absoluteRequestUrl.toString())
-      return true
-    }
-
-    if (response.status !== 302) {
-      return false
-    }
-
-    const location = response.headers.get('Location')
-    if (!location) {
-      return false
-    }
-
-    const redirectUrl = new URL(location, absoluteRequestUrl)
-    window.location.assign(redirectUrl.toString())
-    return true
+    return false
+//    if (typeof window === 'undefined') {
+//      return false
+//    }
+//
+//    const absoluteRequestUrl = new URL(requestUrl, window.location.href)
+//
+//    if (response.type === 'opaqueredirect') {
+//      window.location.assign(absoluteRequestUrl.toString())
+//      return true
+//    }
+//
+//    if (response.status !== 302) {
+//      return false
+//    }
+//
+//    const location = response.headers.get('Location')
+//    if (!location) {
+//      return false
+//    }
+//
+//    const redirectUrl = new URL(location, absoluteRequestUrl)
+//    window.location.assign(redirectUrl.toString())
+//    return true
   }
 
   private async request<T>(
