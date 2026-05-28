@@ -41,6 +41,7 @@ class ApiClient {
   }
 
   private redirectBrowserOnApiRedirect(response: Response, requestUrl: string): boolean {
+    console.log(response, requestUrl)
     return false
 //    if (typeof window === 'undefined') {
 //      return false
