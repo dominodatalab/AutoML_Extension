@@ -105,7 +105,8 @@ def resolve_domino_api_host() -> str:
     host = (
             #os.environ.get("DOMINO_API_PROXY")
             #or settings.domino_api_host
-        or os.environ.get("DOMINO_API_HOST")
+            #or os.environ.get("DOMINO_API_HOST")
+        os.environ.get("DOMINO_API_HOST")
     )
     if not host:
         raise ValueError(
