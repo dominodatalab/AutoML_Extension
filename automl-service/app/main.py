@@ -69,6 +69,20 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Exception handlers
+    @app.exception_handler(FileNotFoundError)
+    async def file_not_found_handler(request: Request, exc: FileNotFoundError):
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+    @app.exception_handler(ValueError)
+    async def value_error_handler(request: Request, exc: ValueError):
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+    @app.exception_handler(Exception)
+    async def generic_exception_handler(request: Request, exc: Exception):
+        logger.error(f"Unhandled exception on {request.url}: {exc}", exc_info=True)
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
     # Request context capture: store the forwarded auth header in a request-scoped ContextVar.
     @app.middleware("http")
     async def capture_request_context(request: Request, call_next):
@@ -86,20 +100,6 @@ def create_app() -> FastAPI:
         finally:
             set_request_auth_header(None)
         return response
-
-    # Exception handlers
-    @app.exception_handler(FileNotFoundError)
-    async def file_not_found_handler(request: Request, exc: FileNotFoundError):
-        return JSONResponse(status_code=404, content={"detail": str(exc)})
-
-    @app.exception_handler(ValueError)
-    async def value_error_handler(request: Request, exc: ValueError):
-        return JSONResponse(status_code=400, content={"detail": str(exc)})
-
-    @app.exception_handler(Exception)
-    async def generic_exception_handler(request: Request, exc: Exception):
-        logger.error(f"Unhandled exception on {request.url}: {exc}", exc_info=True)
-        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
     # RESTful routers
     app.include_router(health.router, prefix="/svc/v1/health", tags=["Health"])
