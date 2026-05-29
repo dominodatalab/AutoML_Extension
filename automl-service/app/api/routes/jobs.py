@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,8 +36,6 @@ from app.services.job_service import (
     list_jobs_filtered,
     preview_cleanup as preview_cleanup_service,
 )
-import logging
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -142,13 +140,11 @@ async def get_job_metrics(job_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.get("/{job_id}/logs", response_model=list[JobLogResponse])
 async def get_job_logs(
-    request: Request,
     job_id: str,
     limit: int = 1000,
     db: AsyncSession = Depends(get_db),
 ):
     """Get job logs."""
-    logger.info(f"DELETE ME job logs request headers {request.headers}")
     logs = await get_job_logs_service(db=db, job_id=job_id, limit=limit)
     return [JobLogResponse.model_validate(log) for log in logs]
 

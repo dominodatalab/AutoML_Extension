@@ -69,6 +69,23 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Request context capture: store the forwarded auth header in a request-scoped ContextVar.
+    @app.middleware("http")
+    async def capture_request_context(request: Request, call_next):
+        headers = request.headers
+        redacted_headers = [(key, "<REDACTED>") for key, val in headers.items() if is_auth_header(key)]
+        safe_headers = [(key, val) for key, val in headers.items() if not is_auth_header(key)]
+
+        logger.debug(f"Capture request metadata: {request.method} {request.url.path} {redacted_headers + safe_headers}")
+
+        auth_header = request.headers.get("authorization")
+        set_request_auth_header(auth_header)
+        try:
+            response = await call_next(request)
+        finally:
+            set_request_auth_header(None)
+        return response
+
     # Exception handlers
     @app.exception_handler(FileNotFoundError)
     async def file_not_found_handler(request: Request, exc: FileNotFoundError):
@@ -92,24 +109,6 @@ def create_app() -> FastAPI:
     app.include_router(registry.router, prefix="/svc/v1/registry", tags=["Registry"])
     app.include_router(export.router, prefix="/svc/v1/export", tags=["Export"])
     app.include_router(deployments.router, prefix="/svc/v1/deployments", tags=["Deployments"])
-
-    # Request context capture: store the forwarded auth header in a request-scoped ContextVar.
-    @app.middleware("http")
-    async def capture_request_context(request: Request, call_next):
-        headers = request.headers
-        redacted_headers = [(key, "<REDACTED>") for key, val in headers.items() if is_auth_header(key)]
-        safe_headers = [(key, val) for key, val in headers.items() if not is_auth_header(key)]
-
-        logger.debug(f"Capture request metadata: {request.method} {request.url.path} {redacted_headers + safe_headers}")
-
-        auth_header = request.headers.get("authorization")
-        logger.info(f"DELETE ME auth header middleware {request.url}{request.headers}")
-        set_request_auth_header(auth_header)
-        try:
-            response = await call_next(request)
-        finally:
-            set_request_auth_header(None)
-        return response
 
     # Optional static file serving for combined frontend+backend mode
     static_dir = os.environ.get("STATIC_DIR")
