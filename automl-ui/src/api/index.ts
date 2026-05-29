@@ -23,6 +23,34 @@ declare global {
   }
 }
 
+export function getApiRedirectTarget(
+  response: Response,
+  requestUrl: string,
+  currentLocation: string
+): string | undefined {
+  const absoluteRequestUrl = new URL(requestUrl, currentLocation)
+
+  if (response.type === 'opaqueredirect') {
+    return absoluteRequestUrl.toString()
+  }
+
+  if (response.status !== 302) {
+    return undefined
+  }
+
+  const location = response.headers.get('Location')
+  if (!location) {
+    return undefined
+  }
+
+  const redirectUrl = new URL(location, absoluteRequestUrl)
+  if (redirectUrl.searchParams.has('callback')) {
+    redirectUrl.searchParams.set('callback', currentLocation)
+  }
+
+  return redirectUrl.toString()
+}
+
 // Fetch-based API client
 class ApiClient {
   private defaultHeaders: Record<string, string>
@@ -45,28 +73,12 @@ class ApiClient {
       return false
     }
 
-    const absoluteRequestUrl = new URL(requestUrl, window.location.href)
-
-    if (response.type === 'opaqueredirect') {
-      window.location.assign(absoluteRequestUrl.toString())
-      return true
-    }
-
-    if (response.status !== 302) {
+    const redirectTarget = getApiRedirectTarget(response, requestUrl, window.location.href)
+    if (!redirectTarget) {
       return false
     }
 
-    const location = response.headers.get('Location')
-    if (!location) {
-      return false
-    }
-
-    const redirectUrl = new URL(location, absoluteRequestUrl)
-    if (redirectUrl.searchParams.has('callback')) {
-      redirectUrl.searchParams.set('callback', window.location.href)
-    }
-
-    window.location.assign(redirectUrl.toString())
+    window.location.assign(redirectTarget)
     return true
   }
 
