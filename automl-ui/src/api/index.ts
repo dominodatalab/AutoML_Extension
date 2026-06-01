@@ -23,34 +23,6 @@ declare global {
   }
 }
 
-export function getApiRedirectTarget(
-  response: Response,
-  requestUrl: string,
-  currentLocation: string
-): string | undefined {
-  const absoluteRequestUrl = new URL(requestUrl, currentLocation)
-
-  if (response.type === 'opaqueredirect') {
-    return absoluteRequestUrl.toString()
-  }
-
-  if (response.status !== 302) {
-    return undefined
-  }
-
-  const location = response.headers.get('Location')
-  if (!location) {
-    return undefined
-  }
-
-  const redirectUrl = new URL(location, absoluteRequestUrl)
-  if (redirectUrl.searchParams.has('callback')) {
-    redirectUrl.searchParams.set('callback', currentLocation)
-  }
-
-  return redirectUrl.toString()
-}
-
 // Fetch-based API client
 class ApiClient {
   private defaultHeaders: Record<string, string>
@@ -68,17 +40,12 @@ class ApiClient {
     }
   }
 
-  private redirectBrowserOnApiRedirect(response: Response, requestUrl: string): boolean {
-    if (typeof window === 'undefined') {
+  private refreshBrowserOnApiRedirect(response: Response): boolean {
+    if (response.status !== 302 || typeof window === 'undefined') {
       return false
     }
 
-    const redirectTarget = getApiRedirectTarget(response, requestUrl, window.location.href)
-    if (!redirectTarget) {
-      return false
-    }
-
-    window.location.assign(redirectTarget)
+    window.location.reload()
     return true
   }
 
@@ -128,8 +95,8 @@ class ApiClient {
     try {
       const response = await fetch(fullUrl, fetchConfig)
 
-      if (this.redirectBrowserOnApiRedirect(response, fullUrl)) {
-        throw new Error('Redirecting after API 302 response')
+      if (this.refreshBrowserOnApiRedirect(response)) {
+        throw new Error('Refreshing after API 302 response')
       }
 
       if (!response.ok) {
