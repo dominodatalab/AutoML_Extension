@@ -8,9 +8,9 @@
 
 LABEL maintainer="Domino Data Lab"
 LABEL description="AutoGluon AutoML environment for Domino Data Lab"
-LABEL version="1.0.0"
+ARG EXTENSION_VERSION=${EXTENSION_VERSION:-main}
+LABEL version=$EXTENSION_VERSION
 
-ARG EXTENSION_VERSION=main
 ARG GITHUB_ORG=dominodatalab
 ARG DUSER=ubuntu
 ARG DGROUP=ubuntu
@@ -19,7 +19,8 @@ ARG DEBIAN_FRONTEND=noninteractive
 ENV DOMINO_USER=$DUSER
 ENV DOMINO_GROUP=$DGROUP
 ENV MLFLOW_VERSION=3.2.0
-ENV DATABASE_URL=sqlite:////mnt/data/AutoML_Extension/automl.db
+ARG DATABASE_URL
+ENV DATABASE_URL=$DATABASE_URL
 
 # Set Python environment variables
 ENV PYTHONUNBUFFERED=1 \
