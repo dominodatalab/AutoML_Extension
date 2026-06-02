@@ -40,8 +40,13 @@ class ApiClient {
     }
   }
 
-  private refreshBrowserOnApiRedirect(response: Response): boolean {
+  private refreshBrowserOnAppConsentRedirect(response: Response): boolean {
     if (response.status !== 302 || typeof window === 'undefined') {
+      return false
+    }
+
+    const location = response.headers.get('Location')
+    if (!location?.includes('app-consent')) {
       return false
     }
 
@@ -95,7 +100,7 @@ class ApiClient {
     try {
       const response = await fetch(fullUrl, fetchConfig)
 
-      if (this.refreshBrowserOnApiRedirect(response)) {
+      if (this.refreshBrowserOnAppConsentRedirect(response)) {
         throw new Error('Refreshing after API 302 response')
       }
 

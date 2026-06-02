@@ -60,20 +60,36 @@ describe('api redirect handling', () => {
     assert.equal(fetchCalls[0][1].redirect, 'manual')
   })
 
-  it('refreshes the browser after a 302 response', async () => {
+  it('refreshes the browser after a 302 response to app consent', async () => {
     const location = setWindowLocation('https://domino.example.com/apps/automl?projectId=project-1')
     console.error = () => {}
 
     globalThis.fetch = async () => new Response(null, {
       status: 302,
       headers: {
-        Location: '/login?callback=old-callback&state=state-1',
+        Location: '/app-consent?callback=old-callback&state=state-1',
       },
     })
 
     await assert.rejects(api.get('jobs'), /Refreshing after API 302 response/)
 
     assert.equal(location.reloadCount, 1)
+  })
+
+  it('does not refresh the browser after a 302 response to a different location', async () => {
+    const location = setWindowLocation('https://domino.example.com/apps/automl')
+    console.error = () => {}
+
+    globalThis.fetch = async () => new Response(null, {
+      status: 302,
+      headers: {
+        Location: '/login?callback=old-callback',
+      },
+    })
+
+    await assert.rejects(api.get('jobs'))
+
+    assert.equal(location.reloadCount, 0)
   })
 
   it('does not refresh the browser for non-302 responses', async () => {
