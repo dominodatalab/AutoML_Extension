@@ -11,6 +11,25 @@ cd automl-ui
 npm install
 ```
 
+## Testing
+
+Frontend unit tests use Node's built-in test runner with `tsx` for TypeScript imports.
+
+Install dependencies first:
+
+```bash
+cd automl-ui
+npm install
+```
+
+Run the frontend tests:
+
+```bash
+npm test
+```
+
+Tests are discovered from `src/**/*.test.js`.
+
 ## Development
 
 ### Frontend only

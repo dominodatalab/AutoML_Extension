@@ -40,6 +40,20 @@ class ApiClient {
     }
   }
 
+  private refreshBrowserOnAppConsentRedirect(response: Response): boolean {
+    if (response.status !== 302 || typeof window === 'undefined') {
+      return false
+    }
+
+    const location = response.headers.get('Location')
+    if (!location?.includes('app-consent')) {
+      return false
+    }
+
+    window.location.reload()
+    return true
+  }
+
   private async request<T>(
     method: string,
     endpoint: string,
@@ -71,6 +85,7 @@ class ApiClient {
       method,
       headers,
       credentials: 'include',
+      redirect: 'manual',
     }
 
     if (data && method !== 'GET') {
@@ -84,6 +99,10 @@ class ApiClient {
 
     try {
       const response = await fetch(fullUrl, fetchConfig)
+
+      if (this.refreshBrowserOnAppConsentRedirect(response)) {
+        throw new Error('Refreshing after API 302 response')
+      }
 
       if (!response.ok) {
         // Check if response is HTML (common when Domino intercepts)
