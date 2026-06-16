@@ -4,27 +4,6 @@
   "versions": [
     {
       "manifestSchemaVersion": 1,
-      "version": "0.0.11",
-      "releaseTag": "v0.0.11",
-      "minDominoVersion": "6.3.0",
-      "testedWithDominoVersions": ["6.3.0"]
-    },
-    {
-      "manifestSchemaVersion": 1,
-      "version": "0.0.9",
-      "releaseTag": "v0.0.9",
-      "minDominoVersion": "6.5.0",
-      "testedWithDominoVersions": ["6.5.0"]
-    },
-    {
-      "manifestSchemaVersion": 1,
-      "version": "0.0.8",
-      "releaseTag": "v0.0.8",
-      "minDominoVersion": "6.3.0",
-      "testedWithDominoVersions": ["6.3.0"]
-    },
-    {
-      "manifestSchemaVersion": 1,
       "version": "1.0.0",
       "releaseTag": "v1.0.0",
       "minDominoVersion": "6.3.0",
