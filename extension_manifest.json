@@ -32,7 +32,7 @@
     "mountDatasets": true,
     "mountNetAppVolumes": false,
     "externalVolumeMounts": [],
-    "hardwareTierIdSuggestion": "small-k8s",
+    "hardwareTierIdSuggestion": "medium-k8s",
     "autoscalingSpec": {
       "enabled": false
     }
