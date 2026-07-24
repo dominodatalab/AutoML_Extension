@@ -47,8 +47,8 @@ The project must be named `AutoML_Extension`.
 
 After the environment finishes building, create the app that will be published as the Domino Extension.
 
-1. In the `AutoML_Extension` project, navigate to **Deployments > Apps & Agents**.
-2. Create an app with these settings:
+1. In the `AutoML_Extension` project, navigate to **Settings** and set the environment variable `DATABASE_URL=sqlite:////mnt/data/AutoML_Extension/automl.db`
+2. Navigate to **Deployments > Apps & Agents**. Create an app with these settings:
    - Name: `AutoML`
    - Enable deep linking and query parameters: checked
    - Git reference type: Branch
