@@ -22,24 +22,13 @@ ARG DATABASE_URL
 ENV DATABASE_URL=$DATABASE_URL
 
 # Set Python environment variables
-#
-# PIP_NO_CACHE_DIR was removed deliberately. The pip download cache now lives
-# in a BuildKit cache mount (see --mount=type=cache below), outside the image
-# layers, so it adds nothing to final image size. Keeping it means a retry
-# after a 502 does not re-download wheels that already succeeded.
+# No PIP_NO_CACHE_DIR: the pip cache now lives in a BuildKit cache mount, so
+# retries don't re-download wheels that already succeeded.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Per-attempt retry budget is deliberately LOW. files.pythonhosted.org
-# intermittently returns 502 on PEP 658 *.whl.metadata sidecar requests from
-# this build's network path. pip treats a 502 as a transport error rather than
-# falling back to the full wheel, so it exhausts its retries and dies.
-#
-# A high PIP_RETRIES just burns every attempt inside the same bad 30 seconds
-# (the original mlflow failure took 248s to give up). Instead each pip
-# invocation fails fast and the pipr wrapper below retries the whole
-# invocation with escalating sleeps, so attempts land in different minutes.
+# Kept low so a bad network window fails fast; pipr (below) handles retries.
 ENV PIP_RETRIES=3
 ENV PIP_TIMEOUT=60
 
@@ -68,14 +57,10 @@ RUN apt-get update && \
 # ============================================
 # pipr: retrying pip wrapper
 # ============================================
-# Every pip install below goes through pipr, which takes the same arguments and
-# retries the whole install with escalating backoff (20s, 40s, 60s, 80s, 100s)
-# before giving up. Worst case is about 5 minutes spread across 6 attempts,
-# enough to ride out a transient 502 window.
-#
-# This MUST be defined before the first pip install. The smoke test at the end
-# of this layer means a broken or off-PATH wrapper fails here with a clear
-# message rather than 12 steps later with "pipr: not found".
+# Every pip install below goes through pipr, which retries the whole install
+# with escalating backoff (20s, 40s, ..., up to 6 attempts) to ride out
+# transient 502s. Must be defined before the first pip install; the smoke
+# test below catches a broken wrapper immediately instead of later.
 RUN test -x /bin/bash || (echo "bash is required for the pipr wrapper" && exit 1)
 RUN printf '%s\n' \
   '#!/bin/bash' \
@@ -128,8 +113,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
  && apt-get install -y nodejs
 
 # Install npm packages and build frontend
-# npm retry settings added for the same reason as the pip ones: this build's
-# egress path is flaky and npm's defaults give up quickly.
+# Retry settings for the same flaky egress path as the pip retries above.
 RUN npm config set fetch-retries 6 \
  && npm config set fetch-retry-maxtimeout 120000 \
  && cd automl-ui && npm i && npm run build
@@ -139,28 +123,19 @@ WORKDIR /
 #
 # Install backend/job dependencies
 #
-# This file deliberately uses plain pip (via pipr), not uv. uv hard-fails when
-# a PEP 658 *.whl.metadata request returns 502, which is what this build
-# environment's network path does. pip falls back to the full wheel.
+# Plain pip (via pipr), not uv: uv hard-fails on a 502 for a PEP 658
+# .whl.metadata request, while pip falls back to the full wheel.
 #
-# setuptools_scm is installed explicitly and up front. seqeval (a dependency of
-# autogluon.multimodal) ships only as an sdist whose setup.py declares
-# use_scm_version=True with setup_requires=['setuptools_scm']. If setuptools_scm
-# is absent, setuptools fetches it from PyPI mid-build via the legacy
-# fetch_build_eggs path. When that fetch fails, seqeval's version resolves to
-# 0.0.0 and the whole AutoGluon resolution collapses. Having setuptools_scm
-# present satisfies setup_requires from the working set, so no fetch happens.
+# setuptools_scm is installed up front so seqeval's sdist build (setup_requires)
+# can find it locally instead of fetching it mid-build, which is where it fails.
 RUN --mount=type=cache,target=/root/.cache/pip \
     pipr --upgrade pip wheel Cython setuptools setuptools_scm
 
 #
 # Mlflow for experiment tracking, must install before dominodatalab
 #
-# This is the step that failed on the .whl.metadata 502. curl is tried first
-# because it retries plain file URLs on 502 (--retry-all-errors) and never
-# touches the PEP 658 sidecar. Installing from the local wheel still resolves
-# mlflow's own dependencies from the index normally. If the pinned URL goes
-# stale, the curl leg fails and we fall through to a retrying index install.
+# curl fetches the wheel directly first (bypasses the .whl.metadata sidecar
+# that 502s); falls back to a regular pipr index install if that fails.
 RUN --mount=type=cache,target=/root/.cache/pip \
     if curl -fsSL --retry 8 --retry-all-errors --retry-delay 10 \
          -o /tmp/mlflow-3.2.0-py3-none-any.whl \
@@ -249,9 +224,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # ============================================
 # seqeval (pre-installed ahead of AutoGluon)
 # ============================================
-# Built explicitly here, with setuptools_scm already available, so its version
-# resolves correctly. Once installed, AutoGluon's seqeval requirement is
-# already satisfied and pip will not rebuild it.
+# Installed here first, with setuptools_scm already available, so its
+# version resolves correctly before AutoGluon pulls it in as a dependency.
 RUN --mount=type=cache,target=/root/.cache/pip \
     pipr --no-build-isolation "seqeval>=1.2.2,<1.3.0"
 
@@ -259,13 +233,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # AutoGluon Installation (All Modules)
 # ============================================
 # --no-build-isolation reuses the setuptools/wheel/Cython/setuptools_scm
-# already installed above instead of fetching fresh copies into an isolated
-# build env. This matters for oss2, a transitive dep pulled in via
-# autogluon.multimodal -> openmim -> opendatalab -> openxlab -> oss2, and for
-# seqeval's setup_requires.
-#
-# Largest download in the file, so it benefits most from the cache mount: a
-# 502 on attempt 3 no longer restarts the whole download.
+# installed above instead of fetching fresh copies (needed by oss2 and seqeval).
 RUN --mount=type=cache,target=/root/.cache/pip \
     pipr --no-build-isolation \
     "autogluon>=1.1.0" \
