@@ -167,12 +167,12 @@ RUN pip install \
 # AutoGluon Installation (All Modules)
 # ============================================
 RUN pip install \
-    "autogluon>=1.1.0" \
-    "autogluon.core>=1.1.0" \
-    "autogluon.features>=1.1.0" \
-    "autogluon.tabular[all]>=1.1.0" \
-    "autogluon.timeseries>=1.1.0" \
-    "autogluon.multimodal>=1.1.0"
+    "autogluon==1.5.0" \
+    "autogluon.core==1.5.0" \
+    "autogluon.features==1.5.0" \
+    "autogluon.tabular[all]==1.5.0" \
+    "autogluon.timeseries==1.5.0" \
+    "autogluon.multimodal==1.5.0"
 
 
 # ============================================
@@ -203,7 +203,7 @@ RUN pip install \
 # Additional Data Science Utilities
 # ============================================
 RUN pip install \
-    "pyarrow>=14.0.0" \
+    "pyarrow>=14.0.0,<22" \
     "fastparquet>=2023.10.0" \
     "openpyxl>=3.1.0" \
     "xlrd>=2.0.0" \
