@@ -3,7 +3,7 @@
 # Compatible with Domino Data Lab compute environments
 
 #
-# Required Domino Environment Base Image: python:3.10-slim-bullseye
+# Required Domino Environment Base Image: 3.10-slim-trixie
 #
 
 LABEL maintainer="Domino Data Lab"
@@ -33,8 +33,8 @@ ENV PYTHONUNBUFFERED=1 \
 #
 RUN apt-get update && \
     # Security updates
-    grep security /etc/apt/sources.list > /etc/apt/security.sources.list && \
-    apt-get upgrade -y -o Dir::Etc::SourceList=/etc/apt/security.sources.list && \
+    grep security /etc/apt/sources.list.d/debian.sources > source.list && \
+    apt-get upgrade -y -o Dir::Etc::SourceList=source.list && \
     apt-get install -y \
         apt-utils \
     # add C compiler for some of the python packages required in the training job
