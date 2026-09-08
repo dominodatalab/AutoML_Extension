@@ -3,7 +3,7 @@
 # Compatible with Domino Data Lab compute environments
 
 #
-# Required Domino Environment Base Image: 3.10-slim-trixie
+# Required Domino Environment Base Image: python:3.10-slim-trixie
 #
 
 LABEL maintainer="Domino Data Lab"
