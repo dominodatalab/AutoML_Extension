@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getJobs,
@@ -16,9 +16,13 @@ import { JobCreateRequest } from '../types/job'
 import { useStore } from '../store'
 import { getErrorMessage } from '../utils/errors'
 
-function useQueryWithErrorToast() {
+function useQueryWithErrorToast(resetKey: string) {
   const addNotification = useStore((state) => state.addNotification)
   const hasNotifiedError = useRef(false)
+
+  useEffect(() => {
+    hasNotifiedError.current = false
+  }, [resetKey])
 
   return useCallback(async <T,>(query: () => Promise<T>): Promise<T> => {
     try {
@@ -44,7 +48,8 @@ function useMutationErrorToast() {
 }
 
 export function useJobs(params?: { skip?: number; limit?: number; status?: string }) {
-  const queryWithErrorToast = useQueryWithErrorToast()
+  const resetKey = `${params?.skip ?? ''}:${params?.limit ?? ''}:${params?.status ?? ''}`
+  const queryWithErrorToast = useQueryWithErrorToast(resetKey)
 
   return useQuery({
     queryKey: ['jobs', params],
@@ -59,7 +64,7 @@ export function useJobs(params?: { skip?: number; limit?: number; status?: strin
 }
 
 export function useJob(jobId: string) {
-  const queryWithErrorToast = useQueryWithErrorToast()
+  const queryWithErrorToast = useQueryWithErrorToast(jobId)
 
   return useQuery({
     queryKey: ['job', jobId],
@@ -70,7 +75,7 @@ export function useJob(jobId: string) {
 }
 
 export function useJobStatus(jobId: string, enabled = true) {
-  const queryWithErrorToast = useQueryWithErrorToast()
+  const queryWithErrorToast = useQueryWithErrorToast(`${jobId}:${enabled}`)
 
   return useQuery({
     queryKey: ['jobStatus', jobId],
@@ -89,7 +94,7 @@ export function useJobStatus(jobId: string, enabled = true) {
 }
 
 export function useJobLogs(jobId: string, limit?: number) {
-  const queryWithErrorToast = useQueryWithErrorToast()
+  const queryWithErrorToast = useQueryWithErrorToast(`${jobId}:${limit ?? ''}`)
 
   return useQuery({
     queryKey: ['jobLogs', jobId, limit],
@@ -159,7 +164,7 @@ export function useBulkDeleteJobs() {
 }
 
 export function useOrphanPreview(enabled = true) {
-  const queryWithErrorToast = useQueryWithErrorToast()
+  const queryWithErrorToast = useQueryWithErrorToast(String(enabled))
 
   return useQuery({
     queryKey: ['orphanPreview'],
