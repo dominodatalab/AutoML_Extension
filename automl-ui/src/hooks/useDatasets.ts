@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { getDatasets, getDataset, getDatasetPreview, getDatasetSchema } from '../api/datasets'
+import { useStore } from '../store'
+import { getErrorMessage } from '../utils/errors'
 
 export function useDatasets() {
   return useQuery({
@@ -17,10 +19,20 @@ export function useDataset(datasetId: string) {
 }
 
 export function useDatasetPreview(filePath: string, limit: number = 100, offset: number = 0, datasetId: string | undefined = undefined) {
+  const addNotification = useStore((state) => state.addNotification)
+
   return useQuery({
     queryKey: ['datasetPreview', filePath, limit, offset],
-    queryFn: () => getDatasetPreview(filePath, limit, offset, datasetId),
+    queryFn: async () => {
+      try {
+        return await getDatasetPreview(filePath, limit, offset, datasetId)
+      } catch (error) {
+        addNotification(getErrorMessage(error), 'error')
+        throw error
+      }
+    },
     enabled: !!filePath,
+    retry: false,
   })
 }
 

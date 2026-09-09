@@ -30,12 +30,16 @@ interface ToastItemProps {
 
 function ToastItem({ id, message, type, onDismiss }: ToastItemProps) {
   useEffect(() => {
+    if (type === 'error') {
+      return
+    }
+
     const timer = setTimeout(() => {
       onDismiss(id)
     }, 5000)
 
     return () => clearTimeout(timer)
-  }, [id, onDismiss])
+  }, [id, type, onDismiss])
 
   const styles = {
     success: {
