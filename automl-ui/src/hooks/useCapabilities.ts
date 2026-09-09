@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import api from '../api'
+import { useStore } from '../store'
+import { getErrorMessage } from '../utils/errors'
 
 interface BackendCapabilities {
   standalone_mode: boolean
@@ -36,13 +38,20 @@ const STANDALONE: Capabilities = {
 
 export function useCapabilities(): Capabilities {
   const enableDomino = readEnableDominoParam()
+  const addNotification = useStore((state) => state.addNotification)
 
   const { data } = useQuery({
     queryKey: ['capabilities'],
     queryFn: async () => {
-      const { data } = await api.get<BackendCapabilities>('health/capabilities')
-      return data
+      try {
+        const { data } = await api.get<BackendCapabilities>('health/capabilities')
+        return data
+      } catch (error) {
+        addNotification(getErrorMessage(error), 'error')
+        throw error
+      }
     },
+    retry: false,
     staleTime: Infinity,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
