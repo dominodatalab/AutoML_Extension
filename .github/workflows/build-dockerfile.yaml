@@ -17,7 +17,7 @@ jobs:
         EXTENSION_VERSION: ${{ github.head_ref || github.ref_name }}
         GITHUB_ORG: ${{ github.event.pull_request.head.repo.owner.login || github.repository_owner }}
       run: |
-        echo "FROM python:3.10-slim-bullseye" | cat - Dockerfile | docker build \
+        echo "FROM python:3.10-slim-trixie" | cat - Dockerfile | docker build \
             --build-arg EXTENSION_VERSION=$EXTENSION_VERSION \
             --build-arg GITHUB_ORG=$GITHUB_ORG \
             -
