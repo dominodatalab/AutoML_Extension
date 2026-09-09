@@ -154,8 +154,8 @@ export function StorageCleanupDialog({ isOpen, onClose }: StorageCleanupDialogPr
 
       await refetch()
       setConfirmOpen(false)
-    } catch (cleanupError) {
-      addNotification(`Storage cleanup failed: ${getErrorMessage(cleanupError)}`, 'error')
+    } catch {
+      return
     }
   }
 
