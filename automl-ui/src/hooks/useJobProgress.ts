@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import api from '../api'
+import { useStore } from '../store'
 import type { JobProgress, Job } from '../types/job'
+import { getErrorMessage } from '../utils/errors'
 
 interface UseJobProgressReturn {
   polledProgress: JobProgress | null
@@ -9,10 +11,12 @@ interface UseJobProgressReturn {
 }
 
 export function useJobProgress(jobId: string | undefined, job: Job | undefined, isTraining: boolean, refetch: () => void): UseJobProgressReturn {
+  const addNotification = useStore((state) => state.addNotification)
   const [polledProgress, setPolledProgress] = useState<JobProgress | null>(null)
   const [progressJobId, setProgressJobId] = useState<string | null>(null)
   const [simulatedProgress, setSimulatedProgress] = useState(0)
   const currentJobIdRef = useRef<string | undefined>(jobId)
+  const progressErrorNotifiedRef = useRef(false)
   const simulationStartRef = useRef<number | null>(null)
 
   useEffect(() => {
@@ -23,6 +27,7 @@ export function useJobProgress(jobId: string | undefined, job: Job | undefined, 
     setPolledProgress(null)
     setProgressJobId(null)
     setSimulatedProgress(0)
+    progressErrorNotifiedRef.current = false
     simulationStartRef.current = null
   }, [jobId])
 
@@ -32,16 +37,20 @@ export function useJobProgress(jobId: string | undefined, job: Job | undefined, 
     try {
       const { data } = await api.get<JobProgress>(`jobs/${requestJobId}/progress`)
       if (currentJobIdRef.current === requestJobId) {
+        progressErrorNotifiedRef.current = false
         setPolledProgress(data)
         setProgressJobId(requestJobId)
         if (data.status === 'completed' || data.status === 'failed') {
           refetch()
         }
       }
-    } catch (err) {
-      console.error('Failed to fetch progress:', err)
+    } catch (error) {
+      if (currentJobIdRef.current === requestJobId && !progressErrorNotifiedRef.current) {
+        progressErrorNotifiedRef.current = true
+        addNotification(getErrorMessage(error), 'error')
+      }
     }
-  }, [refetch])
+  }, [addNotification, refetch])
 
   useEffect(() => {
     if (isTraining && jobId) {
