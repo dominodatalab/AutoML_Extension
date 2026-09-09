@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import api from '../api'
+import { useStore } from '../store'
 import { useAsyncOperation } from './useAsyncOperation'
 import type { RegisterModelResult } from '../types/registry'
 
@@ -14,6 +15,8 @@ interface UseRegistryResult {
 }
 
 export function useRegistry(): UseRegistryResult {
+  const addNotification = useStore((state) => state.addNotification)
+
   const registerModelOp = useAsyncOperation(
     async (
       jobId: string,
@@ -25,6 +28,9 @@ export function useRegistry(): UseRegistryResult {
         model_name: modelName,
         description,
       })
+      if (!data.success) {
+        addNotification(data.error || 'Failed to register model', 'error')
+      }
       return data
     },
     { errorMessage: 'Failed to register model' }
