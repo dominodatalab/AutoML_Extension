@@ -1,5 +1,7 @@
 import { useQuery, useMutation } from '@tanstack/react-query'
 import api from '../api'
+import { useStore } from '../store'
+import { getErrorMessage } from '../utils/errors'
 
 export interface LearningCurvesRequest {
   job_id: string
@@ -32,28 +34,47 @@ export interface SupportedFormats {
 }
 
 export function useLearningCurves(jobId: string, modelType?: string, enabled = true) {
+  const addNotification = useStore((state) => state.addNotification)
+
   return useQuery({
     queryKey: ['learningcurves', jobId, modelType],
     queryFn: async () => {
-      const { data } = await api.post<LearningCurvesResponse>('export/learning-curves', {
-        job_id: jobId,
-        model_type: modelType,
-      })
-      return data
+      try {
+        const { data } = await api.post<LearningCurvesResponse>('export/learning-curves', {
+          job_id: jobId,
+          model_type: modelType,
+        })
+        if (data.error) {
+          addNotification(data.error, 'error')
+        }
+        return data
+      } catch (error) {
+        addNotification(getErrorMessage(error), 'error')
+        throw error
+      }
     },
     enabled: enabled && !!jobId,
     staleTime: 5 * 60 * 1000,
+    retry: false,
   })
 }
 
 export function useSupportedFormats() {
+  const addNotification = useStore((state) => state.addNotification)
+
   return useQuery({
     queryKey: ['exportformats'],
     queryFn: async () => {
-      const { data } = await api.get<SupportedFormats>('export/formats')
-      return data
+      try {
+        const { data } = await api.get<SupportedFormats>('export/formats')
+        return data
+      } catch (error) {
+        addNotification(getErrorMessage(error), 'error')
+        throw error
+      }
     },
     staleTime: 30 * 60 * 1000,
+    retry: false,
   })
 }
 
@@ -64,12 +85,17 @@ interface NotebookExportResponse {
 }
 
 export function useExportNotebook() {
+  const addNotification = useStore((state) => state.addNotification)
+
   return useMutation({
     mutationFn: async (jobId: string) => {
       const { data } = await api.post<NotebookExportResponse>('export/notebook', {
         job_id: jobId,
       })
       return data
+    },
+    onError: (error) => {
+      addNotification(getErrorMessage(error), 'error')
     },
   })
 }
