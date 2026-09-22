@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import api from '../api'
+import { useStore } from '../store'
 import { useAsyncOperation } from './useAsyncOperation'
 import { aggregateAsyncState, orNull } from './asyncHelpers'
 import type {
@@ -22,6 +23,7 @@ interface UseDeploymentsResult {
 
 export function useDeployments(): UseDeploymentsResult {
   const [modelApiStatus, setModelApiStatus] = useState<ModelApiStatus | null>(null)
+  const addNotification = useStore((state) => state.addNotification)
 
   const fetchModelApiStatusOp = useAsyncOperation(
     async (modelApiId: string) => {
@@ -45,6 +47,9 @@ export function useDeployments(): UseDeploymentsResult {
         model_name: request.model_name,
         replicas: request.replicas,
       })
+      if (!data.success) {
+        addNotification(data.error || data.message || 'Failed to deploy from job', 'error')
+      }
       return data
     },
     { errorMessage: 'Failed to deploy from job' }
