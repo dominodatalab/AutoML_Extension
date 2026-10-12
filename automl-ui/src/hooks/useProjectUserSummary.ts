@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import api from '../api'
+import { useStore } from '../store'
+import { getErrorMessage } from '../utils/errors'
 
 interface ProjectUserSummary {
     username: string,
@@ -20,15 +22,23 @@ const EMPTY_PROJECT_USER_SUMMARY: ProjectUserSummary = {
 }
 
 export function useProjectUserSummary(): ProjectUserSummary {
+  const addNotification = useStore((state) => state.addNotification)
+
   const { data } = useQuery<ProjectUserSummary>({
     queryKey: ['user_summary'],
     queryFn: async () => {
-      const { data } = await api.get<ProjectUserSummary>('health/user')
-      return data
+      try {
+        const { data } = await api.get<ProjectUserSummary>('health/user')
+        return data
+      } catch (error) {
+        addNotification(getErrorMessage(error), 'error')
+        throw error
+      }
     },
     staleTime: Infinity,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
+    retry: false,
   })
 
   return data ?? EMPTY_PROJECT_USER_SUMMARY
