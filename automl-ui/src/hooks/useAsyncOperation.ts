@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
+import { useStore } from '../store'
 
 /**
  * A generic hook that encapsulates the common async operation pattern:
@@ -41,6 +42,7 @@ export function useAsyncOperation<TArgs extends unknown[], TReturn>(
 ): UseAsyncOperationResult<TArgs, TReturn> {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const addNotification = useStore((state) => state.addNotification)
 
   // Keep the latest operation reference stable to avoid stale closures
   // while still allowing the caller to pass an inline arrow.
@@ -60,11 +62,12 @@ export function useAsyncOperation<TArgs extends unknown[], TReturn>(
       const fallback = optionsRef.current?.errorMessage ?? 'An error occurred'
       const message = err instanceof Error ? err.message : fallback
       setError(message)
+      addNotification(message, 'error')
       return undefined
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [addNotification])
 
   const reset = useCallback(() => {
     setError(null)
