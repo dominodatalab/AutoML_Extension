@@ -179,8 +179,10 @@ export function useEdaAsyncProfiling({
         }
 
         if (status.status === 'failed') {
+          const message = status.error || 'Async profiling failed'
           setAsyncProfileStatus('failed')
-          setAsyncProfileError(status.error || 'Async profiling failed')
+          setAsyncProfileError(message)
+          addNotification(message, 'error')
           if (intervalId !== null) window.clearInterval(intervalId)
           return
         }
@@ -191,6 +193,7 @@ export function useEdaAsyncProfiling({
         const message = error instanceof Error ? error.message : 'Failed to poll async profiling status'
         setAsyncProfileStatus('failed')
         setAsyncProfileError(message)
+        addNotification(message, 'error')
         if (intervalId !== null) window.clearInterval(intervalId)
       }
     }
@@ -204,7 +207,7 @@ export function useEdaAsyncProfiling({
       mounted = false
       if (intervalId !== null) window.clearInterval(intervalId)
     }
-  }, [asyncDominoJobId, asyncRequestId, edaExecutionTarget, getAsyncProfileStatus, setProfileData, setTsProfileData])
+  }, [addNotification, asyncDominoJobId, asyncRequestId, edaExecutionTarget, getAsyncProfileStatus, setProfileData, setTsProfileData])
 
   return {
     asyncRequestId,
